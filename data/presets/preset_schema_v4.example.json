@@ -1,0 +1,17 @@
+{
+  "preset_version": 4,
+  "preset_id": "example_reference",
+  "electrode_layout": "standard_10-20",
+  "source_subject_id": 1,
+  "terminal_assignments": {
+    "Fp1": "TERMINAL_LEFT",
+    "Fp2": "TERMINAL_RIGHT"
+  },
+  "source_anatomical_fiducials": {
+    "nasion": [0.0, 0.0, 0.0],
+    "lpa": [0.0, 0.0, 0.0],
+    "rpa": [0.0, 0.0, 0.0],
+    "inion": [0.0, 0.0, 0.0]
+  },
+  "_comment": "Replace coordinates from data/json/fiducials_{ref}.json (first four keys only)."
+}

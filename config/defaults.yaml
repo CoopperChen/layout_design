@@ -1,0 +1,20 @@
+# Pipeline defaults (override per run via CLI)
+
+preprocess:
+  terminal_assignment_strategy: balanced  # balanced | shortest
+
+synthesize:
+  use_target_terminals: true
+  optimize_terminals: true
+  preserve_entry_order: false
+  uv_resolution: 100
+
+polish:
+  mode: gentle  # gentle = repair; refine = refine-v4; ga-short = warm-start GA
+  phase2_max_rounds: 12
+  ga_generations: 20
+  ga_population: 20
+
+postprocess:
+  smoothing_strength: 0.1
+  matlab_folder: subject_optimized  # relative to data/output/matlab/

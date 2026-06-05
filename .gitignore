@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.py[cod]
+*.egg-info/
+layout_design.egg-info/
+.venv/
+venv/
+.env
+
+# Large / subject-specific inputs (keep structure via .gitkeep)
+data/raw/*.stl
+data/raw/*.ply
+data/cleaned_scans/*.stl
+data/cleaned_scans/*.ply
+
+# Generated pipeline artifacts
+data/output/**/*
+!data/output/**/.gitkeep
+data/archive/**/*
+!data/archive/**/.gitkeep
+data/json/*.json
+!data/json/.gitkeep
+data/presets/*.json
+!data/presets/.gitkeep
+!data/presets/*.example.json
+
+# Postprocess
+data/output/smooth/*.json
+data/output/matlab/*.mat
+subject_optimized/
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+*.log
+
+# MATLAB g-code output (generated)
+legacy_gcode_examples/**/*.txt
+!legacy_gcode_examples/README.md

@@ -1,0 +1,119 @@
+---
+name: layout-synth-pipeline
+description: >-
+  Generates per-subject EEG wire path layouts (not preset path replay). Preprocess
+  target heads, synthesize paths from terminal assignment map (LEFT/RIGHT only) plus
+  target fiducials/electrodes, optional polish, then MATLAB export. Use for
+  layout_design generate workflow, assignment-only preset, synthesize, not GA transfer.
+---
+
+# EEG Layout Pipeline — Generate (Not Apply)
+
+**Goal:** **Generate** a collision-free interconnect layout on **each** subject. The cross-subject “preset” is **terminal assignment only** (which electrode → `TERMINAL_LEFT` / `TERMINAL_RIGHT`). Paths, entry slots, and hub angles are **computed on the target** by synthesize.
+
+**Not the goal:** Replay reference GA paths, chord shapes, or rigid hub map (legacy: `--inherit-preset-terminals`).
+
+**Working directory:** `layout_design/` repo root. Paths: `app/paths.py`.
+
+---
+
+## Pipeline
+
+```text
+A. PREPROCESS (per target subject)
+   mesh, fiducials+TERMINAL_*, Cz, 10–20 electrodes
+
+B. GENERATE LAYOUT (synthesize)
+   assignment map + target geometry → new 2D paths, slots, surface 3D
+
+C. POLISH (optional) — wire separation only
+
+D. POSTPROCESS — smooth → .mat → MATLAB g-code
+```
+
+---
+
+## What “preset” means in layout_design
+
+| In assignment file | On each target (generated / prep) |
+|--------------------|-----------------------------------|
+| `terminal_assignments` only | Mesh, electrodes, TERMINAL_* clicks |
+| Optional: `preset_id`, `source_subject_id` | Synthesized `paths[]`, `collision_metrics` |
+
+**Do not require** in assignment file: `paths_chord_3d`, `paths_normalized`, `terminal_positions_3d` (ignored for default generate).
+
+Build assignment map:
+
+```bash
+python -m app build-assignments --reference 1 --id s1_assignments
+```
+
+---
+
+## B — Generate layout (primary)
+
+**Default:** target hub clicks + assignment map → **new** layout.
+
+```bash
+python -m app synthesize --assignments s1_assignments --target 2
+python -m app visualize --applied data/output/layouts/synth_s2.json
+```
+
+| Flag | Meaning |
+|------|---------|
+| *(default)* | Hubs from `fiducials_{target}.json`; optional ±36° search |
+| `--fix-terminals` | Exact hub clicks; may have more crossings |
+| `--inherit-preset-terminals` | **Legacy:** map reference hubs — not generate-first |
+
+**Internal:** target-native entry slots, straight/detour 2D, UV surface `path_points`, validate 0/0.
+
+**Gate:** `crossing_count=0`, `electrode_violations=0` before polish/post.
+
+---
+
+## A — Preprocess
+
+Per subject: `cleaned_scans/`, `fiducials_*` (incl. TERMINAL_LEFT/RIGHT), `electrode_positions_*`.
+
+```bash
+python -m app preprocess --subject N --step fiducials
+python -m app preprocess --subject N --step electrodes
+python -m app preprocess --subject N --step assignments   # optional local balanced map
+```
+
+Reference assignments: `build-assignments --reference 1` or copy `initial_terminal_assignments_1.json` into `terminal_assignments` in JSON.
+
+---
+
+## C — Polish (optional)
+
+Only if generated layout needs more **separation** (not to invent layout).
+
+```bash
+python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
+```
+
+Requires `PYTHON/GA/greed.py` for repair/refine.
+
+---
+
+## D — Postprocess
+
+```bash
+python -m app smooth --applied data/output/layouts/synth_s2.json
+python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
+```
+
+---
+
+## Anti-patterns
+
+- Treating full v4 GA export as the normal preset (paths + hubs).
+- Using `apply-v4` without `--synthesize` as the main multi-subject path.
+- Expecting polish to fix wrong LEFT/RIGHT assignment — edit assignment map and **re-generate**.
+
+---
+
+## Reference
+
+[reference.md](reference.md) · [docs/GOAL.md](../../docs/GOAL.md)

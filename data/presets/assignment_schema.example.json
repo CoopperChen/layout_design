@@ -1,0 +1,11 @@
+{
+  "preset_version": 4,
+  "preset_id": "example_assignments_only",
+  "assignment_only": true,
+  "electrode_layout": "standard_10-20",
+  "source_subject_id": 1,
+  "terminal_assignments": {
+    "Fp1": "TERMINAL_LEFT",
+    "Fp2": "TERMINAL_RIGHT"
+  }
+}

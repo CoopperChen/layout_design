@@ -1,0 +1,26 @@
+[project]
+name = "layout-design"
+version = "0.1.0"
+description = "Generate per-subject EEG wire layouts from terminal assignment maps"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pyvista",
+    "shapely",
+    "matplotlib",
+    "mne",
+    "pyyaml",
+]
+
+[project.scripts]
+layout = "app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
