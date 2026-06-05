@@ -4,6 +4,8 @@
 
 **Not** applying a reference GA layout or rigidly mapping reference hub positions (that is legacy / opt-in).
 
+**Repository:** https://github.com/CoopperChen/layout_design
+
 **Run from repository root** (`layout_design/`).
 
 ```powershell
@@ -31,6 +33,22 @@ See [docs/GOAL.md](docs/GOAL.md) for scope.
 
 Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md)
 
+## Terminal entries (target-native)
+
+Synthesize uses **fiducial-native** strip zones by default (`terminal_2d_mode: fiducial_native`):
+
+- Terminal safety zones are centered on your **TERMINAL_LEFT / TERMINAL_RIGHT** clicks (polar projection), not on an inflated legacy hub radius.
+- Each wire ends at a **strip entry** on that zone boundary (fixed spacing, collision-free fan-in), not at the hub center.
+- 3D endpoints use UV surface lift with a light blend toward the hub for entries near the strip center.
+
+**3D visualize markers**
+
+| Color | Meaning |
+|-------|---------|
+| Gray | Hub clicks (`TERMINAL_LEFT` / `TERMINAL_RIGHT`) |
+| Lime | Wire ends (`entry_position_3d`) |
+| Cyan | Path splines |
+
 ## Repository layout
 
 ```text
@@ -52,21 +70,38 @@ python -m app preprocess --subject 2 --step fiducials
 python -m app preprocess --subject 2 --step cz
 python -m app preprocess --subject 2 --step electrodes
 
-# 2. Assignment map from reference subject 1 (preset = assignments only)
+# 2. Assignment map (or use bundled subject1_best_v4)
 python -m app build-assignments --reference 1 --id s1_assignments
+# requires data/json/fiducials_1.json — or skip and use:
+#   --assignments subject1_best_v4
 
 # 3. Generate layout on subject 2 (paths created here — not copied from S1)
-python -m app synthesize --assignments s1_assignments --target 2 --visualize
+python -m app synthesize --assignments subject1_best_v4 --target 2 --visualize
 
 # 4. Optional polish → print prep
 python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
-python -m app smooth --applied data/output/layouts/synth_s2.json
+python -m app smooth --applied "data/output/layouts/synth_s2.json" --out "data/output/smooth/smooth_s2_final.json"
 python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
 ```
 
-Use genetic_SHAPE venv if system Python lacks scientific stack:
+Use **layout JSON** for `visualize` and **smooth JSON** only for `smooth` / `export-matlab`:
+
+```powershell
+python -m app visualize --applied data/output/layouts/synth_s2.json
+```
+
+Use genetic_SHAPE venv if system Python lacks the scientific stack:
 
 `D:\Research\genetic_layout_design\genetic_SHAPE\genetic\Scripts\python.exe -m app …`
+
+## Synthesize flags (common)
+
+| Flag | Effect |
+|------|--------|
+| `--assignments` / `--preset` | Terminal assignment map in `data/presets/` |
+| `--fix-terminals` | Exact hub clicks (no ±36° angle search) |
+| `--inherit-preset-terminals` | Legacy: rigid-map reference hubs (not generate-first) |
+| `--preserve-entry-order` | Keep reference strip slot order from full v4 preset |
 
 ## Agent skill
 
@@ -74,4 +109,4 @@ Use genetic_SHAPE venv if system Python lacks scientific stack:
 
 ## Status
 
-Core path: preprocess → **generate** (`synthesize`) → optional polish → postprocess. Assignment-only presets + target terminal hubs are default.
+Core path: preprocess → **generate** (`synthesize`) → optional polish → postprocess. Target fiducial hubs + fiducial-native strip entries are default.

@@ -146,7 +146,18 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         uv_raw = new2d.create_uv_grid(mesh, cz_pos, resolution=100)
         uv_ctx = recon.UVReconstructionContext(uv_grid_for_context(uv_raw), mesh)
 
-    electrodes_2d, terminals_2d, _ = build_layout_2d(electrodes, layout_fiducials)
+    terminal_2d_mode = data.get("metadata", {}).get("terminal_2d_mode", "inflated_legacy")
+    if terminal_2d_mode == "fiducial_native":
+        t2d_mode = "fiducial"
+    else:
+        t2d_mode = "inflated"
+    electrodes_2d, terminals_2d, _ = build_layout_2d(
+        electrodes, layout_fiducials, terminal_2d_mode=t2d_mode
+    )
+    terminal_zone_size = None
+    if t2d_mode == "fiducial":
+        ez, _ = new2d.create_zones(electrodes_2d, terminals_2d)
+        terminal_zone_size = float(ez["metadata"].get("terminal_zone_size", 0.0))
 
     out = deepcopy(data)
     lift = data.get("metadata", {}).get("path_lift")
@@ -166,7 +177,15 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         else:
             end2d = new2d.polar_projection(np.array([t3d]), cz_pos)[0]
         end3d = entry_3d_for_strip(
-            end2d, uv_ctx, mesh, e3d=e3d, terminal_3d=t3d, e2d=e2d, cz_pos=cz_pos
+            end2d,
+            uv_ctx,
+            mesh,
+            e3d=e3d,
+            terminal_3d=t3d,
+            e2d=e2d,
+            cz_pos=cz_pos,
+            terminal_2d_mode=terminal_2d_mode,
+            terminal_zone_size=terminal_zone_size,
         )
 
         path_3d = uv_ctx.reconstruct(e3d, end3d, path_2d)

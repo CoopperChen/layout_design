@@ -132,15 +132,25 @@ def polar_projection(points_3d, cz_pos):
     return np.column_stack([r*np.cos(theta), r*np.sin(theta)])
 
 
-def build_terminals_2d(electrodes_2d, fiducials, cz_pos):
-    """Build the canonical 2D terminal anchors used for routing and visualization."""
-    max_dist = 1.2 * max(np.linalg.norm(list(electrodes_2d.values()), axis=1))
+def build_terminals_2d(electrodes_2d, fiducials, cz_pos, *, mode="inflated"):
+    """
+    Build 2D terminal anchors for routing and visualization.
+
+    mode:
+      inflated — legacy GA layout: hub angle from fiducial, radius pushed to ~1.2× max electrode r.
+      fiducial — hub at polar projection of the clicked TERMINAL_* (target-native strip entries).
+    """
     terminals_2d = {}
-    for term in ['TERMINAL_LEFT', 'TERMINAL_RIGHT']:
-        if term in fiducials:
-            pos = polar_projection(np.array([fiducials[term]]), cz_pos)[0]
-            angle = np.arctan2(pos[1], pos[0])
-            terminals_2d[term] = max_dist * np.array([np.cos(angle), np.sin(angle)])
+    for term in ["TERMINAL_LEFT", "TERMINAL_RIGHT"]:
+        if term not in fiducials:
+            continue
+        pos = polar_projection(np.array([fiducials[term]]), cz_pos)[0]
+        if mode == "fiducial":
+            terminals_2d[term] = np.asarray(pos, dtype=float)
+            continue
+        max_dist = 1.2 * max(np.linalg.norm(list(electrodes_2d.values()), axis=1))
+        angle = np.arctan2(pos[1], pos[0])
+        terminals_2d[term] = max_dist * np.array([np.cos(angle), np.sin(angle)], dtype=float)
     return terminals_2d
 
 

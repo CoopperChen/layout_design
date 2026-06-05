@@ -31,6 +31,8 @@ from PYTHON.tools.layoutPreset import (
 )
 
 ENTRY_MODE_TARGET_FIDUCIALS = "target_fiducial_terminals"
+TERMINAL_2D_FIDUCIAL = "fiducial_native"
+TERMINAL_2D_INFLATED = "inflated_legacy"
 
 PRESET_VERSION_V4 = 4
 ENTRY_MODE_ARC_OFFSET = "terminal_arc_offset_slots"
@@ -595,11 +597,31 @@ def entry_3d_for_strip(
     terminal_3d: np.ndarray,
     e2d: np.ndarray,
     cz_pos: np.ndarray,
+    terminal_2d_mode: str = TERMINAL_2D_INFLATED,
+    terminal_zone_size: float | None = None,
 ) -> np.ndarray:
     """Surface entry at strip; UV lift when context available, else chord fraction."""
     if uv_context is not None and mesh is not None:
-        return entry_3d_from_uv(entry_2d, uv_context, mesh)
-    return entry_3d_from_chord_fraction(e3d, terminal_3d, e2d, entry_2d, cz_pos)
+        end3d = entry_3d_from_uv(entry_2d, uv_context, mesh)
+    else:
+        end3d = entry_3d_from_chord_fraction(e3d, terminal_3d, e2d, entry_2d, cz_pos)
+
+    if (
+        terminal_2d_mode == TERMINAL_2D_FIDUCIAL
+        and mesh is not None
+        and terminal_zone_size is not None
+        and terminal_zone_size > 0
+    ):
+        term_2d = new2d.polar_projection(np.array([terminal_3d]), cz_pos)[0]
+        d_hub = float(np.linalg.norm(np.asarray(entry_2d, dtype=float) - term_2d))
+        blend = max(0.0, 1.0 - d_hub / (terminal_zone_size * 2.5))
+        if blend > 1e-6:
+            hub_snap = snap_path_to_mesh(
+                np.array([terminal_3d]), mesh, pin_endpoints=False
+            )[0]
+            end3d = (1.0 - blend) * np.asarray(end3d, dtype=float) + blend * hub_snap
+            end3d = snap_path_to_mesh(np.array([end3d]), mesh, pin_endpoints=False)[0]
+    return np.asarray(end3d, dtype=float)
 
 
 def pin_path_endpoints_3d(
@@ -1350,11 +1372,14 @@ def optimize_terminals_for_clearance(
     preset_paths: dict[str, dict] | None = None,
     search_deg: float = TERMINAL_ANGLE_SEARCH_DEG,
     step_deg: float = TERMINAL_ANGLE_STEP_DEG,
+    terminal_2d_mode: str = TERMINAL_2D_INFLATED,
 ) -> tuple[dict[str, np.ndarray], dict, dict[str, np.ndarray], dict[str, np.ndarray], np.ndarray]:
     """Coarse hub-angle search minimizing crossings + electrode violations."""
     _, slot_order = _preset_slot_metadata(preset)
     preset_paths = preset_paths or preset.get("paths_chord_3d", {})
-    electrodes_2d, terminals_2d, cz_pos = build_layout_2d(electrodes, layout_fiducials)
+    electrodes_2d, terminals_2d, cz_pos = build_layout_2d(
+        electrodes, layout_fiducials, terminal_2d_mode=terminal_2d_mode
+    )
     electrode_zones, terminal_zones = new2d.create_zones(electrodes_2d, terminals_2d)
 
     entries, _ = _resolve_entries_for_synth(
@@ -1387,14 +1412,15 @@ def optimize_terminals_for_clearance(
         base_3d = terminals_3d[terminal].copy()
         base_2d = np.asarray(terminals_2d[terminal], dtype=float)
         base_angle = float(np.arctan2(base_2d[1], base_2d[0]))
-        radius = float(np.linalg.norm(base_2d))
         local_best = best_score
         local_delta = 0.0
 
         for delta in angles:
             trial_fid = dict(layout_fiducials)
             trial_fid[terminal] = _rotate_terminal_3d_about_cz(base_3d, cz_pos, float(delta))
-            e2d, t2d, _ = build_layout_2d(electrodes, trial_fid)
+            e2d, t2d, _ = build_layout_2d(
+                electrodes, trial_fid, terminal_2d_mode=terminal_2d_mode
+            )
             _, tz = new2d.create_zones(e2d, t2d)
             ent, _ = _resolve_entries_for_synth(
                 path_electrodes,
@@ -1429,7 +1455,9 @@ def optimize_terminals_for_clearance(
                 f"(score→{local_best})"
             )
 
-    electrodes_2d, terminals_2d, cz_pos = build_layout_2d(electrodes, layout_fiducials)
+    electrodes_2d, terminals_2d, cz_pos = build_layout_2d(
+        electrodes, layout_fiducials, terminal_2d_mode=terminal_2d_mode
+    )
     return terminals_3d, layout_fiducials, electrodes_2d, terminals_2d, cz_pos
 
 
@@ -1500,6 +1528,11 @@ def apply_layout_preset_v4_synthesize(
             else "preset rigid hubs + angle search"
         )
     )
+    terminal_2d_mode = (
+        TERMINAL_2D_FIDUCIAL if use_target_terminals else TERMINAL_2D_INFLATED
+    )
+    if terminal_2d_mode == TERMINAL_2D_FIDUCIAL:
+        hub_msg = f"{hub_msg} (fiducial strip zones)"
     print(f"v4 synthesize: {entry_mode} → {hub_msg} → straight/detour paths")
 
     if optimize_terminals:
@@ -1514,12 +1547,18 @@ def apply_layout_preset_v4_synthesize(
                 offset_map,
                 slot_index_preset,
                 preserve_entry_order=preserve_entry_order,
+                terminal_2d_mode=terminal_2d_mode,
             )
         )
     else:
-        electrodes_2d, terminals_2d, cz_pos = build_layout_2d(electrodes, layout_fiducials)
+        electrodes_2d, terminals_2d, cz_pos = build_layout_2d(
+            electrodes, layout_fiducials, terminal_2d_mode=terminal_2d_mode
+        )
 
     electrode_zones, terminal_zones = new2d.create_zones(electrodes_2d, terminals_2d)
+    terminal_zone_size = float(
+        electrode_zones["metadata"].get("terminal_zone_size", 0.0)
+    )
     if preserve_entry_order:
         offset_map = _slide_entry_offsets_for_clearance(
             offset_map,
@@ -1593,7 +1632,15 @@ def apply_layout_preset_v4_synthesize(
         end2d = entry_points_2d[electrode]
         t3d = np.asarray(terminals_3d[terminal], dtype=float)
         end3d = entry_3d_for_strip(
-            end2d, uv_context, mesh, e3d=e3d, terminal_3d=t3d, e2d=e2d, cz_pos=cz_pos
+            end2d,
+            uv_context,
+            mesh,
+            e3d=e3d,
+            terminal_3d=t3d,
+            e2d=e2d,
+            cz_pos=cz_pos,
+            terminal_2d_mode=terminal_2d_mode,
+            terminal_zone_size=terminal_zone_size,
         )
 
         path_3d = uv_context.reconstruct(e3d, end3d, np.asarray(path_2d, dtype=float))
@@ -1651,6 +1698,7 @@ def apply_layout_preset_v4_synthesize(
             "terminal_positions_3d": {
                 k: v.tolist() for k, v in terminals_3d.items()
             },
+            "terminal_2d_mode": terminal_2d_mode,
             "timestamp": datetime.now().isoformat(),
         },
         "preset_path": preset_path.replace("\\", "/"),

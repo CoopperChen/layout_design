@@ -252,13 +252,20 @@ def map_preset_terminals_to_target(
     return effective_fiducials, terminals_3d, target_anatomical
 
 
-def build_layout_2d(electrodes: dict, fiducials: dict) -> tuple[dict, dict, np.ndarray]:
+def build_layout_2d(
+    electrodes: dict,
+    fiducials: dict,
+    *,
+    terminal_2d_mode: str = "inflated",
+) -> tuple[dict, dict, np.ndarray]:
     """Electrodes 2D, terminals 2D, and Cz position."""
     cz_pos = electrodes["Cz"]
     electrodes_2d = {
         k: new2d.polar_projection(np.array([v]), cz_pos)[0] for k, v in electrodes.items()
     }
-    terminals_2d = new2d.build_terminals_2d(electrodes_2d, fiducials, cz_pos)
+    terminals_2d = new2d.build_terminals_2d(
+        electrodes_2d, fiducials, cz_pos, mode=terminal_2d_mode
+    )
     return electrodes_2d, terminals_2d, cz_pos
 
 
@@ -1211,6 +1218,13 @@ def visualize_applied_preset(
             pos = layout_fiducials[term]
             plotter.add_mesh(pv.Sphere(radius=mesh.length * 0.01, center=pos), color="gray")
             plotter.add_point_labels([pos], [term.split("_")[-1]], font_size=10)
+    for conn in path_specs:
+        entry_3d = conn.get("entry_position_3d")
+        if entry_3d is not None:
+            ep = np.asarray(entry_3d, dtype=float)
+            plotter.add_mesh(
+                pv.Sphere(radius=mesh.length * 0.006, center=ep), color="lime"
+            )
     for conn in path_specs:
         path_3d = np.asarray(conn.get("path_points"), dtype=float)
         if len(path_3d) >= 2:
