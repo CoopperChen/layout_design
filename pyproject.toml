@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "scipy",
+    "open3d",
     "pyvista",
     "shapely",
     "matplotlib",
@@ -20,6 +21,16 @@ layout = "app.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: real-mesh export (minutes); excluded from default CI",
+]
+addopts = "-m 'not slow'"
 
 [build-system]
 requires = ["setuptools>=61"]

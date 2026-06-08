@@ -4,20 +4,30 @@ Canonical paths: `app/paths.py`. This document describes **what** each artifact 
 
 ## Stage A — Preprocess
 
-### `data/raw/{id}.stl`
+### `data/raw/{id}.ply`
 
-Raw head scan from acquisition. Not modified in place.
+Raw structured-light / photogrammetry point cloud. Input to the **reconstruct** preprocess step.
+
+### `data/raw/{id}.stl` and `data/raw/{id}.obj`
+
+Per subject you need **both** meshes with the **same geometry** (from reconstruct or external export):
+
+- **STL** — used by clear-islands, electrodes, geodesics, synthesize, smooth, and MATLAB `HeadMesh.mat`
+- **OBJ** (textured) — used **only** by `select_fiducials` for interactive picking on the color scan
+
+OBJ may also live under `data/cleaned_scans/{id}.obj`; pipeline steps never read it.
 
 ### `data/cleaned_scans/{id}.stl`
 
-Single connected head mesh after `0_clearIslands` (small islands removed).
+Single connected head mesh after `0_clearIslands` (small islands removed). Canonical mesh for all steps after preprocess A.
 
 ### `data/json/fiducials_{id}.json`
 
-Keys (3D coordinates as lists or objects):
+Keys (3D coordinates as lists; picked on OBJ, valid on STL):
 
 - `nasion`, `lpa`, `rpa`, `inion` — anatomical registration
 - `TERMINAL_LEFT`, `TERMINAL_RIGHT` — rear harness terminal clicks
+- `landmark_central`, `landmark_left`, `landmark_back` — calibration landmarks → `Landmarks.mat` / `LandmarkNames.mat`
 
 Synthesize uses the **four anatomical** points for hub registration; terminal 3D positions for layout come from the preset / synthesize hub pose unless polish syncs fiducials.
 
@@ -77,13 +87,29 @@ Same schema expected by `EXPORT_TO_MATLAB` / legacy g-code:
 - `final_paths` — list of smoothed 3D polylines with electrode metadata
 - Mesh reference for normal computation
 
-### `data/output/matlab/subject_{id}/`
+### `data/output/bundles/subject_{id}/` — **canonical**
+
+Schema `eeg_subject_bundle/1.0.0`:
+
+| File | Contents |
+|------|----------|
+| `manifest.json` | Schema version, frame conventions, array refs |
+| `geometry.npz` | `mesh_points`, `mesh_faces` (0-based), `landmarks_xyz` |
+| `traces.npz` | `channel_names`, `interconnect_xyzn`, `electrode_xyzn` (N×6) |
+
+CLI: `python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json`
+
+### `data/output/gcode/`
+
+5-axis G-code from `python -m app convert-gcode`. Print session YAML in `config/postprocessor/subjects/`.
+
+### `data/output/matlab/subject_{id}/` — **legacy**
 
 | File | Contents |
 |------|----------|
 | `InterconnectElectrodePaths.mat` | Wires + electrode circles |
 | `HeadMesh.mat` | Triangulated head |
-| `Landmarks.mat` | Terminal positions |
+| `Landmarks.mat` | Calibration landmarks |
 | `LandmarkNames.mat` | Labels |
 
 ## Archive (legacy)

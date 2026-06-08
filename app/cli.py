@@ -9,12 +9,14 @@ Unified pipeline CLI.
   # --preset is alias for --assignments (terminal map only; paths are generated)
   python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
   python -m app smooth --applied data/output/layouts/synth_s2.json
-  python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
+  python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
+  python -m app convert-gcode --bundle data/output/bundles/subject_{id} --config config/postprocessor/subjects/example.yaml
 """
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from app import paths
 from app.preprocess import run as preprocess_run
@@ -31,8 +33,15 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print("Repository root:", paths.REPO_ROOT)
     print()
     print("A — Preprocess")
-    print("  raw:           ", paths.raw_scan(sid))
-    print("  cleaned:       ", paths.cleaned_scan(sid))
+    print("  raw PLY:       ", paths.raw_point_cloud(sid))
+    print("  raw STL:       ", paths.raw_scan(sid))
+    obj = paths.DATA_DIR / "raw" / f"{sid}.obj"
+    try:
+        obj = paths.textured_head_obj(sid)
+    except FileNotFoundError:
+        pass
+    print("  raw OBJ:       ", obj, "" if obj.is_file() else "(not found — fiducials only)")
+    print("  cleaned STL:   ", paths.cleaned_scan(sid))
     print("  fiducials:     ", paths.fiducials_json(sid))
     print("  electrodes:    ", paths.electrode_positions_json(sid))
     print("  assignments:   ", paths.terminal_assignments_json(sid))
@@ -42,20 +51,26 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print()
     print("D — Postprocess")
     print("  smooth:        ", paths.smooth_json(sid))
-    print("  matlab:        ", paths.matlab_export_dir(sid))
+    print("  bundle:        ", paths.bundle_export_dir(sid))
+    print("  gcode:         ", paths.gcode_output_dir(sid))
+    print("  matlab:        ", paths.matlab_export_dir(sid), "(legacy)")
     return 0
 
 
 def cmd_preprocess(args: argparse.Namespace) -> int:
+    extra: list[str] = []
+    if args.spacing != 4.5:
+        extra.extend(["--spacing", str(args.spacing)])
+    if args.full_circle:
+        extra.append("--full-circle")
+    if getattr(args, "ply", None):
+        extra.extend(["--ply", str(args.ply)])
+    if getattr(args, "no_align_head", False):
+        extra.append("--no-align-head")
+    if getattr(args, "depth", 12) != 12:
+        extra.extend(["--depth", str(args.depth)])
     return preprocess_run.main(
-        [
-            "--subject",
-            str(args.subject),
-            "--step",
-            args.step,
-            *(["--spacing", str(args.spacing)] if args.spacing != 4.5 else []),
-            *(["--full-circle"] if args.full_circle else []),
-        ]
+        ["--subject", str(args.subject), "--step", args.step, *extra]
     )
 
 
@@ -178,9 +193,67 @@ def cmd_smooth(args: argparse.Namespace) -> int:
 
 def cmd_export_matlab(args: argparse.Namespace) -> int:
     from app.postprocess import export_matlab as em
+    from app.postprocess.bundle.emit import CalibrationLandmarksMissingError
+    from app.postprocess.validate_export import ExportValidationError
 
     try:
-        em.export_matlab(args.input, args.output)
+        em.export_matlab(
+            args.input,
+            args.output,
+            strict_landmarks=not args.allow_terminal_landmarks,
+            skip_validation=args.skip_validation,
+        )
+        return 0
+    except (FileNotFoundError, ExportValidationError, CalibrationLandmarksMissingError) as e:
+        print(e, file=sys.stderr)
+        return 1
+
+
+def cmd_export_bundle(args: argparse.Namespace) -> int:
+    from app.postprocess import export_bundle as eb
+    from app.postprocess.bundle.emit import CalibrationLandmarksMissingError
+    from app.postprocess.validate_export import ExportValidationError
+
+    try:
+        eb.export_bundle(
+            args.input,
+            args.output,
+            strict_landmarks=not args.allow_terminal_landmarks,
+            skip_validation=args.skip_validation,
+        )
+        return 0
+    except (FileNotFoundError, ExportValidationError, CalibrationLandmarksMissingError) as e:
+        print(e, file=sys.stderr)
+        return 1
+
+
+def cmd_convert_gcode(args: argparse.Namespace) -> int:
+    from app.postprocess import convert_gcode as cg
+
+    try:
+        out = cg.convert_gcode(
+            args.bundle,
+            args.config,
+            machine=args.machine,
+            output=args.output,
+            trace=args.trace,
+            electrode=args.electrode,
+            subject=args.subject,
+        )
+        print(f"Wrote G-code to {out}")
+        return 0
+    except FileNotFoundError as e:
+        print(e, file=sys.stderr)
+        return 1
+
+
+def cmd_list_electrodes(args: argparse.Namespace) -> int:
+    from app.postprocess import convert_gcode as cg
+
+    try:
+        names = cg.list_electrodes(args.bundle)
+        for i, name in enumerate(names, 1):
+            print(f"{i:3d}  {name}")
         return 0
     except FileNotFoundError as e:
         print(e, file=sys.stderr)
@@ -209,6 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--step",
         required=True,
         choices=[
+            "reconstruct",
             "clear-islands",
             "fiducials",
             "cz",
@@ -217,6 +291,9 @@ def build_parser() -> argparse.ArgumentParser:
             "entry-capacity",
         ],
     )
+    pr.add_argument("--ply", type=Path, default=None, help="Input .ply for reconstruct step")
+    pr.add_argument("--no-align-head", action="store_true", help="Skip head rotation UI")
+    pr.add_argument("--depth", type=int, default=12, help="Poisson octree depth")
     pr.add_argument("--spacing", type=float, default=4.5)
     pr.add_argument("--full-circle", action="store_true")
     pr.set_defaults(func=cmd_preprocess)
@@ -342,9 +419,59 @@ def build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--strength", type=float)
     sm.set_defaults(func=cmd_smooth)
 
-    em = sub.add_parser("export-matlab", help="Stage D: write .mat files")
+    eb = sub.add_parser(
+        "export-bundle",
+        help="Stage D: write eeg_subject_bundle/1.0.0 (manifest + NPZ)",
+    )
+    eb.add_argument("--input", required=True, help="Smooth JSON (e.g. smooth_s2_final.json)")
+    eb.add_argument("--output", help="Output folder (default: data/output/bundles/subject_{id}/)")
+    eb.add_argument(
+        "--allow-terminal-landmarks",
+        action="store_true",
+        help="Allow export without calibration landmarks (not recommended)",
+    )
+    eb.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip collision-free and path readiness checks (not recommended)",
+    )
+    eb.set_defaults(func=cmd_export_bundle)
+
+    cg = sub.add_parser("convert-gcode", help="Stage D: bundle → 5-axis G-code")
+    cg.add_argument("--bundle", required=True, help="Bundle dir or default export path")
+    cg.add_argument(
+        "--config",
+        required=True,
+        help="Print session YAML (config/postprocessor/subjects/*.yaml)",
+    )
+    cg.add_argument("--machine", help="Machine YAML (default: config/postprocessor/machine_default.yaml)")
+    cg.add_argument("--output", help="Output base (default: data/output/gcode/)")
+    cg.add_argument(
+        "--trace",
+        choices=["interconnect", "electrode"],
+        help="Override trace type from config",
+    )
+    cg.add_argument("--electrode", help="Print single channel (name or index)")
+    cg.add_argument("--subject", help="Legacy .mat subject folder (if not using bundle)")
+    cg.set_defaults(func=cmd_convert_gcode)
+
+    le = sub.add_parser("list-electrodes", help="List channels in a subject bundle")
+    le.add_argument("--bundle", required=True)
+    le.set_defaults(func=cmd_list_electrodes)
+
+    em = sub.add_parser("export-matlab", help="Stage D (legacy): write .mat files")
     em.add_argument("--input", required=True)
     em.add_argument("--output")
+    em.add_argument(
+        "--allow-terminal-landmarks",
+        action="store_true",
+        help="Allow export without calibration landmarks (not recommended)",
+    )
+    em.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip collision-free and path readiness checks (not recommended)",
+    )
     em.set_defaults(func=cmd_export_matlab)
 
     return p

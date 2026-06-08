@@ -6,8 +6,8 @@ All pipeline I/O lives under `data/`. Paths are defined in `app/paths.py` — do
 
 ```text
 data/
-├── raw/                    # Input head scans (per subject: {id}.stl)
-├── cleaned_scans/          # After island removal
+├── raw/                    # {id}.ply (input), {id}.stl + {id}.obj (reconstruct output)
+├── cleaned_scans/          # After island removal — {id}.stl for pipeline; optional {id}.obj
 ├── json/                   # Per-subject prep artifacts
 ├── presets/                # Terminal assignment maps only (folder name legacy)
 ├── output/
@@ -23,7 +23,7 @@ data/
 
 | File | Stage | Description |
 |------|-------|-------------|
-| `fiducials_{id}.json` | A | Nasion, LPA, RPA, inion, TERMINAL_LEFT, TERMINAL_RIGHT |
+| `fiducials_{id}.json` | A | Nasion, LPA, RPA, inion, terminals, three calibration landmarks (picked on OBJ; coordinates apply to STL) |
 | `Cz_{id}.json` | A | Cz position for 10–20 placement |
 | `electrode_positions_{id}.json` | A | Standard 10–20 electrode coordinates |
 | `initial_terminal_assignments_{id}.json` | A | Electrode → TERMINAL_LEFT / TERMINAL_RIGHT |

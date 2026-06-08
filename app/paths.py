@@ -33,8 +33,41 @@ def raw_scan(subject_id: int | str, ext: str = "stl") -> Path:
     return DATA_DIR / "raw" / f"{_subject_stem(subject_id)}.{ext}"
 
 
+def raw_point_cloud(subject_id: int | str) -> Path:
+    """Input scan PLY for Poisson reconstruction (Stage A, reconstruct step)."""
+    return DATA_DIR / "raw" / f"{_subject_stem(subject_id)}.ply"
+
+
 def cleaned_scan(subject_id: int | str, ext: str = "stl") -> Path:
     return DATA_DIR / "cleaned_scans" / f"{_subject_stem(subject_id)}.{ext}"
+
+
+def textured_head_obj(subject_id: int | str) -> Path:
+    """
+    Textured OBJ for interactive fiducial picking only.
+
+    Same geometry as ``cleaned_scan(subject_id)`` (.stl); layout, geodesics,
+    smooth, and MATLAB mesh export all use the STL.
+    """
+    sid = _subject_stem(subject_id)
+    candidates = [
+        DATA_DIR / "raw" / f"{sid}.obj",
+        DATA_DIR / "cleaned_scans" / f"{sid}.obj",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    stl = cleaned_scan(sid)
+    raise FileNotFoundError(
+        f"No textured OBJ for subject {sid}. Place {sid}.obj in data/raw/ "
+        f"(or data/cleaned_scans/) alongside {stl.name} — same geometry, "
+        f"OBJ for fiducial picking, STL for all other steps."
+    )
+
+
+def head_mesh_for_fiducials(subject_id: int | str) -> Path:
+    """Alias for :func:`textured_head_obj`."""
+    return textured_head_obj(subject_id)
 
 
 def fiducials_json(subject_id: int | str) -> Path:
@@ -101,6 +134,30 @@ def matlab_export_dir(subject_id: int | str | None = None) -> Path:
     if subject_id is None:
         return DATA_DIR / "output" / "matlab" / "subject_optimized"
     return DATA_DIR / "output" / "matlab" / f"subject_{_subject_stem(subject_id)}"
+
+
+def bundle_export_dir(subject_id: int | str) -> Path:
+    """Canonical eeg_subject_bundle/1.0.0 output for Postprocessor."""
+    return DATA_DIR / "output" / "bundles" / f"subject_{_subject_stem(subject_id)}"
+
+
+def postprocessor_config_dir() -> Path:
+    return CONFIG_DIR / "postprocessor"
+
+
+def postprocessor_machine_config() -> Path:
+    return postprocessor_config_dir() / "machine_default.yaml"
+
+
+def postprocessor_job_config(name: str = "example") -> Path:
+    return postprocessor_config_dir() / "subjects" / f"{name}.yaml"
+
+
+def gcode_output_dir(subject_id: int | str | None = None) -> Path:
+    base = DATA_DIR / "output" / "gcode"
+    if subject_id is None:
+        return base
+    return base / f"subject_{_subject_stem(subject_id)}_post"
 
 
 # --- Legacy / reference archives ---
@@ -176,6 +233,9 @@ def ensure_data_tree() -> None:
         DATA_DIR / "output" / "pics",
         DATA_DIR / "output" / "smooth",
         DATA_DIR / "output" / "matlab",
+        DATA_DIR / "output" / "bundles",
+        DATA_DIR / "output" / "gcode",
+        CONFIG_DIR / "postprocessor" / "subjects",
         DATA_DIR / "output" / "logs",
         DATA_DIR / "archive",
     ]

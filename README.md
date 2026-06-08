@@ -22,14 +22,14 @@ See [docs/GOAL.md](docs/GOAL.md) for scope.
 | **A. Preprocess** | Mesh, fiducials, terminals, 10–20, optional local assignments |
 | **B. Generate layout** | Assignments file + target → `data/output/layouts/synth_s{id}.json` |
 | **C. Polish** (optional) | Separation polish only — not layout discovery |
-| **D. Postprocess** | Smooth → MATLAB / g-code |
+| **D. Postprocess** | Smooth → bundle → G-code |
 
 | Stage | Directory | Output |
 |-------|-----------|--------|
 | A | `app/preprocess/` | `data/json/`, `data/cleaned_scans/` |
 | B | `app/layout/` | `data/output/layouts/` |
 | C | `app/polish/` | `data/output/layouts/*_repaired.json` |
-| D | `app/postprocess/` | `data/output/smooth/`, `data/output/matlab/` |
+| D | `app/postprocess/` | `data/output/smooth/`, `data/output/bundles/`, `data/output/gcode/` |
 
 Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md)
 
@@ -64,9 +64,10 @@ layout_design/
 ## Quick start
 
 ```powershell
-# 1. Prep subject 2 (mesh, fiducials incl. TERMINAL_*, electrodes)
-python -m app preprocess --subject 2 --step clear-islands
-python -m app preprocess --subject 2 --step fiducials
+# 1. Prep subject 2 — place {id}.ply under data/raw/, then reconstruct → STL + OBJ
+python -m app preprocess --subject 2 --step reconstruct      # PLY → raw/{id}.stl + .obj
+python -m app preprocess --subject 2 --step clear-islands   # STL → cleaned_scans/
+python -m app preprocess --subject 2 --step fiducials       # OBJ only (textured picking)
 python -m app preprocess --subject 2 --step cz
 python -m app preprocess --subject 2 --step electrodes
 
@@ -81,10 +82,13 @@ python -m app synthesize --assignments subject1_best_v4 --target 2 --visualize
 # 4. Optional polish → print prep
 python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
 python -m app smooth --applied "data/output/layouts/synth_s2.json" --out "data/output/smooth/smooth_s2_final.json"
-python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
+python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
+python -m app convert-gcode --bundle data/output/bundles/subject_2 --config config/postprocessor/subjects/example.yaml
 ```
 
-Use **layout JSON** for `visualize` and **smooth JSON** only for `smooth` / `export-matlab`:
+Legacy MATLAB export (optional): `python -m app export-matlab --input data/output/smooth/smooth_s2_final.json`
+
+Use **layout JSON** for `visualize` and **smooth JSON** for `smooth` / `export-bundle`:
 
 ```powershell
 python -m app visualize --applied data/output/layouts/synth_s2.json

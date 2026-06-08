@@ -1,139 +1,210 @@
-# # # # # BELOW: ALSO SAVE TERMINAL ROIS FOR INTERCONNECT PATHS
+"""Interactive fiducial + terminal + calibration landmark picking on textured OBJ head."""
+from __future__ import annotations
+
 import os
+import sys
+
 import pyvista as pv
 import vtk
-import json
-from pathlib import Path
+
+from app import paths
+from app.preprocess.fiducials_io import (
+    PICK_COLORS,
+    PICK_SEQUENCE,
+    load_head_mesh,
+    load_picks,
+    save_landmarks_mat,
+    save_picks,
+)
 
 SUBJECT_ID = int(os.environ.get("LAYOUT_SUBJECT_ID", "1"))
 
 
+def _first_missing_index(picked: dict) -> int:
+    for i, (key, _) in enumerate(PICK_SEQUENCE):
+        if key not in picked:
+            return i
+    return 0
 
-# 1) Load your scan
-stl_path = f"data/cleaned_scans/{SUBJECT_ID}.stl"
-mesh = pv.read(stl_path)
 
-# 2) Landmark prompts and sphere colors (including inion)
-order = [
-    ("nasion", "1) Right-click the NASION (bridge of nose)"),
-    ("lpa",    "2) Right-click LEFT pre-auricular point"),
-    ("rpa",    "3) Right-click RIGHT pre-auricular point"),
-    ("inion",  "4) Right-click the INION (bump at back of head)"),
-]
-terminal_order = [
-    ("TERMINAL_RIGHT", "5) Right-click the RIGHT terminal location"),
-    ("TERMINAL_LEFT", "6) Right-click the LEFT terminal location"),
-]
-colors = ["orange", "green", "blue", "yellow", "black", "red"]
+def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
+    texture = getattr(mesh, "texture", None)
+    if texture is not None:
+        plotter.add_mesh(mesh, texture=texture, show_edges=False, name="head")
+    elif "RGB" in mesh.array_names:
+        plotter.add_mesh(mesh, scalars="RGB", rgb=True, show_edges=False, name="head")
+    else:
+        plotter.add_mesh(mesh, color="lightgray", opacity=0.55, name="head")
 
-# 3) State & storage
-state = {"idx": 0, "last_pt": None, "phase": "initial"}  # phases: initial, terminal
-picked = {}
 
-# 4) Console instructions
-print("Rotate with left-click + drag.")
-print(order[0][1])
+def _sphere_radius(mesh: pv.DataSet) -> float:
+    return float(mesh.length) * 0.005
 
-# 5) Create the PyVista window
-plotter = pv.Plotter(window_size=(2000, 2000))
-plotter.add_mesh(mesh, color="lightgray", opacity=0.5)
 
-# 6) Show on-screen instruction
-def show_instr(text):
+def _draw_confirmed(
+    plotter: pv.Plotter,
+    mesh: pv.DataSet,
+    name: str,
+    pt: tuple[float, float, float],
+    color: str,
+) -> None:
     try:
-        plotter.remove_actor("instr")
+        plotter.remove_actor(f"confirmed_{name}")
     except Exception:
         pass
-    plotter.add_text(text, name="instr", font_size=14)
-show_instr(order[0][1])
+    sphere = pv.Sphere(
+        center=pt,
+        radius=_sphere_radius(mesh),
+        theta_resolution=16,
+        phi_resolution=16,
+    )
+    plotter.add_mesh(sphere, color=color, name=f"confirmed_{name}")
 
-# 7) VTK picker setup
-picker = vtk.vtkCellPicker()
-picker.SetTolerance(0.0005)
 
-# 8) Right-click callback: provisional pick
-def on_right_click(obj, event):
-    x, y = obj.GetEventPosition()
-    picker.Pick(x, y, 0, plotter.renderer)
-    pos = picker.GetPickPosition()
-    pt = (float(pos[0]), float(pos[1]), float(pos[2]))
-    state["last_pt"] = pt
+def main() -> int:
+    mesh_path = paths.textured_head_obj(SUBJECT_ID)
+    stl_path = paths.cleaned_scan(SUBJECT_ID)
+    print("Mesh pairing (same geometry):")
+    print(f"  OBJ (this step — textured picking): {mesh_path}")
+    if stl_path.is_file():
+        print(f"  STL (all other pipeline steps):     {stl_path}")
+    else:
+        print(
+            f"  STL (all other pipeline steps):     {stl_path}  "
+            "[missing — run clear-islands or copy STL before synthesize]"
+        )
+    mesh = load_head_mesh(mesh_path)
 
-    # remove old provisional
-    try:
-        plotter.remove_actor("provisional")
-    except Exception:
-        pass
+    picked = load_picks(SUBJECT_ID)
+    if picked:
+        print(f"Recalled {len(picked)} point(s) from {paths.fiducials_json(SUBJECT_ID)}")
 
-    # draw provisional marker
-    sphere = pv.Sphere(center=pt, radius=mesh.length * 0.005,
-                       theta_resolution=16, phi_resolution=16)
-    plotter.add_mesh(sphere, color="white", opacity=0.6, name="provisional")
-    print(f"  → Picked provisional: {pt}\n    Now press SPACE or ENTER to confirm.")
+    state: dict = {"idx": _first_missing_index(picked), "last_pt": None}
 
-plotter.iren.add_observer("RightButtonPressEvent", on_right_click)
+    print("Controls:")
+    print("  Rotate: left-click + drag")
+    print("  Right-click: provisional pick on surface")
+    print("  Space / Enter: confirm current pick")
+    print("  1–9: jump to landmark (re-pick)")
+    print("  n / p: next / previous landmark")
+    print("  Close window when done to save")
 
-# 9) Confirmation callback: lock in pick
-def on_confirm():
-    i = state["idx"]
-    pt = state["last_pt"]
-    if pt is None:
-        print("  (!) No provisional pick yet—right-click first.")
-        return
-    
-    if state["phase"] == "initial":
-        name, _ = order[i]
-    else:  # terminal phase
-        name, _ = terminal_order[i]
-        
-    picked[name] = pt
+    plotter = pv.Plotter(window_size=(2000, 2000))
+    _add_head_mesh(plotter, mesh)
 
-    # remove provisional
-    try:
-        plotter.remove_actor("provisional")
-    except Exception:
-        pass
+    def show_instr(text: str) -> None:
+        try:
+            plotter.remove_actor("instr")
+        except Exception:
+            pass
+        plotter.add_text(text, name="instr", font_size=14)
 
-    # draw permanent sphere
-    sphere = pv.Sphere(center=pt, radius=mesh.length * 0.005,
-                       theta_resolution=16, phi_resolution=16)
-    plotter.add_mesh(sphere, color=colors[i], name=f"confirmed_{name}")
-    print(f"  ✔ Confirmed {name}: {pt}")
+    def current_label() -> str:
+        _, label = PICK_SEQUENCE[state["idx"]]
+        return label
 
-    # advance state
-    state["last_pt"] = None
-    state["idx"] += 1
-    
-    if state["phase"] == "initial":
-        if state["idx"] < len(order):
-            show_instr(order[state["idx"]][1])
+    show_instr(current_label())
+
+    for i, (key, _) in enumerate(PICK_SEQUENCE):
+        if key in picked:
+            pt = tuple(float(c) for c in picked[key])
+            _draw_confirmed(plotter, mesh, key, pt, PICK_COLORS[i])
+
+    picker = vtk.vtkCellPicker()
+    picker.SetTolerance(0.0005)
+
+    def on_right_click(obj, event) -> None:
+        x, y = obj.GetEventPosition()
+        picker.Pick(x, y, 0, plotter.renderer)
+        pos = picker.GetPickPosition()
+        pt = (float(pos[0]), float(pos[1]), float(pos[2]))
+        state["last_pt"] = pt
+        try:
+            plotter.remove_actor("provisional")
+        except Exception:
+            pass
+        sphere = pv.Sphere(
+            center=pt,
+            radius=_sphere_radius(mesh),
+            theta_resolution=16,
+            phi_resolution=16,
+        )
+        plotter.add_mesh(sphere, color="white", opacity=0.6, name="provisional")
+        print(f"  → Provisional: {pt}  (Space/Enter to confirm)")
+
+    def on_confirm() -> None:
+        pt = state["last_pt"]
+        if pt is None:
+            print("  (!) Right-click a point on the head first.")
+            return
+
+        idx = state["idx"]
+        name, label = PICK_SEQUENCE[idx]
+        picked[name] = pt
+        try:
+            plotter.remove_actor("provisional")
+        except Exception:
+            pass
+        _draw_confirmed(plotter, mesh, name, pt, PICK_COLORS[idx])
+        print(f"  ✔ {name}: {pt}")
+        state["last_pt"] = None
+
+        if idx + 1 < len(PICK_SEQUENCE):
+            state["idx"] = idx + 1
+            show_instr(current_label())
         else:
-            # Switch to terminal phase
-            state["phase"] = "terminal"
-            state["idx"] = 0
-            show_instr(terminal_order[0][1])
-    else:  # terminal phase
-        if state["idx"] < len(terminal_order):
-            show_instr(terminal_order[state["idx"]][1])
-        else:
-            show_instr("All points confirmed – close window to continue")
-            plotter.iren.remove_observers("RightButtonPressEvent")
+            show_instr("All points set — close window to save")
 
-plotter.add_key_event("space",  on_confirm)
-plotter.add_key_event("Return", on_confirm)
+    def jump_to(index: int) -> None:
+        index = max(0, min(index, len(PICK_SEQUENCE) - 1))
+        state["idx"] = index
+        state["last_pt"] = None
+        try:
+            plotter.remove_actor("provisional")
+        except Exception:
+            pass
+        _, label = PICK_SEQUENCE[index]
+        show_instr(f"Re-pick: {label}")
+        print(f"  → Selected: {label}")
 
-# 10) Show the UI (blocks until closed)
-plotter.show()
+    def on_next() -> None:
+        jump_to(state["idx"] + 1)
 
-# 11) After closing, verify picks
-expected_total = len(order) + len(terminal_order)
-if len(picked) != expected_total:
-    raise RuntimeError(f"Expected {expected_total} picks, got {len(picked)}")
+    def on_prev() -> None:
+        jump_to(state["idx"] - 1)
 
-# 12) Save fiducials.json
-filename_data = f"data/json/fiducials_{SUBJECT_ID}.json"
-Path(filename_data).parent.mkdir(parents=True, exist_ok=True)
-with open(filename_data, "w") as fp:
-    json.dump(picked, fp, indent=2)
-print(f"Saved to {filename_data}:", picked)
+    plotter.iren.add_observer("RightButtonPressEvent", on_right_click)
+    plotter.add_key_event("space", on_confirm)
+    plotter.add_key_event("Return", on_confirm)
+    plotter.add_key_event("n", on_next)
+    plotter.add_key_event("p", on_prev)
+    for digit in range(1, 10):
+        plotter.add_key_event(str(digit), lambda d=digit: jump_to(d - 1))
 
+    plotter.show()
+
+    if not picked:
+        print("No points saved.", file=sys.stderr)
+        return 1
+
+    json_path = save_picks(SUBJECT_ID, picked)
+    print(f"Saved fiducials → {json_path}")
+
+    mat_dir = save_landmarks_mat(SUBJECT_ID, picked)
+    if mat_dir is not None:
+        print(f"Saved Landmarks.mat + LandmarkNames.mat → {mat_dir}")
+    else:
+        print(
+            "Landmarks.mat not written (need landmark_central, landmark_left, landmark_back)."
+        )
+
+    missing = [k for k, _ in PICK_SEQUENCE if k not in picked]
+    if missing:
+        print(f"Warning: incomplete picks ({len(picked)}/{len(PICK_SEQUENCE)}). Missing: {missing}")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

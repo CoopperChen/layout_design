@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 MATLAB .mat File Exporter for Legacy GCode System
 Exports smoothed paths in the exact format expected by gcodeConverter_final14.m
@@ -11,12 +11,19 @@ Creates the required .mat files:
 """
 
 import json
-import numpy as np
-import pyvista as pv
-from scipy.spatial import KDTree
-from scipy.io import savemat
 import os
 from pathlib import Path
+
+import numpy as np
+import pyvista as pv
+from scipy.io import savemat
+
+from app.postprocess.mesh_export import (
+    MeshExportContext,
+    normals_at_points,
+    prepare_mesh_export_context,
+    xyzn_from_path,
+)
 
 def load_final_paths(json_filename):
     """Load the final smoothed paths from JSON file"""
@@ -60,86 +67,70 @@ def resolve_mesh_file(json_filename, mesh_file_entry):
         f"Searched:\n{searched_paths}"
     )
 
-def calculate_surface_normals(path_3d, mesh):
-    """Calculate surface normal vectors for each point in the path"""
-    print(f" Calculating surface normals for {len(path_3d)} points...")
-    
-    kdtree = KDTree(mesh.points)
-    
-    if not hasattr(mesh, 'point_normals') or mesh.point_normals is None:
-        mesh = mesh.compute_normals(point_normals=True, cell_normals=False)
-    
-    normals = np.zeros_like(path_3d)
-    
-    for i, point in enumerate(path_3d):
-        _, nearest_idx = kdtree.query(point)
-        normal = mesh.point_normals[nearest_idx]
-        normal = normal / np.linalg.norm(normal)
-        normals[i] = normal
-    
-    return normals
+def create_electrode_circles(
+    final_paths_data,
+    ctx: MeshExportContext,
+    electrode_diameter_mm: float = 13.8,
+    resolution: int = 20,
+    *,
+    verbose: bool = True,
+):
+    """Create circular electrode toolpaths matching legacy format."""
+    if verbose:
+        print(f" Creating electrode circles (diameter: {electrode_diameter_mm:.1f}mm)...")
 
-def create_electrode_circles(final_paths_data, mesh, electrode_diameter_mm=13.8, resolution=20):
-    """Create circular electrode toolpaths matching legacy format"""
-    print(f" Creating electrode circles (diameter: {electrode_diameter_mm:.1f}mm)...")
-    
     electrode_toolpaths = []
     radius = electrode_diameter_mm / 2.0
-    kdtree = KDTree(mesh.points)
-    
-    if not hasattr(mesh, 'point_normals') or mesh.point_normals is None:
-        mesh = mesh.compute_normals(point_normals=True, cell_normals=False)
-    
-    # Get unique electrode positions
-    electrode_positions = {}
-    for path_data in final_paths_data['final_paths']:
-        electrode_name = path_data['electrode']
+
+    electrode_positions: dict[str, np.ndarray] = {}
+    for path_data in final_paths_data["final_paths"]:
+        electrode_name = path_data["electrode"]
         if electrode_name not in electrode_positions:
-            electrode_positions[electrode_name] = np.array(final_paths_data['electrode_positions'][electrode_name])
-    
+            electrode_positions[electrode_name] = np.asarray(
+                final_paths_data["electrode_positions"][electrode_name],
+                dtype=np.float64,
+            )
+
+    angles = np.linspace(0, 2 * np.pi, resolution, endpoint=False)
+    cos_a = np.cos(angles)
+    sin_a = np.sin(angles)
+
     for electrode_name, electrode_pos in electrode_positions.items():
-        print(f"    Creating electrode circle: {electrode_name}")
-        
-        # Find surface normal at electrode position
-        _, nearest_idx = kdtree.query(electrode_pos)
-        surface_normal = mesh.point_normals[nearest_idx]
-        surface_normal = surface_normal / np.linalg.norm(surface_normal)
-        
-        # Create orthogonal tangent vectors
+        if verbose:
+            print(f"    Creating electrode circle: {electrode_name}")
+
+        surface_normal = normals_at_points(ctx, electrode_pos)[0]
         if abs(surface_normal[2]) < 0.9:
             tangent1 = np.cross(surface_normal, [0, 0, 1])
         else:
             tangent1 = np.cross(surface_normal, [1, 0, 0])
         tangent1 = tangent1 / np.linalg.norm(tangent1)
-        
         tangent2 = np.cross(surface_normal, tangent1)
         tangent2 = tangent2 / np.linalg.norm(tangent2)
-        
-        # Create circle points
-        circle_data = []
-        angles = np.linspace(0, 2*np.pi, resolution, endpoint=False)
-        
-        for angle in angles:
-            circle_point = (electrode_pos + 
-                          radius * (np.cos(angle) * tangent1 + np.sin(angle) * tangent2))
-            
-            # Project to mesh surface
-            _, proj_idx = kdtree.query(circle_point)
-            projected_point = mesh.points[proj_idx]
-            projected_normal = mesh.point_normals[proj_idx]
-            projected_normal = projected_normal / np.linalg.norm(projected_normal)
-            
-            # Format: [x, y, z, nx, ny, nz]
-            circle_data.append([
-                projected_point[0], projected_point[1], projected_point[2],
-                projected_normal[0], projected_normal[1], projected_normal[2]
-            ])
-        
-        electrode_toolpaths.append(np.array(circle_data))
-    
+
+        offsets = radius * (
+            cos_a[:, None] * tangent1 + sin_a[:, None] * tangent2
+        )
+        circle_points = electrode_pos + offsets
+        _, proj_idx = ctx.kdtree.query(circle_points)
+        projected = ctx.points[np.asarray(proj_idx, dtype=int)]
+        projected_normals = ctx.point_normals[np.asarray(proj_idx, dtype=int)]
+        norms = np.linalg.norm(projected_normals, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        projected_normals = projected_normals / norms
+        electrode_toolpaths.append(
+            np.column_stack([projected, projected_normals])
+        )
+
     return electrode_toolpaths, list(electrode_positions.keys())
 
-def create_matlab_data_structure(final_paths_data, mesh):
+
+def create_matlab_data_structure(
+    final_paths_data,
+    mesh_or_ctx: pv.PolyData | MeshExportContext,
+    *,
+    verbose: bool = True,
+):
     """
     Create the exact data structure expected by gcodeConverter_final14.m
     
@@ -150,28 +141,29 @@ def create_matlab_data_structure(final_paths_data, mesh):
     - electrodesexport: cell array of [x,y,z,nx,ny,nz] matrices  
     - PathNames: cell array of electrode names
     """
-    print(f"  Creating MATLAB data structure...")
-    
-    # Create interconnect toolpaths (smoothed paths with normals)
+    if verbose:
+        print("  Creating MATLAB data structure...")
+
+    ctx = (
+        mesh_or_ctx
+        if isinstance(mesh_or_ctx, MeshExportContext)
+        else prepare_mesh_export_context(mesh_or_ctx)
+    )
+
     interconnect_toolpaths = []
     path_names = []
-    
-    for path_data in final_paths_data['final_paths']:
-        electrode = path_data['electrode']
-        path_3d = np.array(path_data['path_3d'])
-        
-        print(f"    Processing interconnect: {electrode}")
-        
-        # Calculate surface normals
-        normals = calculate_surface_normals(path_3d, mesh)
-        
-        # Format as [x, y, z, nx, ny, nz]
-        interconnect_data = np.column_stack([path_3d, normals])
-        interconnect_toolpaths.append(interconnect_data)
+
+    for path_data in final_paths_data["final_paths"]:
+        electrode = path_data["electrode"]
+        path_3d = np.asarray(path_data["path_3d"], dtype=np.float64)
+        if verbose:
+            print(f"    Processing interconnect: {electrode}")
+        interconnect_toolpaths.append(xyzn_from_path(ctx, path_3d))
         path_names.append(electrode)
-    
-    # Create electrode circles
-    electrode_toolpaths, electrode_names = create_electrode_circles(final_paths_data, mesh)
+
+    electrode_toolpaths, electrode_names = create_electrode_circles(
+        final_paths_data, ctx, verbose=verbose
+    )
     
     # Verify same number of interconnects and electrodes
     if len(interconnect_toolpaths) != len(electrode_toolpaths):
@@ -193,26 +185,62 @@ def create_mesh_data(mesh):
     
     return mesh_data
 
-def create_landmarks_data(final_paths_data):
-    """Create landmarks data from terminal positions"""
-    print(f" Creating landmarks data...")
-    
+def create_landmarks_data(
+    final_paths_data,
+    subject_id: int | None = None,
+    *,
+    strict_landmarks: bool = True,
+):
+    """Create landmarks for legacy gcode (prefer preprocess calibration landmarks)."""
+    print(" Creating landmarks data...")
+
+    if subject_id is not None:
+        from app.postprocess.bundle.emit import (
+            CalibrationLandmarksMissingError,
+            require_calibration_landmarks,
+        )
+
+        if strict_landmarks:
+            landmarks, landmark_names = require_calibration_landmarks(subject_id)
+            print(f" Using calibration landmarks from fiducials_{subject_id}.json")
+            return landmarks, landmark_names
+
+        try:
+            from app.preprocess.fiducials_io import load_picks, matlab_landmarks_from_picks
+
+            parsed = matlab_landmarks_from_picks(load_picks(subject_id))
+            if parsed is not None:
+                landmarks, landmark_names = parsed
+                print(f" Using calibration landmarks from fiducials_{subject_id}.json")
+                return landmarks, landmark_names
+        except CalibrationLandmarksMissingError:
+            pass
+        except Exception:
+            pass
+
+    if strict_landmarks:
+        raise CalibrationLandmarksMissingError(
+            "Calibration landmarks required for export; use --allow-terminal-landmarks to override"
+        )
+
     landmarks = []
     landmark_names = []
-    
-    # Use terminal positions as landmarks (required by legacy system)
-    for term_name, term_pos in final_paths_data['terminal_positions'].items():
+    for term_name, term_pos in final_paths_data["terminal_positions"].items():
         landmarks.append(term_pos)
         landmark_names.append(term_name)
-    
-    # Legacy expects at least 3 landmarks, pad if necessary
     while len(landmarks) < 3:
         landmarks.append([0, 0, 0])
         landmark_names.append(f"DUMMY_{len(landmarks)}")
-    
     return np.array(landmarks), landmark_names
 
-def export_to_matlab_format(json_filename, output_folder="matlab_export"):
+
+def export_to_matlab_format(
+    json_filename,
+    output_folder="matlab_export",
+    *,
+    strict_landmarks: bool = True,
+    skip_validation: bool = False,
+):
     """
     Export final paths to MATLAB .mat files compatible with gcodeConverter_final14.m
     
@@ -222,21 +250,37 @@ def export_to_matlab_format(json_filename, output_folder="matlab_export"):
     - Landmarks.mat  
     - LandmarkNames.mat
     """
-    print(f" Starting MATLAB export...")
-    
-    # Create output folder
+    print(" Starting MATLAB export...")
     os.makedirs(output_folder, exist_ok=True)
-    
-    # Load data
+
+    json_path = Path(json_filename)
     final_paths_data = load_final_paths(json_filename)
-    mesh_file = resolve_mesh_file(json_filename, final_paths_data['mesh_file'])
+    if not skip_validation:
+        from app.postprocess.validate_export import validate_smooth_for_export
+
+        validate_smooth_for_export(
+            final_paths_data,
+            smooth_path=json_path.resolve(),
+            require_collision_free=True,
+        )
+
+    mesh_file = resolve_mesh_file(json_filename, final_paths_data["mesh_file"])
     print(f" Loading mesh from: {mesh_file}")
     mesh = pv.read(mesh_file)
-    
-    # Create MATLAB data structures
-    interconnects, electrodes, path_names = create_matlab_data_structure(final_paths_data, mesh)
-    mesh_data = create_mesh_data(mesh)
-    landmarks, landmark_names = create_landmarks_data(final_paths_data)
+    ctx = prepare_mesh_export_context(mesh)
+
+    interconnects, electrodes, path_names = create_matlab_data_structure(
+        final_paths_data, ctx
+    )
+    mesh_data = create_mesh_data(ctx.mesh)
+    mesh_stem = Path(mesh_file).stem
+    subject_digits = "".join(c for c in mesh_stem if c.isdigit())
+    subject_id = int(subject_digits) if subject_digits else None
+    landmarks, landmark_names = create_landmarks_data(
+        final_paths_data,
+        subject_id=subject_id,
+        strict_landmarks=strict_landmarks,
+    )
     
     # Save InterconnectElectrodePaths.mat
     # Format: [allinterconnects, electrodesexport, PathNames]

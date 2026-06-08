@@ -1,0 +1,19 @@
+# Print session template.
+# pm: mount end-effector on printhead; touch 3 marked head points; record XYZ below.
+# First point is origin [0,0,0]; points 2–3 are relative machine coordinates.
+subject: "{id}"
+
+registration:
+  rot0y_deg: 0
+  rot0z_deg: 0
+  physical_landmarks_mm:
+    - [0, 0, 0]       # landmark_central (probe touch)
+    - [10, 0, 0]       # landmark_left
+    - [0, 10, 0]       # landmark_back
+
+process:
+  trace_type: interconnect
+  choose_print: all
+
+output:
+  export_name_version: "0deg"

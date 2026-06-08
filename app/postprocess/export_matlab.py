@@ -10,6 +10,9 @@ from app.runtime import setup_runtime
 def export_matlab(
     smooth_json: str | Path,
     output_folder: str | Path | None = None,
+    *,
+    strict_landmarks: bool = True,
+    skip_validation: bool = False,
 ) -> Path:
     setup_runtime()
     from app.postprocess.export_matlab_legacy import export_to_matlab_format
@@ -41,5 +44,10 @@ def export_matlab(
         if not out.is_absolute():
             out = paths.REPO_ROOT / out
 
-    export_to_matlab_format(str(smooth_path), str(out))
+    export_to_matlab_format(
+        str(smooth_path),
+        str(out),
+        strict_landmarks=strict_landmarks,
+        skip_validation=skip_validation,
+    )
     return out

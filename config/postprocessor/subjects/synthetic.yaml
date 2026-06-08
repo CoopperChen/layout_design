@@ -1,0 +1,17 @@
+# For tests/fixtures/synthetic_bundle contract tests only.
+subject: synthetic
+
+registration:
+  rot0y_deg: 0
+  rot0z_deg: 0
+  physical_landmarks_mm:
+    - [0, 0, 0]
+    - [10, 0, 0]
+    - [0, 10, 0]
+
+process:
+  trace_type: interconnect
+  choose_print: all
+
+output:
+  export_name_version: "0deg"
