@@ -130,11 +130,7 @@ def build_assignment_map(
             f"  Run preprocess --subject {reference_subject} --step assignments, or copy "
             f"initial_terminal_assignments_{reference_subject}.json into data/json/."
         )
-    fid = json.loads(fid_path.read_text(encoding="utf-8"))
     assign = json.loads(assign_path.read_text(encoding="utf-8"))
-    anatomical = {
-        k: fid[k] for k in ("nasion", "lpa", "rpa", "inion") if k in fid
-    }
     doc = {
         "preset_version": 4,
         "preset_id": assignment_id,

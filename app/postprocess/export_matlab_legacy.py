@@ -360,7 +360,7 @@ def export_to_matlab_format(
         print(f"   - InterconnectElectrodePaths.mat ({len(interconnects)} paths)")
         print(f"   - HeadMesh.mat ({len(ctx.mesh.points)} vertices)")
         print(f"   - Landmarks.mat ({len(landmarks)} landmarks)")
-        print(f"   - LandmarkNames.mat")
+        print("   - LandmarkNames.mat")
 
     return output_folder
 
@@ -382,9 +382,9 @@ if __name__ == "__main__":
     # Export to MATLAB format
     output_folder = export_to_matlab_format(INPUT_FILE, OUTPUT_FOLDER)
     
-    print(f"\n Next steps:")
+    print("\n Next steps:")
     print(f"   1. Copy the '{output_folder}' folder to your MATLAB working directory")
-    print(f"   2. Open gcodeConverter_final14.m")
+    print("   2. Open gcodeConverter_final14.m")
     print(f"   3. Change line: subject='{output_folder}';")
-    print(f"   4. Run the MATLAB script to generate final GCode")
+    print("   4. Run the MATLAB script to generate final GCode")
 

@@ -543,19 +543,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return build_parser().parse_args(argv).func(
-        build_parser().parse_args(argv)
-    )
-
-
-def _main_fixed(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
-
-
-# fix double parse bug
-main = _main_fixed
 
 if __name__ == "__main__":
     raise SystemExit(main())

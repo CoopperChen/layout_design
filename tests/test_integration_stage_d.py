@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
+from app import paths as app_paths
+from app.postprocess.bundle.emit import export_bundle
 from app.postprocess.bundle.load import load_bundle
 from app.postprocess.convert_gcode import convert_gcode
 from app.postprocess.export_matlab_legacy import export_to_matlab_format
-from app.postprocess.bundle.emit import export_bundle
 from tests.fixtures.bundle_factory import (
     write_synthetic_fiducials,
     write_synthetic_mesh,
@@ -53,17 +49,17 @@ def test_export_bundle_then_convert_gcode(synthetic_stage_d: Path, tmp_path: Pat
     bundle_dir = tmp_path / "bundle"
     export_bundle(smooth, bundle_dir, verbose=False)
 
-    pm = _REPO_ROOT / "config/postprocessor/subjects/subject_synthetic.yaml"
+    pm = app_paths.postprocessor_config_dir() / "subjects" / "subject_synthetic.yaml"
     gcode_out = tmp_path / "gcode"
-    paths = convert_gcode(
+    gcode_paths = convert_gcode(
         bundle_dir,
         pm,
         output=gcode_out,
         trace="both",
     )
-    assert isinstance(paths, list)
-    assert len(paths) == 2
-    for path in paths:
+    assert isinstance(gcode_paths, list)
+    assert len(gcode_paths) == 2
+    for path in gcode_paths:
         assert path.is_file()
         assert path.read_text(encoding="utf-8").startswith("G94")
 

@@ -23,8 +23,8 @@ def convert_gcode(
     subject: str | Path | None = None,
 ) -> Path | list[Path]:
     setup_runtime()
-    from app.postprocess.gcode.converter import run_conversion
     from app.postprocess.gcode.config_loader import load_machine_config
+    from app.postprocess.gcode.converter import run_conversion
     from app.postprocess.gcode.io.load_bundle import load_bundle
     from app.postprocess.gcode.io.load_mat import load_mat_subject
     from app.postprocess.gcode.models import JobConfig

@@ -81,7 +81,7 @@ def write_vtk_compatible_obj(mesh, obj_path: Path) -> None:
 
     Vertex colors are stored in ``{stem}_vertex_colors.npy`` for reload.
     """
-    o3d = _require_open3d()
+    _require_open3d()
     obj_path = Path(obj_path)
     obj_path.parent.mkdir(parents=True, exist_ok=True)
 

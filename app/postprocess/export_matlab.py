@@ -16,9 +16,9 @@ def export_matlab(
     quiet: bool = False,
 ) -> Path:
     setup_runtime()
-    from app.postprocess.export_matlab_legacy import export_to_matlab_format
-
     import json
+
+    from app.postprocess.export_matlab_legacy import export_to_matlab_format
 
     smooth_path = Path(smooth_json)
     if not smooth_path.is_absolute():

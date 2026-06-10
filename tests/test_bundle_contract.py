@@ -1,14 +1,9 @@
 """Subject-agnostic bundle schema contract tests."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 from app.postprocess.bundle.emit import export_bundle
 from app.postprocess.bundle.load import load_bundle

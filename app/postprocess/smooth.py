@@ -12,7 +12,7 @@ from app.runtime import setup_runtime
 
 
 def _smooth_3d_path(path: np.ndarray, smoothing_factor: float) -> np.ndarray:
-    from scipy.interpolate import splprep, splev
+    from scipy.interpolate import splev, splprep
 
     if len(path) < 3:
         return path.copy()
@@ -60,9 +60,8 @@ def smooth_from_applied(
     smoothing_strength: float | None = None,
 ) -> Path:
     setup_runtime()
-    import pyvista as pv
-    import PYTHON.tools.new2dAlterations as new2d
     import PYTHON.tools.reconstructUsingUVmesh as recon
+    import pyvista as pv
 
     applied_parts = paths.split_concatenated_paths(applied)
     applied_path = paths.resolve_json_path(applied_parts[0], role="Applied layout")

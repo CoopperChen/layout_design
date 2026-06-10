@@ -77,7 +77,8 @@ def _build_manifest(
     mesh_file: Path,
     channel_count: int,
 ) -> dict:
-    rel = lambda p: str(p.relative_to(paths.REPO_ROOT)) if p.is_relative_to(paths.REPO_ROOT) else str(p)
+    def rel(p: Path) -> str:
+        return str(p.relative_to(paths.REPO_ROOT)) if p.is_relative_to(paths.REPO_ROOT) else str(p)
     return {
         "schema_version": SCHEMA_VERSION,
         "subject_id": int(subject_id) if str(subject_id).isdigit() else subject_id,

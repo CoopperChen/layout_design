@@ -120,9 +120,9 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
     Replaces straight 3D chords from older synthesize runs (path_lift=straight_synthesize).
     """
     setup_runtime()
-    import pyvista as pv
     import PYTHON.tools.new2dAlterations as new2d
     import PYTHON.tools.reconstructUsingUVmesh as recon
+    import pyvista as pv
     from PYTHON.tools.layoutPreset import build_layout_2d, load_subject_data, uv_grid_for_context
     from PYTHON.tools.layoutPresetV4 import (
         entry_3d_for_strip,
@@ -299,7 +299,7 @@ def _show_3d_interactive(
     """PyVista mesh + surface-snapped wires."""
     setup_runtime()
     import pyvista as pv
-    from PYTHON.tools.layoutPreset import load_subject_data, _pyvista_read_stl
+    from PYTHON.tools.layoutPreset import _pyvista_read_stl, load_subject_data
 
     electrodes, fiducials = load_subject_data(subject_id)
     layout_fiducials = dict(fiducials)

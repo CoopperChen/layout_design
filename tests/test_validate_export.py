@@ -1,13 +1,8 @@
 """Pre-export validation gates."""
 
-import sys
 from pathlib import Path
 
 import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 from app.postprocess.validate_export import ExportValidationError, validate_smooth_for_export
 from tests.fixtures.bundle_factory import write_synthetic_smooth
