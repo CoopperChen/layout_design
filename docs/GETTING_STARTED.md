@@ -68,11 +68,20 @@ python -m app polish --applied data/output/layouts/synth_s2_refined.json --mode 
 
 ```powershell
 python -m app smooth --applied data/output/layouts/synth_s2.json
-python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
+python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
+python -m app init-print-config --subject 2
+python -m app list-electrodes --bundle data/output/bundles/subject_2
+python -m app convert-gcode --bundle data/output/bundles/subject_2
 ```
 
-MATLAB: open `legacy_gcode_examples/gcodeConverter_final14.m` (copy from genetic_SHAPE) with `subject` pointing at `data/output/matlab/subject_2/`.
+Edit `config/postprocessor/subjects/subject_2.yaml` with measured `pm` (end-effector on printhead → touch three calibration points). Trace/channel: `--trace interconnect --electrode C3`. See `config/postprocessor/README.md`.
 
-## 5. Project layout
+**Legacy:** `export-matlab` + `legacy_gcode_examples/gcodeConverter_final14.m` if you still need MATLAB G-code.
+
+## 5. CLI reference
+
+All commands, flags, and defaults: [CLI.md](CLI.md)
+
+## 6. Project layout
 
 See [README.md](../README.md) and [DATA_LAYOUT.md](DATA_LAYOUT.md).

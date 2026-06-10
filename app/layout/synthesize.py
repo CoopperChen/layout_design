@@ -149,11 +149,3 @@ def build_assignment_map(
     print(f"Wrote assignment map {out_path} ({len(assign)} electrodes)")
     return out_path
 
-
-def build_preset_from_subject(
-    reference_subject: int,
-    preset_id: str,
-    out: str | Path | None = None,
-) -> Path:
-    """Deprecated alias for build_assignment_map."""
-    return build_assignment_map(reference_subject, preset_id, out)

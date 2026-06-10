@@ -1,0 +1,14 @@
+schema_version: postprocessor_config/1.0.0
+
+machine:
+  d_mm: 57.59
+  a_mm: 180.7
+  gap_size_mm: 15
+  calgap_z_mm: 26.62
+  c0_deg: 90
+  b0_deg: 0
+  speed_mm_min: 500
+  max_speed_mm_min: 1500
+  transition_speed_mm_min: 1000
+  jet_freq_hz: 12
+  zsafe_margin_mm: 25

@@ -1,0 +1,20 @@
+{
+  "schema_version": "eeg_subject_bundle/1.0.0",
+  "subject_id": "synthetic",
+  "coordinate_frame": {
+    "space": "head_scan",
+    "units": "mm",
+    "origin": "landmark_index_0"
+  },
+  "landmarks": {
+    "calibration": {
+      "names": [
+        "Landmark(central)",
+        "Landmark(left)",
+        "Landmark(back)"
+      ]
+    }
+  },
+  "channel_count": 1,
+  "sources": {}
+}

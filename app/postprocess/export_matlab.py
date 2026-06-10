@@ -10,6 +10,10 @@ from app.runtime import setup_runtime
 def export_matlab(
     smooth_json: str | Path,
     output_folder: str | Path | None = None,
+    *,
+    strict_landmarks: bool = True,
+    skip_validation: bool = False,
+    quiet: bool = False,
 ) -> Path:
     setup_runtime()
     from app.postprocess.export_matlab_legacy import export_to_matlab_format
@@ -41,5 +45,17 @@ def export_matlab(
         if not out.is_absolute():
             out = paths.REPO_ROOT / out
 
-    export_to_matlab_format(str(smooth_path), str(out))
+    if not quiet:
+        print(
+            "Warning: export-matlab is a legacy path; prefer export-bundle + convert-gcode.",
+            flush=True,
+        )
+
+    export_to_matlab_format(
+        str(smooth_path),
+        str(out),
+        strict_landmarks=strict_landmarks,
+        skip_validation=skip_validation,
+        verbose=not quiet,
+    )
     return out

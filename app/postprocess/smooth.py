@@ -133,6 +133,8 @@ def smooth_from_applied(
         "source_applied": applied_path.as_posix(),
         "smoothing_strength": strength,
     }
+    if data.get("collision_metrics"):
+        final_model["collision_metrics"] = data["collision_metrics"]
     for i, path in enumerate(paths_3d):
         conn = data["paths"][i]
         final_model["final_paths"].append(

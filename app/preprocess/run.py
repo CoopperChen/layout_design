@@ -11,6 +11,7 @@ from app import paths
 from app.runtime import setup_runtime
 
 _PREP_SCRIPTS = {
+    "reconstruct": None,
     "clear-islands": "PYTHON/0_PREP/0_clearIslands.py",
     "fiducials": "PYTHON/0_PREP/1_selectFiducials.py",
     "cz": "PYTHON/0_PREP/2_showCz.py",
@@ -27,10 +28,30 @@ def _run_script(relative: str, subject_id: int) -> None:
     runpy.run_path(str(script), run_name="__main__")
 
 
+def run_reconstruct(
+    subject_id: int,
+    *,
+    ply_path: Path | None = None,
+    align_head: bool = True,
+    poisson_depth: int = 12,
+) -> int:
+    from app.preprocess.reconstruct import run_reconstruct as _run
+
+    return _run(
+        subject_id,
+        ply_path=ply_path,
+        align_head=align_head,
+        poisson_depth=poisson_depth,
+    )
+
+
 def run_step(step: str, subject_id: int) -> int:
     if step not in _PREP_SCRIPTS:
         raise ValueError(f"Unknown step {step!r}. Choose from: {', '.join(_PREP_SCRIPTS)}")
-    _run_script(_PREP_SCRIPTS[step], subject_id)
+    script = _PREP_SCRIPTS[step]
+    if script is None:
+        return run_reconstruct(subject_id)
+    _run_script(script, subject_id)
     return 0
 
 
@@ -72,6 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--spacing", type=float, default=4.5)
     p.add_argument("--full-circle", action="store_true")
+    p.add_argument("--ply", type=Path, default=None, help="Input .ply (reconstruct step)")
+    p.add_argument("--no-align-head", action="store_true", help="Skip head rotation (reconstruct)")
+    p.add_argument("--depth", type=int, default=12, help="Poisson depth (reconstruct)")
     return p
 
 
@@ -82,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
             return run_assignments(args.subject)
         if args.step == "entry-capacity":
             return run_entry_capacity(args.subject, args.spacing, args.full_circle)
+        if args.step == "reconstruct":
+            return run_reconstruct(
+                args.subject,
+                ply_path=args.ply,
+                align_head=not args.no_align_head,
+                poisson_depth=args.depth,
+            )
         return run_step(args.step, args.subject)
     except FileNotFoundError as e:
         print(e, file=sys.stderr)

@@ -1,0 +1,6 @@
+# Template — copy to subject_{id}.yaml or run: init-print-config --subject {id}
+# pm: end-effector on printhead → touch central (origin), left, back on real head.
+physical_landmarks_mm:
+  - [0, 0, 0]
+  - [0, 0, 0]
+  - [0, 0, 0]
