@@ -31,7 +31,7 @@ See [docs/GOAL.md](docs/GOAL.md) for scope.
 | C | `app/polish/` | `data/output/layouts/*_repaired.json` |
 | D | `app/postprocess/` | `data/output/smooth/`, `data/output/bundles/`, `data/output/gcode/` |
 
-Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md)
+Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) · **[docs/CLI.md](docs/CLI.md)** (all commands)
 
 ## Terminal entries (target-native)
 
@@ -53,13 +53,16 @@ Synthesize uses **fiducial-native** strip zones by default (`terminal_2d_mode: f
 
 ```text
 layout_design/
-├── app/                    # CLI + synthesize / polish / postprocess
-├── data/
-│   ├── presets/            # Terminal assignment maps only (LEFT/RIGHT per electrode)
-│   └── output/layouts/     # Generated layouts (primary deliverable)
-├── docs/GOAL.md
-└── .cursor/skills/layout-synth-pipeline/
+├── app/                    # CLI, preprocess, layout, polish, postprocess/gcode
+├── config/                 # defaults.yaml + postprocessor machine/pm configs
+├── data/                   # Pipeline I/O (see data/README.md)
+├── docs/                   # CLI.md, PIPELINE.md, ARCHITECTURE.md, …
+├── legacy_gcode_examples/  # MATLAB reference (optional)
+├── scripts/                # Sample data helpers
+└── tests/                  # Contract tests + synthetic fixtures
 ```
+
+Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Quick start
 
@@ -83,7 +86,8 @@ python -m app synthesize --assignments subject1_best_v4 --target 2 --visualize
 python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
 python -m app smooth --applied "data/output/layouts/synth_s2.json" --out "data/output/smooth/smooth_s2_final.json"
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
-python -m app convert-gcode --bundle data/output/bundles/subject_2 --config config/postprocessor/subjects/example.yaml
+python -m app init-print-config --subject 2
+python -m app convert-gcode --bundle data/output/bundles/subject_2
 ```
 
 Legacy MATLAB export (optional): `python -m app export-matlab --input data/output/smooth/smooth_s2_final.json`
@@ -98,14 +102,14 @@ Use genetic_SHAPE venv if system Python lacks the scientific stack:
 
 `D:\Research\genetic_layout_design\genetic_SHAPE\genetic\Scripts\python.exe -m app …`
 
-## Synthesize flags (common)
+## CLI
 
-| Flag | Effect |
-|------|--------|
-| `--assignments` / `--preset` | Terminal assignment map in `data/presets/` |
-| `--fix-terminals` | Exact hub clicks (no ±36° angle search) |
-| `--inherit-preset-terminals` | Legacy: rigid-map reference hubs (not generate-first) |
-| `--preserve-entry-order` | Keep reference strip slot order from full v4 preset |
+Full command reference (all stages, arguments, defaults): **[docs/CLI.md](docs/CLI.md)**
+
+```bash
+python -m app --help
+python -m app convert-gcode --help
+```
 
 ## Agent skill
 

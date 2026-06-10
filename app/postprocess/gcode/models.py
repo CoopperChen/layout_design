@@ -1,35 +1,22 @@
-"""Data models for subject bundles and postprocessor configuration."""
+"""G-code postprocessor configuration models."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
 
-SCHEMA_VERSION = "eeg_subject_bundle/1.0.0"
+from app.postprocess.bundle.models import SubjectBundle, TraceChannel
+from app.postprocess.bundle.schema import SCHEMA_VERSION
 
-
-@dataclass
-class TraceChannel:
-    name: str
-    interconnect: np.ndarray  # (N, 6) x,y,z,nx,ny,nz
-    electrode: np.ndarray  # (M, 6)
-    terminal: str = ""
-
-
-@dataclass
-class SubjectBundle:
-    schema_version: str
-    subject_id: str | int
-    mesh_points: np.ndarray  # (V, 3)
-    mesh_faces: np.ndarray  # (F, 3) 0-based
-    landmarks_xyz: np.ndarray  # (3, 3)
-    landmark_names: list[str]
-    channels: list[TraceChannel]
-    anatomical_xyz: np.ndarray | None = None
-    sources: dict[str, str] = field(default_factory=dict)
+__all__ = [
+    "SCHEMA_VERSION",
+    "SubjectBundle",
+    "TraceChannel",
+    "MachineConfig",
+    "JobConfig",
+]
 
 
 @dataclass
@@ -55,13 +42,10 @@ class JobConfig:
     )
     rot0y_deg: float = 0.0
     rot0z_deg: float = 0.0
-    trace_type: Literal["interconnect", "electrode"] = "interconnect"
-    print_mode: str | int = "all"  # "all" or channel name or 1-based index
-    export_name_version: str = "0deg"
-    output_dir: Path | None = None
+    trace_type: Literal["interconnect", "electrode", "both"] = "both"
+    print_mode: str | int = "all"
 
     def resolve_print_index(self, names: list[str]) -> int:
-        """Return 0 for all channels, else 1-based index matching MATLAB chooseprint."""
         if self.print_mode == "all" or self.print_mode == 0:
             return 0
         if isinstance(self.print_mode, int):
@@ -75,4 +59,6 @@ class JobConfig:
 
     @property
     def choose_trace(self) -> int:
-        return 1 if self.trace_type == "interconnect" else 2
+        if self.trace_type == "electrode":
+            return 2
+        return 1

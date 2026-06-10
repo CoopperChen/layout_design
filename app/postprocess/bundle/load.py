@@ -3,38 +3,21 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
+from app.postprocess.bundle.models import SubjectBundle, TraceChannel
 from app.postprocess.bundle.schema import SCHEMA_VERSION
-
-
-@dataclass
-class TraceChannel:
-    name: str
-    interconnect: np.ndarray
-    electrode: np.ndarray
-    terminal: str = ""
-
-
-@dataclass
-class SubjectBundle:
-    schema_version: str
-    subject_id: int | str
-    mesh_points: np.ndarray
-    mesh_faces: np.ndarray
-    landmarks_xyz: np.ndarray
-    landmark_names: list[str]
-    channels: list[TraceChannel]
-    anatomical_xyz: np.ndarray | None = None
-    sources: dict[str, str] = field(default_factory=dict)
 
 
 def load_bundle(bundle_dir: Path | str) -> SubjectBundle:
     bundle_dir = Path(bundle_dir)
-    with open(bundle_dir / "manifest.json", encoding="utf-8") as f:
+    manifest_path = bundle_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"No manifest.json in {bundle_dir}")
+
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
     schema = manifest.get("schema_version", "")

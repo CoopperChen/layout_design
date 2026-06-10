@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pyvista as pv
@@ -17,6 +18,13 @@ class MeshExportContext:
     point_normals: np.ndarray
 
 
+_mesh_context_cache: dict[str, MeshExportContext] = {}
+
+
+def clear_mesh_context_cache() -> None:
+    _mesh_context_cache.clear()
+
+
 def prepare_mesh_export_context(mesh: pv.PolyData) -> MeshExportContext:
     if not hasattr(mesh, "point_normals") or mesh.point_normals is None:
         mesh = mesh.compute_normals(point_normals=True, cell_normals=False)
@@ -28,6 +36,23 @@ def prepare_mesh_export_context(mesh: pv.PolyData) -> MeshExportContext:
         points=points,
         point_normals=normals,
     )
+
+
+def load_mesh_context(
+    mesh_path: str | Path,
+    *,
+    use_cache: bool = True,
+) -> MeshExportContext:
+    """Load mesh from disk with optional in-process cache (keyed by resolved path)."""
+    path = Path(mesh_path).resolve()
+    key = str(path)
+    if use_cache and key in _mesh_context_cache:
+        return _mesh_context_cache[key]
+    mesh = pv.read(str(path))
+    ctx = prepare_mesh_export_context(mesh)
+    if use_cache:
+        _mesh_context_cache[key] = ctx
+    return ctx
 
 
 def normals_at_points(ctx: MeshExportContext, points_3d: np.ndarray) -> np.ndarray:

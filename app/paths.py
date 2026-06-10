@@ -149,8 +149,11 @@ def postprocessor_machine_config() -> Path:
     return postprocessor_config_dir() / "machine_default.yaml"
 
 
-def postprocessor_job_config(name: str = "example") -> Path:
-    return postprocessor_config_dir() / "subjects" / f"{name}.yaml"
+def postprocessor_subject_pm(subject_id: int | str) -> Path:
+    """Per-subject physical landmarks (pm) for G-code registration."""
+    sid = str(subject_id)
+    stem = _subject_stem(subject_id) if sid.isdigit() else sid
+    return postprocessor_config_dir() / "subjects" / f"subject_{stem}.yaml"
 
 
 def gcode_output_dir(subject_id: int | str | None = None) -> Path:

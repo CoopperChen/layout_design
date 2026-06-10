@@ -20,19 +20,23 @@ from scipy.io import savemat
 
 from app.postprocess.mesh_export import (
     MeshExportContext,
+    load_mesh_context,
     normals_at_points,
     prepare_mesh_export_context,
     xyzn_from_path,
 )
 
-def load_final_paths(json_filename):
-    """Load the final smoothed paths from JSON file"""
-    print(f" Loading final paths from: {json_filename}")
-    
-    with open(json_filename, 'r') as f:
+
+def load_final_paths(json_filename, *, verbose: bool = True):
+    """Load the final smoothed paths from JSON file."""
+    if verbose:
+        print(f" Loading final paths from: {json_filename}")
+
+    with open(json_filename, encoding="utf-8") as f:
         data = json.load(f)
-    
-    print(f" Loaded {len(data['final_paths'])} paths")
+
+    if verbose:
+        print(f" Loaded {len(data['final_paths'])} paths")
     return data
 
 def resolve_mesh_file(json_filename, mesh_file_entry):
@@ -166,16 +170,25 @@ def create_matlab_data_structure(
     )
     
     # Verify same number of interconnects and electrodes
-    if len(interconnect_toolpaths) != len(electrode_toolpaths):
-        print(f"  Warning: {len(interconnect_toolpaths)} interconnects vs {len(electrode_toolpaths)} electrodes")
-    
-    print(f" Created {len(interconnect_toolpaths)} interconnects and {len(electrode_toolpaths)} electrodes")
-    
+    if verbose and len(interconnect_toolpaths) != len(electrode_toolpaths):
+        print(
+            f"  Warning: {len(interconnect_toolpaths)} interconnects vs "
+            f"{len(electrode_toolpaths)} electrodes"
+        )
+
+    if verbose:
+        print(
+            f" Created {len(interconnect_toolpaths)} interconnects and "
+            f"{len(electrode_toolpaths)} electrodes"
+        )
+
     return interconnect_toolpaths, electrode_toolpaths, path_names
 
-def create_mesh_data(mesh):
-    """Create mesh data structure for MATLAB"""
-    print(f" Creating mesh data structure...")
+
+def create_mesh_data(mesh, *, verbose: bool = True):
+    """Create mesh data structure for MATLAB."""
+    if verbose:
+        print(" Creating mesh data structure...")
     
     # MATLAB triangulation format
     mesh_data = {
@@ -190,9 +203,11 @@ def create_landmarks_data(
     subject_id: int | None = None,
     *,
     strict_landmarks: bool = True,
+    verbose: bool = True,
 ):
     """Create landmarks for legacy gcode (prefer preprocess calibration landmarks)."""
-    print(" Creating landmarks data...")
+    if verbose:
+        print(" Creating landmarks data...")
 
     if subject_id is not None:
         from app.postprocess.bundle.emit import (
@@ -202,7 +217,8 @@ def create_landmarks_data(
 
         if strict_landmarks:
             landmarks, landmark_names = require_calibration_landmarks(subject_id)
-            print(f" Using calibration landmarks from fiducials_{subject_id}.json")
+            if verbose:
+                print(f" Using calibration landmarks from fiducials_{subject_id}.json")
             return landmarks, landmark_names
 
         try:
@@ -211,7 +227,8 @@ def create_landmarks_data(
             parsed = matlab_landmarks_from_picks(load_picks(subject_id))
             if parsed is not None:
                 landmarks, landmark_names = parsed
-                print(f" Using calibration landmarks from fiducials_{subject_id}.json")
+                if verbose:
+                    print(f" Using calibration landmarks from fiducials_{subject_id}.json")
                 return landmarks, landmark_names
         except CalibrationLandmarksMissingError:
             pass
@@ -240,6 +257,7 @@ def export_to_matlab_format(
     *,
     strict_landmarks: bool = True,
     skip_validation: bool = False,
+    verbose: bool = True,
 ):
     """
     Export final paths to MATLAB .mat files compatible with gcodeConverter_final14.m
@@ -250,11 +268,12 @@ def export_to_matlab_format(
     - Landmarks.mat  
     - LandmarkNames.mat
     """
-    print(" Starting MATLAB export...")
+    if verbose:
+        print(" Starting MATLAB export...")
     os.makedirs(output_folder, exist_ok=True)
 
     json_path = Path(json_filename)
-    final_paths_data = load_final_paths(json_filename)
+    final_paths_data = load_final_paths(json_filename, verbose=verbose)
     if not skip_validation:
         from app.postprocess.validate_export import validate_smooth_for_export
 
@@ -265,14 +284,14 @@ def export_to_matlab_format(
         )
 
     mesh_file = resolve_mesh_file(json_filename, final_paths_data["mesh_file"])
-    print(f" Loading mesh from: {mesh_file}")
-    mesh = pv.read(mesh_file)
-    ctx = prepare_mesh_export_context(mesh)
+    if verbose:
+        print(f" Loading mesh from: {mesh_file}")
+    ctx = load_mesh_context(mesh_file)
 
     interconnects, electrodes, path_names = create_matlab_data_structure(
-        final_paths_data, ctx
+        final_paths_data, ctx, verbose=verbose
     )
-    mesh_data = create_mesh_data(ctx.mesh)
+    mesh_data = create_mesh_data(ctx.mesh, verbose=verbose)
     mesh_stem = Path(mesh_file).stem
     subject_digits = "".join(c for c in mesh_stem if c.isdigit())
     subject_id = int(subject_digits) if subject_digits else None
@@ -280,8 +299,9 @@ def export_to_matlab_format(
         final_paths_data,
         subject_id=subject_id,
         strict_landmarks=strict_landmarks,
+        verbose=verbose,
     )
-    
+
     # Save InterconnectElectrodePaths.mat
     # Format: [allinterconnects, electrodesexport, PathNames]
     # Create cell arrays that MATLAB can properly read
@@ -308,7 +328,8 @@ def export_to_matlab_format(
         {'InterconnectElectrodePaths': interconnect_electrode_paths},
         format='5'
     )
-    print("Saved InterconnectElectrodePaths.mat")
+    if verbose:
+        print("Saved InterconnectElectrodePaths.mat")
 
     # Save HeadMesh.mat
     savemat(
@@ -316,35 +337,31 @@ def export_to_matlab_format(
         {'dataref': mesh_data},
         format='5'
     )
-    print(" HeadMesh.mat created and saved")
+    if verbose:
+        print(" HeadMesh.mat created and saved")
     # Save Landmarks.mat
     savemat(
         os.path.join(output_folder, 'Landmarks.mat'),
         {'Landmarks': landmarks},
         format='5'
     )
-    print(f"Saved Landmarks.mat")
+    if verbose:
+        print("Saved Landmarks.mat")
     # Save LandmarkNames.mat
     savemat(
         os.path.join(output_folder, 'LandmarkNames.mat'),
         {'LandmarkNames': np.array(landmark_names, dtype=object)},
         format='5'
     )
-    print("Saved LandmarkNames.mat")
-    # Summary
-    print(f" MATLAB export complete!")
-    print(f" Output folder: {output_folder}")
-    print(f" Files created:")
-    print(f"   - InterconnectElectrodePaths.mat ({len(interconnects)} paths)")
-    print(f"   - HeadMesh.mat ({len(mesh.points)} vertices, {len(mesh.faces)} faces)")
-    print(f"   - Landmarks.mat ({len(landmarks)} landmarks)")
-    print(f"   - LandmarkNames.mat")
-    print(f"")
-    print(f" Ready for gcodeConverter_final14.m!")
-    print(f"   1. Copy {output_folder}/ folder to your MATLAB workspace")
-    print(f"   2. Set subject='{output_folder}' in gcodeConverter_final14.m")
-    print(f"   3. Run the MATLAB script to generate GCode")
-    
+    if verbose:
+        print("Saved LandmarkNames.mat")
+        print(" MATLAB export complete!")
+        print(f" Output folder: {output_folder}")
+        print(f"   - InterconnectElectrodePaths.mat ({len(interconnects)} paths)")
+        print(f"   - HeadMesh.mat ({len(ctx.mesh.points)} vertices)")
+        print(f"   - Landmarks.mat ({len(landmarks)} landmarks)")
+        print(f"   - LandmarkNames.mat")
+
     return output_folder
 
 if __name__ == "__main__":

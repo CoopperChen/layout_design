@@ -13,6 +13,7 @@ def export_bundle(
     *,
     strict_landmarks: bool = True,
     skip_validation: bool = False,
+    quiet: bool = False,
 ) -> Path:
     setup_runtime()
     from app.postprocess.bundle.emit import export_bundle as _export
@@ -33,4 +34,5 @@ def export_bundle(
         out,
         strict_landmarks=strict_landmarks,
         skip_validation=skip_validation,
+        verbose=not quiet,
     )

@@ -1,13 +1,12 @@
-"""Load YAML configuration files."""
+"""Load machine YAML configuration."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import yaml
 
-from .models import JobConfig, MachineConfig
+from .models import MachineConfig
 
 
 def load_yaml(path: Path | str) -> dict:
@@ -54,36 +53,5 @@ def load_machine_config(
         ),
         zsafe_margin_mm=float(
             machine_section.get("zsafe_margin_mm", machine_section.get("zsafe_margin", 25))
-        ),
-    )
-
-
-def load_job_config(path: Path | str, machine_defaults: Path | str | None = None) -> JobConfig:
-    data = load_yaml(path)
-    reg = data.get("registration", data)
-    proc = data.get("process", data)
-
-    pm = data.get("physical_landmarks_mm", reg.get("physical_landmarks_mm", [[0, 0, 0]] * 3))
-    pm_arr = np.asarray(pm, dtype=float)
-
-    trace_type = data.get(
-        "trace_type", proc.get("trace_type", proc.get("choose_trace", "interconnect"))
-    )
-    if isinstance(trace_type, int):
-        trace_type = "interconnect" if trace_type == 1 else "electrode"
-    if trace_type not in ("interconnect", "electrode"):
-        trace_type = "interconnect"
-
-    print_mode = data.get("print_mode", proc.get("choose_print", "all"))
-
-    return JobConfig(
-        subject=str(data.get("subject", "")),
-        physical_landmarks_mm=pm_arr,
-        rot0y_deg=float(data.get("rot0y", reg.get("rot0y_deg", 0))),
-        rot0z_deg=float(data.get("rot0z", reg.get("rot0z_deg", 0))),
-        trace_type=trace_type,
-        print_mode=print_mode,
-        export_name_version=str(
-            data.get("export_name_version", data.get("output", {}).get("export_name_version", "0deg"))
         ),
     )

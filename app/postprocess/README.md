@@ -8,15 +8,15 @@
 ```bash
 python -m app smooth --applied data/output/layouts/synth_s{id}.json
 python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
-python -m app list-electrodes --bundle data/output/bundles/subject_{id}
-python -m app convert-gcode \
-  --bundle data/output/bundles/subject_{id} \
-  --config config/postprocessor/subjects/example.yaml
+python -m app init-print-config --subject {id}
+python -m app convert-gcode --bundle data/output/bundles/subject_{id}
 ```
+
+Full CLI docs: [docs/CLI.md](../../docs/CLI.md) (Stage D section).
 
 **Export gates** (fail fast unless `--skip-validation`):
 - `collision_metrics.layout_collision_free` in smooth JSON or `source_applied` layout
 - Calibration landmarks in `data/json/fiducials_{id}.json`
 - Each interconnect ≥ 2 finite `path_3d` points
 
-Print configs: `config/postprocessor/README.md` — `pm` measured with end-effector on printhead touching three marked head points.
+Print registration: `config/postprocessor/subjects/subject_{id}.yaml` — **pm only**; see `config/postprocessor/README.md`.

@@ -22,9 +22,8 @@ from app.postprocess.export_matlab_legacy import (
     load_final_paths,
     resolve_mesh_file,
 )
+from app.postprocess.mesh_export import load_mesh_context
 from app.preprocess.fiducials_io import load_picks, matlab_landmarks_from_picks
-
-import pyvista as pv
 
 
 class CalibrationLandmarksMissingError(ValueError):
@@ -137,6 +136,7 @@ def export_bundle(
     *,
     strict_landmarks: bool = True,
     skip_validation: bool = False,
+    verbose: bool = True,
 ) -> Path:
     """
     Export canonical subject bundle: manifest.json, geometry.npz, traces.npz.
@@ -148,7 +148,7 @@ def export_bundle(
     setup_runtime()
 
     smooth_path = paths.resolve_json_path(smooth_json, role="Smooth JSON")
-    final_paths_data = load_final_paths(str(smooth_path))
+    final_paths_data = load_final_paths(str(smooth_path), verbose=verbose)
     if not skip_validation:
         from app.postprocess.validate_export import validate_smooth_for_export
 
@@ -186,13 +186,11 @@ def export_bundle(
     picks = load_picks(subject_id)
     anatomical = _anatomical_xyz(picks)
 
-    from app.postprocess.mesh_export import prepare_mesh_export_context
-
-    print(f" Loading mesh from: {mesh_file}")
-    mesh = pv.read(str(mesh_file))
-    ctx = prepare_mesh_export_context(mesh)
+    if verbose:
+        print(f" Loading mesh from: {mesh_file}")
+    ctx = load_mesh_context(mesh_file)
     interconnects, electrodes, path_names = create_matlab_data_structure(
-        final_paths_data, ctx
+        final_paths_data, ctx, verbose=verbose
     )
 
     mesh_points = np.asarray(ctx.mesh.points, dtype=np.float64)
@@ -235,8 +233,15 @@ def export_bundle(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
 
-    print(f" Bundle export complete: {out}")
-    print(f"   manifest.json")
-    print(f"   geometry.npz ({len(mesh_points)} vertices, {len(mesh_faces)} faces)")
-    print(f"   traces.npz ({len(path_names)} channels)")
+    if verbose:
+        print(f" Bundle export complete: {out}")
+        print("   manifest.json")
+        print(f"   geometry.npz ({len(mesh_points)} vertices, {len(mesh_faces)} faces)")
+        print(f"   traces.npz ({len(path_names)} channels)")
+        pm_hint = paths.postprocessor_subject_pm(subject_id)
+        if not pm_hint.is_file():
+            print(
+                f" Next: python -m app init-print-config --subject {subject_id} "
+                f"(then convert-gcode)"
+            )
     return out

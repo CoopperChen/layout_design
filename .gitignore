@@ -1,4 +1,5 @@
-# Python
+# Python / test cache
+.pytest_cache/
 __pycache__/
 **/__pycache__/
 *.pyc
@@ -12,8 +13,13 @@ venv/
 # Large / subject-specific inputs (keep structure via .gitkeep)
 data/raw/*.stl
 data/raw/*.ply
+data/raw/*.obj
+data/raw/*.mtl
+data/raw/*_texture.png
+data/raw/*_rgb.vtk
 data/cleaned_scans/*.stl
 data/cleaned_scans/*.ply
+data/cleaned_scans/*.obj
 
 # Generated pipeline artifacts
 data/output/**/*
@@ -29,7 +35,16 @@ data/presets/*.json
 # Postprocess
 data/output/smooth/*.json
 data/output/matlab/*.mat
+data/output/bundles/**/*
+!data/output/bundles/**/.gitkeep
+data/output/gcode/**/*
+!data/output/gcode/**/.gitkeep
 subject_optimized/
+
+# Per-subject print registration (measured at print time)
+config/postprocessor/subjects/subject_*.yaml
+!config/postprocessor/subjects/example.yaml
+!config/postprocessor/subjects/subject_synthetic.yaml
 
 # IDE / OS
 .idea/
