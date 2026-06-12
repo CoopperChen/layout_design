@@ -82,3 +82,30 @@ def xyzn_from_path(ctx: MeshExportContext, path_3d: np.ndarray) -> np.ndarray:
     path = np.asarray(path_3d, dtype=np.float64)
     normals = normals_at_points(ctx, path)
     return np.column_stack([path, normals])
+
+
+def closest_points_on_surface(
+    mesh: pv.PolyData,
+    points_3d: np.ndarray,
+) -> np.ndarray:
+    """Closest point on triangle surface (not nearest mesh vertex)."""
+    import vtk
+
+    pts = np.asarray(points_3d, dtype=np.float64)
+    if pts.ndim == 1:
+        pts = pts.reshape(1, 3)
+
+    surface = mesh.triangulate()
+    locator = vtk.vtkCellLocator()
+    locator.SetDataSet(surface)
+    locator.BuildLocator()
+
+    closest = np.empty_like(pts)
+    cell_id = vtk.mutable(0)
+    sub_id = vtk.mutable(0)
+    dist2 = vtk.mutable(0.0)
+    query = [0.0, 0.0, 0.0]
+    for i, point in enumerate(pts):
+        locator.FindClosestPoint(point, query, cell_id, sub_id, dist2)
+        closest[i] = query
+    return closest

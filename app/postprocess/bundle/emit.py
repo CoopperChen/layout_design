@@ -13,8 +13,8 @@ from app.postprocess.bundle.schema import (
     ANATOMICAL_KEYS,
     CALIBRATION_LANDMARK_KEYS,
     CALIBRATION_LANDMARK_NAMES,
-    ELECTRODE_CIRCLE_RESOLUTION,
     ELECTRODE_DIAMETER_MM,
+    ELECTRODE_NLINES,
     SCHEMA_VERSION,
 )
 from app.postprocess.export_matlab_legacy import (
@@ -69,6 +69,12 @@ def _terminals(final_paths_data: dict) -> list[str]:
     return [str(p.get("terminal", "")) for p in final_paths_data["final_paths"]]
 
 
+def _machine_gap_mm() -> float:
+    from app.postprocess.gcode.config_loader import load_machine_config
+
+    return float(load_machine_config(paths.postprocessor_machine_config()).gap_size_mm)
+
+
 def _build_manifest(
     *,
     subject_id: int | str,
@@ -117,10 +123,12 @@ def _build_manifest(
             "interconnect_xyzn": "traces.npz:interconnect_xyzn",
             "electrode_xyzn": "traces.npz:electrode_xyzn",
         },
-        "electrode_circle": {
+        "electrode_matlab": {
             "diameter_mm": ELECTRODE_DIAMETER_MM,
-            "resolution": ELECTRODE_CIRCLE_RESOLUTION,
-            "generation": "mesh_projected_circle",
+            "nlines": ELECTRODE_NLINES,
+            "gap_mm": _machine_gap_mm(),
+            "electrode_coords_include_gap": True,
+            "generation": "perimeter_zigzag",
         },
         "sources": {
             "smooth_json": rel(smooth_json),

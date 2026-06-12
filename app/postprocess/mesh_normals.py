@@ -48,3 +48,25 @@ def orient_trace_xyzn(trace: np.ndarray, head_center: np.ndarray) -> np.ndarray:
     out = np.asarray(trace, dtype=float).copy()
     out[:, 3:6] = orient_normals_outward(out[:, :3], out[:, 3:6], head_center)
     return out
+
+
+def orient_electrode_trace_xyzn(trace: np.ndarray, head_center: np.ndarray) -> np.ndarray:
+    """
+    One outward normal for the whole electrode disk (AdjPoints repmat).
+
+    Uses pad centroid for the outward test — row-0 XYZ is on the circle edge and
+    gap-offset, which can wrongly flip normals when tested against head_center.
+    """
+    out = np.asarray(trace, dtype=float).copy()
+    normal = out[0, 3:6]
+    norm = np.linalg.norm(normal)
+    if norm <= 0.0:
+        return out
+    normal = normal / norm
+    anchor = np.mean(out[:, :3], axis=0)
+    radial = anchor - np.asarray(head_center, dtype=float).reshape(3)
+    radial_norm = np.linalg.norm(radial)
+    if radial_norm > 1e-12 and float(np.dot(normal, radial / radial_norm)) < 0.0:
+        normal = -normal
+    out[:, 3:6] = normal
+    return out

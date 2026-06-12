@@ -143,6 +143,15 @@ tip = B + d · tool_dir(B, C)          # tool ⊥ arm; −Z at B=0
 
 **Offline (`convert-gcode`):** scalp trace → `machine_zero` → `tool_offset` → writes **X,Y,Z,B,C**. That compensation is baked into G-code; the machine executes it literally.
 
+**Trace coordinate semantics:**
+
+| Trace | Bundle XYZ meaning | Tool offset in `convert-gcode` |
+|-------|-------------------|--------------------------------|
+| Interconnect | Scalp contact (material lands on surface) | `d + gap_size_mm` |
+| Electrode | Pad plane at `surface + gap_size_mm` along normal | `d` only (gap already in geometry) |
+
+Electrode disks are built at export (`export-bundle`) as coplanar perimeter zigzags in that offset plane; `convert-gcode --trace electrode` must not apply gap twice.
+
 **Postprocessor decode** (`decode_postprocessor_paths`, `--verbose` only): inverts offline transforms in **landmark frame** (same as `convert-gcode`), then shifts scalp/tip to **machine frame** for comparison with forward FK and the viewer mesh. Standoff median should be ≈ ``gap_size_mm``; FK vs decode may still differ at arbitrary B,C.
 
 ### Machine-frame registration

@@ -239,6 +239,8 @@ data/output/bundles/subject_{id}/
 
 **Validation (default):** collision-free layout, valid paths, calibration landmarks in `fiducials_{id}.json`.
 
+**Electrode traces (`traces.npz` → `electrode_xyzn`):** planar disk zigzag at `surface + gap_size_mm` along the outward normal (default gap 15 mm from `config/postprocessor/machine_default.yaml`). Interconnect traces remain on the scalp surface. Manifest field `electrode_matlab.electrode_coords_include_gap: true` records this for `convert-gcode`.
+
 ---
 
 ### `init-print-config`
