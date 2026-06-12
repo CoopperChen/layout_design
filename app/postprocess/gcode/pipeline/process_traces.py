@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.postprocess.mesh_normals import head_center_from_points, orient_normals_outward
+
 from ..kinematics.axis_angles import compute_axis_angles
 from ..kinematics.feed_rate import compute_feed_rates
 from ..kinematics.flip_correction import correct_flip
 from ..kinematics.machine_zero import apply_machine_zero_offset
 from ..kinematics.tool_offset import apply_tool_offset
 from ..models import MachineConfig, TraceChannel
-from app.postprocess.mesh_normals import head_center_from_points, orient_normals_outward
 
 
 def process_trace(

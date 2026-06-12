@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.postprocess.mesh_normals import head_center_from_points, orient_trace_xyzn
+
 from ..models import JobConfig, SubjectBundle, TraceChannel
 from ..transform.rotations import apply_rotation, roty, rotz
 from ..transform.scan2phys import scan2phys
-from app.postprocess.mesh_normals import head_center_from_points, orient_trace_xyzn
 
 
 def _normalize_normals(trace: np.ndarray) -> np.ndarray:

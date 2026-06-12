@@ -16,12 +16,12 @@ from app.postprocess.gcode.models import JobConfig
 from app.postprocess.gcode.pipeline.align import align_subject
 from app.postprocess.gcode.pipeline.process_traces import process_trace
 from app.postprocess.print_config import load_physical_landmarks
+from app.simulator.kinematics.inverse import nozzle_tip_print_positions
 from app.simulator.kinematics.machine_execute import (
     RigidMachineState,
     forward_states_from_gcode,
     rigid_geometry_checks,
 )
-from app.simulator.kinematics.inverse import nozzle_tip_print_positions
 from app.simulator.parser import parse_gcode_text
 
 
