@@ -12,6 +12,7 @@ Unified pipeline CLI.
   python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
   python -m app init-print-config --subject {id}
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
+  python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
 """
 from __future__ import annotations
 
@@ -538,6 +539,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress per-channel progress output",
     )
     em.set_defaults(func=cmd_export_matlab)
+
+    from app.simulator.cli import add_simulate_gcode_parser
+
+    add_simulate_gcode_parser(sub)
 
     return p
 

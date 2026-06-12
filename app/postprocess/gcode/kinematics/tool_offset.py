@@ -12,9 +12,12 @@ def apply_tool_offset(
     normals: np.ndarray,
     c_angles: np.ndarray,
     machine: MachineConfig,
+    *,
+    gap_mm: float | None = None,
 ) -> np.ndarray:
     g = positions.copy()
-    t = machine.d_mm + machine.gap_size_mm
+    gap = machine.gap_size_mm if gap_mm is None else float(gap_mm)
+    t = machine.d_mm + gap
     a = machine.a_mm
     npts = g.shape[0]
 

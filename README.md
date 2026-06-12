@@ -22,14 +22,14 @@ See [docs/GOAL.md](docs/GOAL.md) for scope.
 | **A. Preprocess** | Mesh, fiducials, terminals, 10–20, optional local assignments |
 | **B. Generate layout** | Assignments file + target → `data/output/layouts/synth_s{id}.json` |
 | **C. Polish** (optional) | Separation polish only — not layout discovery |
-| **D. Postprocess** | Smooth → bundle → G-code |
+| **D. Postprocess** | Smooth → bundle → G-code → **simulate** (3D viewer) |
 
 | Stage | Directory | Output |
 |-------|-----------|--------|
 | A | `app/preprocess/` | `data/json/`, `data/cleaned_scans/` |
 | B | `app/layout/` | `data/output/layouts/` |
 | C | `app/polish/` | `data/output/layouts/*_repaired.json` |
-| D | `app/postprocess/` | `data/output/smooth/`, `data/output/bundles/`, `data/output/gcode/` |
+| D | `app/postprocess/` + `app/simulator/` | `data/output/smooth/`, `bundles/`, `gcode/`; PyVista viewer |
 
 Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) · **[docs/CLI.md](docs/CLI.md)** (all commands)
 
@@ -53,13 +53,18 @@ Synthesize uses **fiducial-native** strip zones by default (`terminal_2d_mode: f
 
 ```text
 layout_design/
-├── app/                    # CLI, preprocess, layout, polish, postprocess/gcode
+├── app/
+│   ├── preprocess/         # Stage A
+│   ├── layout/             # Stage B
+│   ├── polish/             # Stage C (optional)
+│   ├── postprocess/        # Stage D: smooth, bundle, convert-gcode
+│   └── simulator/          # G-code 3D viewer (forward FK + machine-frame mesh)
 ├── config/                 # defaults.yaml + postprocessor machine/pm configs
 ├── data/                   # Pipeline I/O (see data/README.md)
-├── docs/                   # CLI.md, PIPELINE.md, ARCHITECTURE.md, …
+├── docs/                   # CLI.md, PIPELINE.md, MACHINE_KINEMATICS.md, …
 ├── legacy_gcode_examples/  # MATLAB reference (optional)
 ├── scripts/                # Sample data helpers
-└── tests/                  # Contract tests + synthetic fixtures
+└── tests/                  # Contract + simulator tests
 ```
 
 Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -88,7 +93,14 @@ python -m app smooth --applied "data/output/layouts/synth_s2.json" --out "data/o
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
 python -m app init-print-config --subject 2
 python -m app convert-gcode --bundle data/output/bundles/subject_2
+
+# 5. Verify toolpath on registered head mesh (same pm + rot0 as convert-gcode)
+python -m app simulate-gcode \
+  --gcode data/output/gcode/subject_2_post/allinterconnects.txt \
+  --bundle data/output/bundles/subject_2
 ```
+
+**G-code simulator:** forward kinematics — programmed **X,Y,Z = C pivot**; mesh and paths share **controller machine frame** (C at origin). See [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md).
 
 Legacy MATLAB export (optional): `python -m app export-matlab --input data/output/smooth/smooth_s2_final.json`
 

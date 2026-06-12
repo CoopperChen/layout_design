@@ -33,9 +33,14 @@ python -m app init-print-config --subject 4
 
 # 5-axis G-code (default: both interconnect + electrode traces)
 python -m app convert-gcode --bundle data/output/bundles/subject_4/
+
+# 3D viewer — forward FK, machine-frame mesh (same pm + rot0 as convert-gcode)
+python -m app simulate-gcode \
+  --gcode data/output/gcode/subject_4_post/allinterconnects.txt \
+  --bundle data/output/bundles/subject_4
 ```
 
-Legacy `.mat` export remains available via `export-matlab` for MATLAB tooling; prefer `export-bundle` + `convert-gcode`.
+Legacy `.mat` export remains available via `export-matlab` for MATLAB tooling; prefer `export-bundle` + `convert-gcode` + `simulate-gcode`.
 
 See [CLI.md](CLI.md) for flags (`--quiet`, `--skip-validation`, `--trace`, etc.).
 

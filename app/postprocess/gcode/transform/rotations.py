@@ -1,14 +1,8 @@
-"""Rotation matrices matching MATLAB rotx/roty/rotz conventions."""
+"""Rotation matrices matching MATLAB roty/rotz conventions."""
 
 from __future__ import annotations
 
 import numpy as np
-
-
-def rotx(angle_deg: float) -> np.ndarray:
-    a = np.deg2rad(angle_deg)
-    c, s = np.cos(a), np.sin(a)
-    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]], dtype=float)
 
 
 def roty(angle_deg: float) -> np.ndarray:

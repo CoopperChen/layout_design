@@ -1,4 +1,4 @@
-from .rotations import rotx, roty, rotz
+from .rotations import roty, rotz
 from .scan2phys import scan2phys
 
-__all__ = ["rotx", "roty", "rotz", "scan2phys"]
+__all__ = ["roty", "rotz", "scan2phys"]

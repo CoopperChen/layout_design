@@ -47,7 +47,8 @@ python -m app build-assignments --reference 1 --id s1_assignments
 | `synth_s{id}.json` | `synth_s2.json` | B — generated layout |
 | `smooth_s{id}_{tag}.json` | `smooth_s2_final.json` | D — smoothed paths |
 | `subject_{id}/` under `output/bundles/` | manifest + NPZ | D — canonical bundle |
-| `subject_{id}_post/` under `output/gcode/` | `allinterconnects.txt` | D — G-code |
+| `subject_{id}_post/` under `output/gcode/` | `allinterconnects.txt` | D — G-code (machine frame) |
+| `simulate-gcode` input | same gcode + bundle + pm YAML | D — 3D viewer verification |
 
 ## Git
 
