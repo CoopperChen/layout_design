@@ -15,12 +15,16 @@ from app.postprocess.electrode_finder import (
     diameter_mm_from_area_cm2,
     export_electrode_xyzn,
     perimeter_zigzag_uv,
-    uv_to_global,
 )
 from app.postprocess.gcode.config_loader import load_machine_config
 from app.postprocess.gcode.models import MachineConfig
 from app.postprocess.gcode.pipeline.process_traces import process_trace
-from app.postprocess.mesh_export import closest_points_on_surface, load_mesh_context, normals_at_points, xyzn_from_path
+from app.postprocess.mesh_export import (
+    closest_points_on_surface,
+    load_mesh_context,
+    normals_at_points,
+    xyzn_from_path,
+)
 
 
 def test_diameter_matches_adjpoints_formula():
