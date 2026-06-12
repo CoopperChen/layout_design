@@ -9,6 +9,11 @@ import numpy as np
 import pyvista as pv
 from scipy.spatial import KDTree
 
+from app.postprocess.mesh_normals import (
+    head_center_from_points,
+    orient_normals_outward,
+)
+
 
 @dataclass
 class MeshExportContext:
@@ -16,6 +21,7 @@ class MeshExportContext:
     kdtree: KDTree
     points: np.ndarray
     point_normals: np.ndarray
+    head_center: np.ndarray
 
 
 _mesh_context_cache: dict[str, MeshExportContext] = {}
@@ -29,12 +35,15 @@ def prepare_mesh_export_context(mesh: pv.PolyData) -> MeshExportContext:
     if not hasattr(mesh, "point_normals") or mesh.point_normals is None:
         mesh = mesh.compute_normals(point_normals=True, cell_normals=False)
     points = np.asarray(mesh.points, dtype=np.float64)
+    head_center = head_center_from_points(points)
     normals = np.asarray(mesh.point_normals, dtype=np.float64)
+    normals = orient_normals_outward(points, normals, head_center)
     return MeshExportContext(
         mesh=mesh,
         kdtree=KDTree(points),
         points=points,
         point_normals=normals,
+        head_center=head_center,
     )
 
 
@@ -65,7 +74,8 @@ def normals_at_points(ctx: MeshExportContext, points_3d: np.ndarray) -> np.ndarr
     normals = ctx.point_normals[np.asarray(idx, dtype=int)]
     norms = np.linalg.norm(normals, axis=1, keepdims=True)
     norms = np.maximum(norms, 1e-12)
-    return normals / norms
+    normals = normals / norms
+    return orient_normals_outward(pts, normals, ctx.head_center)
 
 
 def xyzn_from_path(ctx: MeshExportContext, path_3d: np.ndarray) -> np.ndarray:

@@ -25,6 +25,7 @@ from app.postprocess.mesh_export import (
     prepare_mesh_export_context,
     xyzn_from_path,
 )
+from app.postprocess.mesh_normals import orient_normals_outward
 
 
 def load_final_paths(json_filename, *, verbose: bool = True):
@@ -41,33 +42,45 @@ def load_final_paths(json_filename, *, verbose: bool = True):
 
 def resolve_mesh_file(json_filename, mesh_file_entry):
     """Resolve a mesh file entry from JSON into an existing mesh path."""
+    from app import paths as repo_paths
+
     json_path = Path(json_filename).resolve()
     mesh_entry = Path(mesh_file_entry)
 
-    candidate_paths = []
+    candidate_paths: list[Path] = []
     if mesh_entry.is_absolute():
         candidate_paths.append(mesh_entry)
     else:
+        # smooth JSON stores mesh_file repo-relative (data/cleaned_scans/{id}.stl)
+        candidate_paths.append(repo_paths.REPO_ROOT / mesh_entry)
         candidate_paths.append(json_path.parent / mesh_entry)
 
     if not mesh_entry.suffix:
-        for extension in ('.stl', '.ply', '.vtk', '.obj'):
-            candidate_paths.append(candidate_paths[0].with_suffix(extension))
+        for extension in (".stl", ".ply", ".vtk", ".obj"):
+            for base in list(candidate_paths):
+                candidate_paths.append(base.with_suffix(extension))
 
-    mesh_directory = candidate_paths[0].parent
+    mesh_directories = {p.parent for p in candidate_paths}
     mesh_stem = mesh_entry.stem
-    leading_digits = ''.join(character for character in mesh_stem if character.isdigit())
+    leading_digits = "".join(character for character in mesh_stem if character.isdigit())
     if leading_digits:
-        for mesh_path in mesh_directory.glob(f'{leading_digits}.*'):
-            candidate_paths.append(mesh_path)
+        for mesh_directory in mesh_directories:
+            for mesh_path in mesh_directory.glob(f"{leading_digits}.*"):
+                candidate_paths.append(mesh_path)
 
+    seen: set[Path] = set()
     for candidate_path in candidate_paths:
-        if candidate_path.exists():
-            return str(candidate_path)
+        resolved = candidate_path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            return str(resolved)
 
-    searched_paths = '\n'.join(f'   - {path}' for path in candidate_paths)
+    searched_paths = "\n".join(f"   - {path}" for path in candidate_paths)
     raise FileNotFoundError(
-        f"Could not resolve mesh file '{mesh_file_entry}' relative to '{json_path.parent}'.\n"
+        f"Could not resolve mesh file '{mesh_file_entry}' "
+        f"(JSON: {json_path}).\n"
         f"Searched:\n{searched_paths}"
     )
 
@@ -122,6 +135,9 @@ def create_electrode_circles(
         norms = np.linalg.norm(projected_normals, axis=1, keepdims=True)
         norms = np.maximum(norms, 1e-12)
         projected_normals = projected_normals / norms
+        projected_normals = orient_normals_outward(
+            projected, projected_normals, ctx.head_center
+        )
         electrode_toolpaths.append(
             np.column_stack([projected, projected_normals])
         )
@@ -363,28 +379,3 @@ def export_to_matlab_format(
         print("   - LandmarkNames.mat")
 
     return output_folder
-
-if __name__ == "__main__":
-    # Configuration
-    INPUT_FILE = "NEW_SMOOTH_FINAL_PATHS_S1_0602_run1_99-2.json"
-    print(f'CONVERTING COORDINATES FROM INPUT FILE: {INPUT_FILE}')
-    OUTPUT_FOLDER = "subject_optimized"  # Folder name for MATLAB
-    
-    # Check if input file exists
-    if not os.path.exists(INPUT_FILE):
-        print(f" Input file not found: {INPUT_FILE}")
-        print(" Available files:")
-        for f in os.listdir('.'):
-            if f.startswith('NEW_SMOOTH_FINAL_PATHS') and f.endswith('.json'):
-                print(f"   - {f}")
-        exit(1)
-    
-    # Export to MATLAB format
-    output_folder = export_to_matlab_format(INPUT_FILE, OUTPUT_FOLDER)
-    
-    print("\n Next steps:")
-    print(f"   1. Copy the '{output_folder}' folder to your MATLAB working directory")
-    print("   2. Open gcodeConverter_final14.m")
-    print(f"   3. Change line: subject='{output_folder}';")
-    print("   4. Run the MATLAB script to generate final GCode")
-

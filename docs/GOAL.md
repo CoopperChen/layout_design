@@ -34,4 +34,4 @@ Stored under `data/presets/` (folder name is legacy; content is assignment-only)
 
 ## Pipeline in one line
 
-Prep target → **synthesize** (assignments + target hubs → new paths) → optional polish → smooth → MATLAB.
+Prep target → **synthesize** (assignments + target hubs → new paths) → optional polish → smooth → export-bundle → convert-gcode → simulate-gcode.

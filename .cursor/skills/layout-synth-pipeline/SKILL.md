@@ -3,7 +3,7 @@ name: layout-synth-pipeline
 description: >-
   Generates per-subject EEG wire path layouts (not preset path replay). Preprocess
   target heads, synthesize paths from terminal assignment map (LEFT/RIGHT only) plus
-  target fiducials/electrodes, optional polish, then MATLAB export. Use for
+  target fiducials/electrodes, optional polish, then bundle/G-code/simulate. Use for
   layout_design generate workflow, assignment-only preset, synthesize, not GA transfer.
 ---
 
@@ -28,7 +28,7 @@ B. GENERATE LAYOUT (synthesize)
 
 C. POLISH (optional) — wire separation only
 
-D. POSTPROCESS — smooth → .mat → MATLAB g-code
+D. POSTPROCESS — smooth → export-bundle → convert-gcode → simulate-gcode
 ```
 
 ---
@@ -101,8 +101,15 @@ Requires `PYTHON/GA/greed.py` for repair/refine.
 
 ```bash
 python -m app smooth --applied data/output/layouts/synth_s2.json
-python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
+python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
+python -m app init-print-config --subject 2   # measure pm at print time
+python -m app convert-gcode --bundle data/output/bundles/subject_2
+python -m app simulate-gcode \
+  --gcode data/output/gcode/subject_2_post/allinterconnects.txt \
+  --bundle data/output/bundles/subject_2
 ```
+
+Legacy: `export-matlab` for MATLAB `gcodeConverter_final14.m`.
 
 ---
 

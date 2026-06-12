@@ -76,6 +76,17 @@ python -m app convert-gcode --bundle data/output/bundles/subject_2
 
 Edit `config/postprocessor/subjects/subject_2.yaml` with measured `pm` (end-effector on printhead → touch three calibration points). Trace/channel: `--trace interconnect --electrode C3`. See `config/postprocessor/README.md`.
 
+### Verify G-code on head mesh
+
+```powershell
+python -m app simulate-gcode `
+  --gcode data/output/gcode/subject_2_post/allinterconnects.txt `
+  --bundle data/output/bundles/subject_2 `
+  --verbose
+```
+
+Uses the same `pm` YAML and `--rot0y` / `--rot0z` as `convert-gcode`. Mesh and toolpath are shown in **machine frame** (C pivot at origin). Layer keys: `m` mesh · `l` landmarks · `o` origin · `t` tip · `a` arm.
+
 **Legacy:** `export-matlab` + `legacy_gcode_examples/gcodeConverter_final14.m` if you still need MATLAB G-code.
 
 ## 5. CLI reference

@@ -10,6 +10,7 @@ from ..kinematics.flip_correction import correct_flip
 from ..kinematics.machine_zero import apply_machine_zero_offset
 from ..kinematics.tool_offset import apply_tool_offset
 from ..models import MachineConfig, TraceChannel
+from app.postprocess.mesh_normals import head_center_from_points, orient_normals_outward
 
 
 def process_trace(
@@ -23,6 +24,8 @@ def process_trace(
     """
     g = data[:, :3].copy()
     en = data[:, 3:6].copy()
+    head_center = head_center_from_points(g)
+    en = orient_normals_outward(g, en, head_center)
     for i in range(en.shape[0]):
         n = np.linalg.norm(en[i])
         if n > 0:
