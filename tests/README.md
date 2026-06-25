@@ -20,6 +20,18 @@ pytest --markers          # list markers
 | `test_print_config.py` | pm-only YAML resolution |
 | `test_integration_stage_d.py` | Synthetic smooth → bundle → gcode |
 | `test_bundle_mat_parity.py` | Bundle vs `.mat` on same synthetic fixture |
+| `postprocess/test_mesh_normals.py` | Mesh normal orientation |
+
+### Simulator (`tests/simulator/`)
+
+| File | Coverage |
+|------|----------|
+| `test_machine_fk.py` | Rigid arm FK, machine zero, frame transforms |
+| `test_machine_execute.py` | Forward G-code execution, geometry checks |
+| `test_mesh_registration.py` | scan2phys + machine-frame shift |
+| `test_inverse_roundtrip.py` | Undo machine-zero / tool-offset |
+| `test_tool_offset_roundtrip.py` | Postprocessor offset parity |
+| `test_parser.py` | G-code line parser |
 
 ## Fixtures
 

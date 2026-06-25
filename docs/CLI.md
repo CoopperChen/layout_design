@@ -18,7 +18,7 @@ Console entry point (same interface): `layout <command> …`
 | A — Preprocess | `preprocess` |
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
 | C — Polish (optional) | `polish` |
-| D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `list-electrodes`, `convert-gcode`, `export-matlab` (legacy) |
+| D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
 
 Typical end-to-end:
 
@@ -30,6 +30,7 @@ python -m app smooth --applied data/output/layouts/synth_s2.json
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
 python -m app init-print-config --subject 2
 python -m app convert-gcode --bundle data/output/bundles/subject_2
+python -m app simulate-gcode --gcode data/output/gcode/subject_2_post/allinterconnects.txt --bundle data/output/bundles/subject_2
 ```
 
 ---
@@ -238,6 +239,8 @@ data/output/bundles/subject_{id}/
 
 **Validation (default):** collision-free layout, valid paths, calibration landmarks in `fiducials_{id}.json`.
 
+**Electrode traces (`traces.npz` → `electrode_xyzn`):** planar disk zigzag at `surface + gap_size_mm` along the outward normal (default gap 15 mm from `config/postprocessor/machine_default.yaml`). Interconnect traces remain on the scalp surface. Manifest field `electrode_matlab.electrode_coords_include_gap: true` records this for `convert-gcode`.
+
 ---
 
 ### `init-print-config`
@@ -313,6 +316,53 @@ python -m app convert-gcode --bundle ... --trace electrode      # pads only
 
 ---
 
+### `simulate-gcode`
+
+Interactive 3D PyVista viewer: **forward G-code execution** — programmed **X,Y,Z = C pivot**, **B,C** drive rigid arm/tool (Rz(−C), Rx(−B)).
+
+```bash
+python -m app simulate-gcode \
+  --gcode data/output/gcode/subject_4_post/allinterconnects.txt \
+  --bundle data/output/bundles/subject_4 \
+  --verbose
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--gcode` | — | G-code `.txt` file (required) |
+| `--bundle` | — | Subject bundle directory (required) |
+| `--pm-file` | auto | Physical landmarks YAML (`config/postprocessor/subjects/subject_{id}.yaml`) |
+| `--machine-config` | `config/postprocessor/machine_default.yaml` | Printer geometry (`a_mm`, `d_mm`, machine zero) |
+| `--rot0y` | `0` | Bed Y rotation (degrees), **must match convert-gcode** |
+| `--rot0z` | `0` | Bed Z rotation (degrees), **must match convert-gcode** |
+| `--layers` | `mesh,landmarks,origin,tip,arm` | Comma-separated: `mesh`, `landmarks`, `origin`, `cnc`, `tip`, `arm`, `programmed` |
+| `--animate` | off | `p` key advances one G-code step (slider always available) |
+| `--verbose` | off | Rigid FK checks, registration fit, decode vs FK metrics (machine frame) |
+
+**Layer keys (toggle in viewer):**
+
+| Key | Layer | Content |
+|-----|-------|---------|
+| `m` | mesh | Registered head mesh |
+| `l` | landmarks | Calibration landmarks (machine frame) |
+| `o` | origin | Machine-zero C pivot, tip, central landmark |
+| `c` | cnc | C-axis pivot path (G-code X,Y,Z) |
+| `g` | programmed | Programmed XYZ markers |
+| `t` | tip | Forward FK nozzle tip (M10/M11 colored) |
+| `a` | arm | Rigid arm skeleton (C→B→tip) |
+
+**Coordinate frame:** mesh, landmarks, and G-code paths are all in **controller machine frame** — C pivot zero at `(0,0,0)`. Central landmark sits at `(0, −a, −(d+calgap_z))` in this frame. See [MACHINE_KINEMATICS.md](MACHINE_KINEMATICS.md).
+
+**Registration:** use the same `--pm-file`, `--rot0y`, and `--rot0z` as `convert-gcode`. The simulator shifts scan2phys output into machine frame automatically; G-code is already in machine frame.
+
+**Kinematics:** forward execution — programmed **X,Y,Z = C pivot**; **B,C** drive rigid arm (C=0 → arm +X; C=90 → arm −Y). No postprocessor compensation at runtime.
+
+**Landmarks:** Digital landmarks from bundle (`geometry.npz`); physical `pm` from YAML — see [config/postprocessor/README.md](../config/postprocessor/README.md).
+
+**Viewer HUD:** current step shows X, Y, Z, B, C. `--verbose` prints arm length a, tool length d, arm⊥tool, and tip vs mesh distance.
+
+---
+
 ### `export-matlab` (legacy)
 
 Export four `.mat` files for MATLAB `gcodeConverter_final14.m`.
@@ -340,6 +390,7 @@ Prefer `export-bundle` → `convert-gcode` for the Python path.
 python -m app --help
 python -m app synthesize --help
 python -m app convert-gcode --help
+python -m app simulate-gcode --help
 ```
 
 ## Related docs
@@ -347,5 +398,6 @@ python -m app convert-gcode --help
 - [ARCHITECTURE.md](ARCHITECTURE.md) — repository layout
 - [GETTING_STARTED.md](GETTING_STARTED.md) — environment and first run
 - [PIPELINE.md](PIPELINE.md) — stage overview
+- [MACHINE_KINEMATICS.md](MACHINE_KINEMATICS.md) — arm FK, machine frame, simulator
 - [DATA_LAYOUT.md](DATA_LAYOUT.md) — file formats
 - [config/postprocessor/README.md](../config/postprocessor/README.md) — pm measurement and print config

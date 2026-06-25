@@ -18,10 +18,15 @@ import numpy as np
 import pyvista as pv
 from scipy.io import savemat
 
+from app import paths
+from app.postprocess.bundle.schema import ELECTRODE_DIAMETER_MM, ELECTRODE_NLINES
+from app.postprocess.electrode_finder import (
+    build_electrode_disk_zigzag,
+    export_electrode_xyzn,
+)
 from app.postprocess.mesh_export import (
     MeshExportContext,
     load_mesh_context,
-    normals_at_points,
     prepare_mesh_export_context,
     xyzn_from_path,
 )
@@ -41,92 +46,89 @@ def load_final_paths(json_filename, *, verbose: bool = True):
 
 def resolve_mesh_file(json_filename, mesh_file_entry):
     """Resolve a mesh file entry from JSON into an existing mesh path."""
+    from app import paths as repo_paths
+
     json_path = Path(json_filename).resolve()
     mesh_entry = Path(mesh_file_entry)
 
-    candidate_paths = []
+    candidate_paths: list[Path] = []
     if mesh_entry.is_absolute():
         candidate_paths.append(mesh_entry)
     else:
+        # smooth JSON stores mesh_file repo-relative (data/cleaned_scans/{id}.stl)
+        candidate_paths.append(repo_paths.REPO_ROOT / mesh_entry)
         candidate_paths.append(json_path.parent / mesh_entry)
 
     if not mesh_entry.suffix:
-        for extension in ('.stl', '.ply', '.vtk', '.obj'):
-            candidate_paths.append(candidate_paths[0].with_suffix(extension))
+        for extension in (".stl", ".ply", ".vtk", ".obj"):
+            for base in list(candidate_paths):
+                candidate_paths.append(base.with_suffix(extension))
 
-    mesh_directory = candidate_paths[0].parent
+    mesh_directories = {p.parent for p in candidate_paths}
     mesh_stem = mesh_entry.stem
-    leading_digits = ''.join(character for character in mesh_stem if character.isdigit())
+    leading_digits = "".join(character for character in mesh_stem if character.isdigit())
     if leading_digits:
-        for mesh_path in mesh_directory.glob(f'{leading_digits}.*'):
-            candidate_paths.append(mesh_path)
+        for mesh_directory in mesh_directories:
+            for mesh_path in mesh_directory.glob(f"{leading_digits}.*"):
+                candidate_paths.append(mesh_path)
 
+    seen: set[Path] = set()
     for candidate_path in candidate_paths:
-        if candidate_path.exists():
-            return str(candidate_path)
+        resolved = candidate_path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            return str(resolved)
 
-    searched_paths = '\n'.join(f'   - {path}' for path in candidate_paths)
+    searched_paths = "\n".join(f"   - {path}" for path in candidate_paths)
     raise FileNotFoundError(
-        f"Could not resolve mesh file '{mesh_file_entry}' relative to '{json_path.parent}'.\n"
+        f"Could not resolve mesh file '{mesh_file_entry}' "
+        f"(JSON: {json_path}).\n"
         f"Searched:\n{searched_paths}"
     )
 
-def create_electrode_circles(
-    final_paths_data,
+def create_electrode_toolpaths(
+    interconnect_toolpaths: list[np.ndarray],
+    path_names: list[str],
     ctx: MeshExportContext,
-    electrode_diameter_mm: float = 13.8,
-    resolution: int = 20,
     *,
+    electrode_diameter_mm: float = ELECTRODE_DIAMETER_MM,
+    nlines: int = ELECTRODE_NLINES,
+    gap_size_mm: float | None = None,
     verbose: bool = True,
-):
-    """Create circular electrode toolpaths matching legacy format."""
+) -> tuple[list[np.ndarray], list[str], float]:
+    """
+    Planar electrode disk at ``surface + gap_size_mm`` along outward normal.
+
+    Interconnect row 0 locates the pad site; perimeter zigzag stays coplanar.
+    """
+    if gap_size_mm is None:
+        from app.postprocess.gcode.config_loader import load_machine_config
+
+        gap_size_mm = load_machine_config(paths.postprocessor_machine_config()).gap_size_mm
+
     if verbose:
-        print(f" Creating electrode circles (diameter: {electrode_diameter_mm:.1f}mm)...")
+        print(
+            f" Creating electrode disk zigzag "
+            f"(diameter: {electrode_diameter_mm:.2f}mm, nlines={nlines}, "
+            f"gap={gap_size_mm:.2f}mm)..."
+        )
 
     electrode_toolpaths = []
-    radius = electrode_diameter_mm / 2.0
-
-    electrode_positions: dict[str, np.ndarray] = {}
-    for path_data in final_paths_data["final_paths"]:
-        electrode_name = path_data["electrode"]
-        if electrode_name not in electrode_positions:
-            electrode_positions[electrode_name] = np.asarray(
-                final_paths_data["electrode_positions"][electrode_name],
-                dtype=np.float64,
-            )
-
-    angles = np.linspace(0, 2 * np.pi, resolution, endpoint=False)
-    cos_a = np.cos(angles)
-    sin_a = np.sin(angles)
-
-    for electrode_name, electrode_pos in electrode_positions.items():
+    for name, interconnect in zip(path_names, interconnect_toolpaths):
+        xyz, _origin, _surface, plane_normal = build_electrode_disk_zigzag(
+            interconnect,
+            ctx.mesh,
+            ctx,
+            electrode_diameter_mm,
+            gap_size_mm,
+            nlines=nlines,
+        )
         if verbose:
-            print(f"    Creating electrode circle: {electrode_name}")
-
-        surface_normal = normals_at_points(ctx, electrode_pos)[0]
-        if abs(surface_normal[2]) < 0.9:
-            tangent1 = np.cross(surface_normal, [0, 0, 1])
-        else:
-            tangent1 = np.cross(surface_normal, [1, 0, 0])
-        tangent1 = tangent1 / np.linalg.norm(tangent1)
-        tangent2 = np.cross(surface_normal, tangent1)
-        tangent2 = tangent2 / np.linalg.norm(tangent2)
-
-        offsets = radius * (
-            cos_a[:, None] * tangent1 + sin_a[:, None] * tangent2
-        )
-        circle_points = electrode_pos + offsets
-        _, proj_idx = ctx.kdtree.query(circle_points)
-        projected = ctx.points[np.asarray(proj_idx, dtype=int)]
-        projected_normals = ctx.point_normals[np.asarray(proj_idx, dtype=int)]
-        norms = np.linalg.norm(projected_normals, axis=1, keepdims=True)
-        norms = np.maximum(norms, 1e-12)
-        projected_normals = projected_normals / norms
-        electrode_toolpaths.append(
-            np.column_stack([projected, projected_normals])
-        )
-
-    return electrode_toolpaths, list(electrode_positions.keys())
+            print(f"    Electrode: {name} ({len(xyz)} points)")
+        electrode_toolpaths.append(export_electrode_xyzn(xyz, plane_normal))
+    return electrode_toolpaths, path_names, float(gap_size_mm)
 
 
 def create_matlab_data_structure(
@@ -165,8 +167,11 @@ def create_matlab_data_structure(
         interconnect_toolpaths.append(xyzn_from_path(ctx, path_3d))
         path_names.append(electrode)
 
-    electrode_toolpaths, electrode_names = create_electrode_circles(
-        final_paths_data, ctx, verbose=verbose
+    electrode_toolpaths, electrode_names, _gap = create_electrode_toolpaths(
+        interconnect_toolpaths,
+        path_names,
+        ctx,
+        verbose=verbose,
     )
     
     # Verify same number of interconnects and electrodes
@@ -363,28 +368,3 @@ def export_to_matlab_format(
         print("   - LandmarkNames.mat")
 
     return output_folder
-
-if __name__ == "__main__":
-    # Configuration
-    INPUT_FILE = "NEW_SMOOTH_FINAL_PATHS_S1_0602_run1_99-2.json"
-    print(f'CONVERTING COORDINATES FROM INPUT FILE: {INPUT_FILE}')
-    OUTPUT_FOLDER = "subject_optimized"  # Folder name for MATLAB
-    
-    # Check if input file exists
-    if not os.path.exists(INPUT_FILE):
-        print(f" Input file not found: {INPUT_FILE}")
-        print(" Available files:")
-        for f in os.listdir('.'):
-            if f.startswith('NEW_SMOOTH_FINAL_PATHS') and f.endswith('.json'):
-                print(f"   - {f}")
-        exit(1)
-    
-    # Export to MATLAB format
-    output_folder = export_to_matlab_format(INPUT_FILE, OUTPUT_FOLDER)
-    
-    print("\n Next steps:")
-    print(f"   1. Copy the '{output_folder}' folder to your MATLAB working directory")
-    print("   2. Open gcodeConverter_final14.m")
-    print(f"   3. Change line: subject='{output_folder}';")
-    print("   4. Run the MATLAB script to generate final GCode")
-

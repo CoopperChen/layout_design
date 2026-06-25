@@ -11,7 +11,9 @@ def find_angle(comp_v: np.ndarray, proj_v: np.ndarray) -> float:
     denom = np.linalg.norm(comp_v) * np.linalg.norm(proj_v)
     if denom == 0:
         return float("nan")
-    return float(np.rad2deg(np.arccos(np.dot(proj_v, comp_v) / denom)))
+    cos_angle = float(np.dot(proj_v, comp_v) / denom)
+    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
+    return float(np.rad2deg(np.arccos(cos_angle)))
 
 
 def find_caxis_angle(norm_v: np.ndarray, i: int) -> float:

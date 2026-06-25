@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.postprocess.mesh_normals import head_center_from_points, orient_normals_outward
+
 from ..kinematics.axis_angles import compute_axis_angles
 from ..kinematics.feed_rate import compute_feed_rates
 from ..kinematics.flip_correction import correct_flip
@@ -15,14 +17,24 @@ from ..models import MachineConfig, TraceChannel
 def process_trace(
     data: np.ndarray,
     machine: MachineConfig,
+    *,
+    coords_include_gap: bool = False,
 ) -> np.ndarray:
     """
     Process one Nx6 trace into gcode rows [X, Y, Z, B, C, F, marker].
 
-    marker column is 0 throughout; merge stage adds M10/M11.
+    Interconnect traces: bundle XYZ is scalp contact → full tool offset (d + gap).
+    Electrode traces: bundle XYZ already includes gap above surface → offset d only.
     """
     g = data[:, :3].copy()
     en = data[:, 3:6].copy()
+    head_center = head_center_from_points(g)
+
+    if coords_include_gap:
+        pass  # bundle normals already outward; do not re-flip at gap-offset points
+    else:
+        en = orient_normals_outward(g, en, head_center)
+
     for i in range(en.shape[0]):
         n = np.linalg.norm(en[i])
         if n > 0:
@@ -31,7 +43,8 @@ def process_trace(
     g = apply_machine_zero_offset(g, machine)
     b_angles, c_angles = compute_axis_angles(en)
     b_angles, c_angles = correct_flip(b_angles, c_angles)
-    g = apply_tool_offset(g, en, c_angles, machine)
+    offset_gap = 0.0 if coords_include_gap else None
+    g = apply_tool_offset(g, en, c_angles, machine, gap_mm=offset_gap)
 
     b_angles = np.round(b_angles, 2)
     c_angles = np.round(c_angles, 2)
@@ -55,6 +68,7 @@ def process_all_traces(
     """
     gcode_list: list[np.ndarray] = []
     names = [ch.name for ch in channels]
+    coords_include_gap = choose_trace == 2
 
     for m, ch in enumerate(channels):
         if choose_trace == 1:
@@ -71,11 +85,19 @@ def process_all_traces(
                 data = ch.electrode
             elif m + 1 == choose_print or names[m] == str(choose_print):
                 data = ch.electrode
-                gcode_list.append(process_trace(data, machine))
+                gcode_list.append(
+                    process_trace(data, machine, coords_include_gap=True)
+                )
                 break
             else:
                 continue
 
-        gcode_list.append(process_trace(data, machine))
+        gcode_list.append(
+            process_trace(
+                data,
+                machine,
+                coords_include_gap=coords_include_gap,
+            )
+        )
 
     return gcode_list

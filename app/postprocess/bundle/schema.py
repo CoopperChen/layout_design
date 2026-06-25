@@ -12,5 +12,13 @@ CALIBRATION_LANDMARK_NAMES = (
 )
 ANATOMICAL_KEYS = ("nasion", "lpa", "rpa", "inion")
 
-ELECTRODE_DIAMETER_MM = 13.8
-ELECTRODE_CIRCLE_RESOLUTION = 20
+ELECTRODE_AREA_CM2 = 1.5
+ELECTRODE_NLINES = 10
+
+
+def electrode_diameter_mm(area_cm2: float = ELECTRODE_AREA_CM2) -> float:
+    """AdjPoints.m: diameter = 2*sqrt(areaelectrode/pi)*10 mm."""
+    return float(2.0 * (area_cm2 / 3.141592653589793) ** 0.5 * 10.0)
+
+
+ELECTRODE_DIAMETER_MM = electrode_diameter_mm()

@@ -101,7 +101,7 @@ CLI: `python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.
 
 ### `data/output/gcode/`
 
-5-axis G-code from `python -m app convert-gcode`. Print session YAML in `config/postprocessor/subjects/`.
+5-axis G-code from `python -m app convert-gcode` (controller machine frame: X,Y,Z = C pivot). Print session YAML in `config/postprocessor/subjects/`. Verify with `simulate-gcode` (same bundle + pm + rot0).
 
 ### `data/output/matlab/subject_{id}/` — **legacy**
 
