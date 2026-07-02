@@ -5,14 +5,16 @@ Unified pipeline CLI.
   python -m app paths --subject 2
   python -m app preprocess --subject 1 --step clear-islands
   python -m app build-assignments --reference 1 --id s1_assignments
-  python -m app synthesize --assignments s1_assignments --target 2
-  # --preset is alias for --assignments (terminal map only; paths are generated)
+  python -m app synthesize --target 2
   python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
   python -m app smooth --applied data/output/layouts/synth_s2.json
   python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
   python -m app init-print-config --subject {id}
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
+  python -m app run --target 2
+  python -m app run --target 2 --ply data/raw/2.ply --from synthesize
+  python -m app run --target 2 --polish --to simulate
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ import sys
 from pathlib import Path
 
 from app import paths
+from app.config_loader import default_assignments, resolve_assignments
 from app.preprocess import run as preprocess_run
 
 
@@ -50,6 +53,7 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print()
     print("B — Synthesize")
     print("  layout out:    ", paths.synth_layout(sid))
+    print("  assignments:   ", paths.preset_path(default_assignments()))
     print()
     print("D — Postprocess")
     print("  smooth:        ", paths.smooth_json(sid))
@@ -78,7 +82,7 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
 
 
 def _assignments_arg(args: argparse.Namespace) -> str:
-    return getattr(args, "assignments", None) or args.preset
+    return resolve_assignments(getattr(args, "assignments", None))
 
 
 def cmd_synthesize(args: argparse.Namespace) -> int:
@@ -340,14 +344,6 @@ def build_parser() -> argparse.ArgumentParser:
         "synthesize",
         help="Stage B: generate layout on target (paths + slots; not preset path replay)",
     )
-    sy.add_argument(
-        "--assignments",
-        "--preset",
-        dest="assignments",
-        required=True,
-        metavar="NAME",
-        help="Terminal assignment map in data/presets/ (LEFT/RIGHT per electrode only)",
-    )
     sy.add_argument("--target", type=int, required=True)
     sy.add_argument("--out")
     sy.add_argument("--preserve-entry-order", action="store_true")
@@ -540,8 +536,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     em.set_defaults(func=cmd_export_matlab)
 
+    from app.pipeline.run import add_run_parser
     from app.simulator.cli import add_simulate_gcode_parser
 
+    add_run_parser(sub)
     add_simulate_gcode_parser(sub)
 
     return p

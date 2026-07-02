@@ -15,23 +15,98 @@ Console entry point (same interface): `layout <command> …`
 | Stage | Commands |
 |-------|----------|
 | Setup | `init-data`, `paths` |
+| **Full pipeline** | **`run`** (PLY → preprocess → synthesize → … → gcode/simulate) |
 | A — Preprocess | `preprocess` |
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
 | C — Polish (optional) | `polish` |
 | D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
 
-Typical end-to-end:
+Typical end-to-end (recommended):
 
 ```bash
 python -m app init-data
+python -m app build-assignments --reference 1 --id s1_assignments   # once
+# Place data/raw/2.ply, then:
+python -m app run --target 2
+```
+
+Step-by-step (debugging / partial reruns):
+
+```bash
 python -m app preprocess --subject 2 --step fiducials
-python -m app synthesize --assignments subject1_best_v4 --target 2
+python -m app synthesize --target 2
 python -m app smooth --applied data/output/layouts/synth_s2.json
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
 python -m app init-print-config --subject 2
 python -m app convert-gcode --bundle data/output/bundles/subject_2
 python -m app simulate-gcode --gcode data/output/gcode/subject_2_post/allinterconnects.txt --bundle data/output/bundles/subject_2
 ```
+
+**Assignment preset:** default `s1_assignments` in `config/defaults.yaml` → `synthesize.assignments`. Not a CLI flag on `synthesize` or `run`.
+
+---
+
+## Full pipeline — `run`
+
+Run preprocess through G-code (and optionally simulation) for one subject. Input is always a **PLY point cloud**; default path `data/raw/{target}.ply`.
+
+```bash
+python -m app run --target 2
+python -m app run --target 2 --from synthesize          # skip preprocess
+python -m app run --target 2 --polish --to simulate
+```
+
+### Stages (in order)
+
+| Stage | Interactive? | Output / effect |
+|-------|--------------|-----------------|
+| `reconstruct` | align UI optional | `data/raw/{id}.stl`, `{id}.obj` |
+| `clear-islands` | no | `data/cleaned_scans/{id}.stl` |
+| `fiducials` | **yes** | `data/json/fiducials_{id}.json` |
+| `cz` | no | `data/json/Cz_{id}.json` |
+| `electrodes` | **yes** | `data/json/electrode_positions_{id}.json` |
+| `synthesize` | no | `data/output/layouts/synth_s{id}.json` |
+| `polish` | no | `*_repaired.json` (only with `--polish`) |
+| `smooth` | no | `data/output/smooth/smooth_s{id}_final.json` |
+| `bundle` | no | `data/output/bundles/subject_{id}/` |
+| `print-config` | no | pm YAML (skipped if exists) |
+| `gcode` | no | `data/output/gcode/subject_{id}_post/` |
+| `simulate` | viewer | PyVista 3D viewer |
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--target` | — | Subject id (required) |
+| `--ply` | `data/raw/{target}.ply` | Input point cloud |
+| `--from` | `reconstruct` | First stage |
+| `--to` | `gcode` | Last stage (`simulate` opens viewer) |
+| `--polish` | off | Include polish between synthesize and smooth |
+| `--polish-mode` | `gentle` | `gentle`, `repair`, `refine`, `ga-short` |
+| `--no-align-head` | off | Skip head rotation UI in reconstruct |
+| `--depth` | config (`12`) | Poisson octree depth |
+| `--preserve-entry-order` | off | Synthesize: keep reference entry order |
+| `--inherit-preset-terminals` | off | Synthesize: legacy rigid hub map |
+| `--fix-terminals` | off | Synthesize: exact hub clicks |
+| `--uv-resolution` | `100` | Synthesize UV grid |
+| `--smooth-tag` | `final` | Smooth output tag |
+| `--smoothing-strength` | config | B-spline smoothing factor |
+| `--allow-terminal-landmarks` | off | Bundle export without calibration landmarks |
+| `--skip-validation` | off | Skip export validation |
+| `--quiet` | off | Quiet bundle export |
+| `--force-print-config` | off | Overwrite existing pm YAML |
+| `--config` / `--pm-file` | auto | pm YAML for G-code |
+| `--machine` | `machine_default.yaml` | Machine config |
+| `--gcode-output` | `data/output/gcode/` | G-code base dir |
+| `--trace` | `both` | `interconnect`, `electrode`, or `both` |
+| `--electrode` | `all` | Channel filter for G-code |
+| `--rot0y`, `--rot0z` | `0` | Bed rotation (deg) |
+| `--legacy-subject` | — | Legacy `.mat` folder |
+| `--layers` | `mesh,landmarks,origin,tip,arm` | Simulator layers |
+| `--animate` | off | Simulator: step with `p` |
+| `--verbose` | off | Simulator FK diagnostics |
+
+Stops on first failure. Resume with `--from <stage>`.
 
 ---
 
@@ -61,7 +136,7 @@ python -m app paths --subject 2
 |----------|----------|-------------|
 | `--subject` | yes | Subject id |
 
-**Shows:** preprocess inputs, layout output, smooth JSON, bundle dir, gcode dir, pm config, legacy matlab dir.
+**Shows:** preprocess inputs, default assignment preset, layout output, smooth JSON, bundle dir, gcode dir, pm config, legacy matlab dir.
 
 ---
 
@@ -119,15 +194,14 @@ python -m app build-assignments --reference 1 --id s1_assignments
 
 ### `synthesize`
 
-Generate per-subject wire layout on a target head from an assignment map.
+Generate per-subject wire layout on a target head. Uses the assignment preset from **`config/defaults.yaml`** (`synthesize.assignments`, default `s1_assignments`).
 
 ```bash
-python -m app synthesize --assignments subject1_best_v4 --target 2 --visualize
+python -m app synthesize --target 2 --visualize
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--assignments` / `--preset` | — | Preset name in `data/presets/` (required) |
 | `--target` | — | Target subject id (required) |
 | `--out` | auto | Output layout JSON path |
 | `--preserve-entry-order` | off | Keep reference strip slot order from full v4 preset |
@@ -140,6 +214,8 @@ python -m app synthesize --assignments subject1_best_v4 --target 2 --visualize
 | `--skip-collisions` | off | Skip collision markers in visualize |
 
 **Output:** `data/output/layouts/synth_s{id}.json`
+
+To change the preset, edit `synthesize.assignments` in `config/defaults.yaml` or run `build-assignments` to create `data/presets/{name}.json`.
 
 ---
 
@@ -388,6 +464,7 @@ Prefer `export-bundle` → `convert-gcode` for the Python path.
 
 ```bash
 python -m app --help
+python -m app run --help
 python -m app synthesize --help
 python -m app convert-gcode --help
 python -m app simulate-gcode --help

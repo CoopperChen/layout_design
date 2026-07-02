@@ -2,8 +2,13 @@
 
 preprocess:
   terminal_assignment_strategy: balanced  # balanced | shortest
+  poisson_depth: 12
+  align_head: true
+  electrode_spacing: 4.5
+  full_circle: false
 
 synthesize:
+  assignments: s1_assignments  # data/presets/{name}.json — terminal LEFT/RIGHT map
   use_target_terminals: true
   optimize_terminals: true
   preserve_entry_order: false

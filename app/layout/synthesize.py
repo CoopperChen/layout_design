@@ -27,8 +27,7 @@ def run_synthesize(
             f"Assignment/preset not found: {preset_path}\n"
             f"  Put {preset_path.name} in data/presets/, or run:\n"
             f"    python -m app build-assignments --reference 1 --id {preset_path.stem}\n"
-            f"  Or use the bundled preset:\n"
-            f"    python -m app synthesize --assignments subject1_best_v4 --target {target}"
+            f"  Default preset is set in config/defaults.yaml (synthesize.assignments)."
         )
 
     sid = int(target)
