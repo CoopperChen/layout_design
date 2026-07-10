@@ -30,11 +30,29 @@ def _first_missing_index(picked: dict) -> int:
 def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
     texture = getattr(mesh, "texture", None)
     if texture is not None:
-        plotter.add_mesh(mesh, texture=texture, show_edges=False, name="head")
+        plotter.add_mesh(
+            mesh,
+            texture=texture,
+            show_edges=False,
+            smooth_shading=True,
+            name="head",
+        )
     elif "RGB" in mesh.array_names:
-        plotter.add_mesh(mesh, scalars="RGB", rgb=True, show_edges=False, name="head")
+        plotter.add_mesh(
+            mesh,
+            scalars="RGB",
+            rgb=True,
+            show_edges=False,
+            smooth_shading=True,
+            lighting=False,
+            name="head",
+        )
     else:
-        plotter.add_mesh(mesh, color="lightgray", opacity=0.55, name="head")
+        print(
+            "Warning: head mesh has no vertex colors — showing gray surface. "
+            "Re-run reconstruct or ensure data/raw/{id}.ply exists beside the OBJ."
+        )
+        plotter.add_mesh(mesh, color="lightgray", opacity=0.85, name="head")
 
 
 def _sphere_radius(mesh: pv.DataSet) -> float:

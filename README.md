@@ -51,7 +51,7 @@ Optional stages (not in default run):
 
 | Stage | How to include |
 |-------|----------------|
-| `polish` | Add `--polish` (runs between synthesize and smooth) |
+| `polish` | Default in `run` (skip with `--no-polish`) |
 | `simulate` | Add `--to simulate` (opens PyVista G-code viewer at the end) |
 
 The pipeline **stops on first failure** and prints which stage failed. Resume with `--from <stage>`.
@@ -72,7 +72,8 @@ python -m app run --target 2 --from synthesize
 python -m app run --target 2 --from bundle
 
 # Polish + open simulator at the end
-python -m app run --target 2 --polish --to simulate
+python -m app run --target 2 --to simulate
+python -m app run --target 2 --no-polish --from synthesize
 
 # Preprocess only (stop before layout generation)
 python -m app run --target 2 --to electrodes
@@ -93,7 +94,7 @@ python -m app run --target 2 --to electrodes
 |--------|---------|-------------|
 | `--from` | `reconstruct` | First stage to run (see stage table above) |
 | `--to` | `gcode` | Last stage to run; use `simulate` for 3D viewer |
-| `--polish` | off | Insert `polish` between synthesize and smooth |
+| `--no-polish` | off | Skip polish between synthesize and smooth |
 | `--polish-mode` | `gentle` | `gentle`, `repair`, `refine`, or `ga-short` |
 
 Valid `--from` / `--to` values (in order):
@@ -114,7 +115,7 @@ Valid `--from` / `--to` values (in order):
 | *(preset)* | `s1_assignments` | Terminal LEFT/RIGHT map — **not a CLI flag**; set in `config/defaults.yaml` → `synthesize.assignments` |
 | `--preserve-entry-order` | off | Keep reference strip slot order (full v4 presets only) |
 | `--inherit-preset-terminals` | off | **Legacy:** rigid-map reference hub positions onto target |
-| `--fix-terminals` | off | Use exact hub clicks (no ±36° hub angle search) |
+| `--rotate` | off | ±36° hub angle search around fiducial clicks (may reduce crossings) |
 | `--uv-resolution` | `100` | UV grid resolution for 3D path lift |
 
 #### Smooth & export
@@ -169,7 +170,7 @@ preprocess:
 synthesize:
   assignments: s1_assignments              # data/presets/{name}.json — LEFT/RIGHT map
   use_target_terminals: true
-  optimize_terminals: true
+  optimize_terminals: false
   preserve_entry_order: false
   uv_resolution: 100
 
@@ -204,7 +205,7 @@ Requires `data/json/initial_terminal_assignments_1.json` (or run preprocess assi
 |-------|---------|
 | **A. Preprocess** | PLY → mesh, fiducials, terminals, 10–20 electrodes |
 | **B. Generate layout** | Assignment map + target geometry → `synth_s{id}.json` |
-| **C. Polish** (optional) | Separation polish only — not layout discovery |
+| **C. Polish** | Fixed-endpoint separation (default in `run`; `--no-polish` to skip) |
 | **D. Postprocess** | Smooth → bundle → G-code → **simulate** (3D viewer) |
 
 | Stage | Directory | Output |
@@ -268,13 +269,13 @@ python -m app visualize --applied data/output/layouts/synth_s2.json
 | `--out` | auto | Output layout JSON |
 | `--preserve-entry-order` | off | Keep reference entry order |
 | `--inherit-preset-terminals` | off | Legacy rigid hub map |
-| `--fix-terminals` | off | Exact hub clicks, no angle search |
+| `--rotate` | off | ±36° hub angle search around fiducial clicks |
 | `--uv-resolution` | `100` | UV grid resolution |
 | `--visualize` | off | Save 2D + open 3D after synth |
 | `--show` / `--no-show` | — | 2D window / skip 3D with `--visualize` |
 | `--skip-collisions` | off | Faster visualize |
 
-### Stage C — `polish` (optional)
+### Stage C — `polish` (default in `run`)
 
 ```powershell
 python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
@@ -337,7 +338,7 @@ layout_design/
 │   ├── preprocess/         # Stage A
 │   ├── layout/             # Stage B
 │   ├── pipeline/           # `run` orchestration
-│   ├── polish/             # Stage C (optional)
+│   ├── polish/             # Stage C (default in run)
 │   ├── postprocess/        # Stage D: smooth, bundle, convert-gcode
 │   └── simulator/          # G-code 3D viewer
 ├── config/                 # defaults.yaml + postprocessor machine/pm configs

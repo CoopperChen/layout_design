@@ -14,7 +14,8 @@ Unified pipeline CLI.
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
   python -m app run --target 2
   python -m app run --target 2 --ply data/raw/2.ply --from synthesize
-  python -m app run --target 2 --polish --to simulate
+  python -m app run --target 2 --to simulate
+  python -m app run --target 2 --no-polish --from synthesize
 """
 from __future__ import annotations
 
@@ -95,8 +96,9 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
             output=args.out,
             preserve_entry_order=args.preserve_entry_order,
             use_target_terminals=not args.inherit_preset_terminals,
-            optimize_terminals=not args.fix_terminals,
+            optimize_terminals=args.rotate,
             uv_resolution=args.uv_resolution,
+            terminal_stop_mm=args.terminal_stop_mm,
         )
         if args.visualize:
             out = args.out or paths.synth_layout(args.target)
@@ -168,6 +170,7 @@ def cmd_polish(args: argparse.Namespace) -> int:
             clear_logs=not args.no_clear_logs,
             no_mutate_gen0=args.no_mutate_gen0,
             electrodes_only=args.electrodes_only,
+            profile_phase2=args.profile,
         )
         return 0
     except (FileNotFoundError, ValueError) as e:
@@ -353,9 +356,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Map TERMINAL_LEFT/RIGHT from preset via rigid landmarks (legacy S1→S2)",
     )
     sy.add_argument(
-        "--fix-terminals",
+        "--rotate",
         action="store_true",
-        help="Use target fiducial hub clicks exactly (no ±36° hub angle search)",
+        help="Search ±36° hub angle around fiducial clicks for fewer crossings",
+    )
+    sy.add_argument(
+        "--terminal-stop-mm",
+        type=float,
+        default=None,
+        help="Shorten each wire from strip entry (default: synthesize.terminal_stop_mm in config)",
     )
     sy.add_argument("--uv-resolution", type=int, default=100)
     sy.add_argument(
@@ -416,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     viz.set_defaults(func=cmd_visualize)
 
-    po = sub.add_parser("polish", help="Stage C (optional)")
+    po = sub.add_parser("polish", help="Stage C: fixed-endpoint separation polish")
     po.add_argument("--applied", required=True)
     po.add_argument(
         "--mode",
@@ -434,6 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--visualize",
         action="store_true",
         help="After polish, save 2D + 3D PNGs for the output layout",
+    )
+    po.add_argument(
+        "--profile",
+        action="store_true",
+        help="Print per-round phase-2 timing breakdown (find pairs, greedy, accept, …)",
     )
     po.set_defaults(func=cmd_polish)
 

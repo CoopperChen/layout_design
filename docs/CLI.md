@@ -53,7 +53,8 @@ Run preprocess through G-code (and optionally simulation) for one subject. Input
 ```bash
 python -m app run --target 2
 python -m app run --target 2 --from synthesize          # skip preprocess
-python -m app run --target 2 --polish --to simulate
+python -m app run --target 2 --to simulate
+python -m app run --target 2 --no-polish --from synthesize
 ```
 
 ### Stages (in order)
@@ -66,7 +67,7 @@ python -m app run --target 2 --polish --to simulate
 | `cz` | no | `data/json/Cz_{id}.json` |
 | `electrodes` | **yes** | `data/json/electrode_positions_{id}.json` |
 | `synthesize` | no | `data/output/layouts/synth_s{id}.json` |
-| `polish` | no | `*_repaired.json` (only with `--polish`) |
+| `polish` | yes | `*_repaired.json` (skip with `--no-polish`) |
 | `smooth` | no | `data/output/smooth/smooth_s{id}_final.json` |
 | `bundle` | no | `data/output/bundles/subject_{id}/` |
 | `print-config` | no | pm YAML (skipped if exists) |
@@ -81,13 +82,13 @@ python -m app run --target 2 --polish --to simulate
 | `--ply` | `data/raw/{target}.ply` | Input point cloud |
 | `--from` | `reconstruct` | First stage |
 | `--to` | `gcode` | Last stage (`simulate` opens viewer) |
-| `--polish` | off | Include polish between synthesize and smooth |
+| `--no-polish` | off | Skip polish between synthesize and smooth |
 | `--polish-mode` | `gentle` | `gentle`, `repair`, `refine`, `ga-short` |
 | `--no-align-head` | off | Skip head rotation UI in reconstruct |
 | `--depth` | config (`12`) | Poisson octree depth |
 | `--preserve-entry-order` | off | Synthesize: keep reference entry order |
 | `--inherit-preset-terminals` | off | Synthesize: legacy rigid hub map |
-| `--fix-terminals` | off | Synthesize: exact hub clicks |
+| `--rotate` | off | Synthesize: ±36° hub angle search around fiducial clicks |
 | `--uv-resolution` | `100` | Synthesize UV grid |
 | `--smooth-tag` | `final` | Smooth output tag |
 | `--smoothing-strength` | config | B-spline smoothing factor |
@@ -206,7 +207,7 @@ python -m app synthesize --target 2 --visualize
 | `--out` | auto | Output layout JSON path |
 | `--preserve-entry-order` | off | Keep reference strip slot order from full v4 preset |
 | `--inherit-preset-terminals` | off | Legacy: rigid-map reference hub positions |
-| `--fix-terminals` | off | Use exact hub clicks (no ±36° hub angle search) |
+| `--rotate` | off | ±36° hub angle search around fiducial clicks (may reduce crossings) |
 | `--uv-resolution` | `100` | UV grid resolution for 3D lift |
 | `--visualize` | off | After synth: 2D PNG + interactive 3D |
 | `--show` | off | Also open 2D matplotlib window |

@@ -646,6 +646,12 @@ def _child_from_applied_data(data: dict) -> dict:
         }
         if p.get("entry_point_2d") is not None:
             entry["entry_point_2d"] = p["entry_point_2d"]
+        if p.get("entry_position_3d") is not None:
+            entry["entry_position_3d"] = p["entry_position_3d"]
+        if p.get("path_end_2d") is not None:
+            entry["path_end_2d"] = p["path_end_2d"]
+        if p.get("path_end_3d") is not None:
+            entry["path_end_3d"] = p["path_end_3d"]
         if p.get("slot_index") is not None:
             entry["slot_index"] = p["slot_index"]
         child_paths.append(entry)
@@ -676,9 +682,12 @@ def _package_applied_result(
     for conn in child["paths"]:
         path_2d = np.asarray(conn["modified_path_2d"], dtype=float)
         e3d = electrodes[conn["electrode"]]
-        t3d = fiducials[conn["terminal"]]
+        if conn.get("path_end_3d") is not None:
+            end3d = np.asarray(conn["path_end_3d"], dtype=float)
+        else:
+            end3d = fiducials[conn["terminal"]]
         path_3d = recon.reconstruct_with_uv_grid(
-            e3d, t3d, path_2d, uv_grid_ctx, mesh
+            e3d, end3d, path_2d, uv_grid_ctx, mesh
         )
         out = {
             "electrode": conn["electrode"],
@@ -688,6 +697,12 @@ def _package_applied_result(
         }
         if conn.get("entry_point_2d") is not None:
             out["entry_point_2d"] = conn["entry_point_2d"]
+        if conn.get("entry_position_3d") is not None:
+            out["entry_position_3d"] = conn["entry_position_3d"]
+        if conn.get("path_end_2d") is not None:
+            out["path_end_2d"] = conn["path_end_2d"]
+        if conn.get("path_end_3d") is not None:
+            out["path_end_3d"] = conn["path_end_3d"]
         if conn.get("slot_index") is not None:
             out["slot_index"] = conn["slot_index"]
         output_paths.append(out)
@@ -730,12 +745,14 @@ def repair_applied_preset(
     *,
     phase2_max_rounds: int = 12,
     aggressive_pass: bool = False,
+    focus: str = "separation",
+    skip_phase1_when_electrode_free: bool = True,
+    fixed_endpoints: bool = True,
+    profile_phase2: bool = False,
 ) -> dict[str, Any]:
     """
-    Run the same 2D collision repair used inside the GA on an applied-preset layout.
-
-    By default: phase-1-style electrode clearance, then phase-2 gentle trace resolution.
-    Skips phase 2 if --electrodes-only.
+  Polish layout: fixed electrode + truncated wire ends; improve trace separation
+  without increasing crossing count. Skips phase-1 electrode rerouting by default.
     """
     with open(applied_path, "r") as f:
         data = json.load(f)
@@ -755,37 +772,69 @@ def repair_applied_preset(
 
     child = _child_from_applied_data(data)
     before = data.get("collision_metrics", {})
+    focus_separation = focus == "separation"
+    baseline_crossings = int(before.get("crossing_count") or 0)
     print(
-        f"Before repair: collision_score={before.get('collision_score')}, "
+        f"Before polish: collision_score={before.get('collision_score')}, "
         f"crossings={before.get('crossing_count')}, "
-        f"electrode_violations={before.get('electrode_violations')}"
+        f"electrode_violations={before.get('electrode_violations')}, "
+        f"min_trace_sep={before.get('min_trace_separation')}"
     )
-
-    child = new2d.apply_smart_collision_resolution(
-        child,
-        target_id,
-        electrodes,
-        fiducials,
-        original_paths,
-        greedy_electrodes_only=True,
-    )
-
-    if not electrodes_only:
+    if focus_separation:
         print(
-            f"Phase 2 gentle trace resolution (up to {phase2_max_rounds} pair rounds)..."
+            f"Polish: fixed endpoints, separation-only "
+            f"(phase2 rounds={phase2_max_rounds}, max_crossings={baseline_crossings})"
         )
+
+    skip_phase1 = (
+        fixed_endpoints
+        or (
+            focus_separation
+            and skip_phase1_when_electrode_free
+            and int(before.get("electrode_violations") or 0) == 0
+        )
+    )
+    if skip_phase1:
+        print("Phase 1 skipped (fixed endpoints / electrode-free layout)")
+    else:
         child = new2d.apply_smart_collision_resolution(
             child,
             target_id,
             electrodes,
             fiducials,
             original_paths,
-            greedy_electrodes_only=False,
-            phase2_max_pair_rounds=phase2_max_rounds,
-            force_trace_resolution=True,
+            greedy_electrodes_only=True,
         )
+
+    if not electrodes_only:
+        print(
+            f"Phase 2 separation polish (up to {phase2_max_rounds} pair rounds)..."
+        )
+        if profile_phase2:
+            from app.polish.phase2_profile import start_phase2_profile, stop_phase2_profile
+
+            start_phase2_profile()
+        try:
+            child = new2d.apply_smart_collision_resolution(
+                child,
+                target_id,
+                electrodes,
+                fiducials,
+                original_paths,
+                greedy_electrodes_only=False,
+                phase2_max_pair_rounds=phase2_max_rounds,
+                force_trace_resolution=True,
+                focus_separation=focus_separation,
+                fixed_endpoints=fixed_endpoints,
+                max_crossing_count=baseline_crossings,
+            )
+        finally:
+            if profile_phase2:
+                from app.polish.phase2_profile import stop_phase2_profile
+
+                stop_phase2_profile()
         if aggressive_pass:
-            print("Phase 2 aggressive greedy pass (crossings / separation)...")
+            print("Phase 2 aggressive greedy pass (legacy; may add crossings)...")
             child = new2d.apply_smart_collision_resolution(
                 child,
                 target_id,
@@ -796,6 +845,7 @@ def repair_applied_preset(
                 use_greedy_aggressive=True,
                 use_gentle_resolution=False,
                 force_trace_resolution=True,
+                focus_separation=focus_separation,
             )
 
     metadata_extra = {
@@ -804,6 +854,10 @@ def repair_applied_preset(
         if k not in ("timestamp", "grid_resolution", "grid_bounds")
     }
     metadata_extra["repaired_from"] = applied_path.replace("\\", "/")
+    if focus_separation:
+        metadata_extra["polish_focus"] = "separation"
+    if fixed_endpoints:
+        metadata_extra["polish_fixed_endpoints"] = True
     result = _package_applied_result(
         target_id, child, metadata_extra, uv_resolution=uv_resolution, fiducials=fiducials
     )
@@ -826,6 +880,7 @@ def repair_applied_preset(
         f"After repair: collision_score={cm.get('collision_score')}, "
         f"crossings={cm.get('crossing_count')}, "
         f"electrode_violations={cm.get('electrode_violations')}, "
+        f"min_trace_sep={cm.get('min_trace_separation')}, "
         f"layout_collision_free={cm.get('layout_collision_free')}"
     )
     print(f"Wrote {output_path}")
@@ -1414,9 +1469,9 @@ def _build_cli() -> argparse.ArgumentParser:
         help="Synthesize: hubs from target fiducials_*.json; preset assignments only",
     )
     av4.add_argument(
-        "--fix-terminals",
+        "--rotate",
         action="store_true",
-        help="With --use-target-terminals: skip hub angle search (exact fiducial clicks)",
+        help="With --synthesize: ±36° hub angle search around fiducial clicks",
     )
 
     rf4 = sub.add_parser(
@@ -1496,7 +1551,7 @@ def main(argv: list[str] | None = None) -> None:
                 preserve_entry_order=args.preserve_entry_order,
                 use_tail_swap=args.tail_swap,
                 use_target_terminals=args.use_target_terminals,
-                optimize_terminals=not args.fix_terminals,
+                optimize_terminals=args.rotate,
             )
         else:
             v4.apply_layout_preset_v4(

@@ -9,6 +9,7 @@ from pathlib import Path
 from app import paths
 from app.config_loader import (
     default_assignments,
+    load_defaults,
     preprocess_defaults,
     resolve_assignments,
 )
@@ -80,6 +81,12 @@ def _align_head(args: argparse.Namespace) -> bool:
     if args.no_align_head:
         return False
     return bool(preprocess_defaults().get("align_head", True))
+
+
+def _polish_enabled(args: argparse.Namespace) -> bool:
+    if getattr(args, "no_polish", False):
+        return False
+    return bool(load_defaults().get("polish", {}).get("enabled", True))
 
 
 def _polished_layout(layout: Path) -> Path:
@@ -214,7 +221,7 @@ def _print_step(label: str, detail: str = "") -> None:
 
 def run_pipeline(args: argparse.Namespace) -> int:
     pp = PipelinePaths.for_target(args.target)
-    polish = bool(args.polish)
+    polish = _polish_enabled(args)
     stages = _active_stages(
         from_stage=args.from_stage,
         to_stage=args.to_stage,
@@ -329,7 +336,7 @@ def _run_synthesize(args: argparse.Namespace, pp: PipelinePaths) -> int:
             output=str(pp.layout),
             preserve_entry_order=args.preserve_entry_order,
             use_target_terminals=not args.inherit_preset_terminals,
-            optimize_terminals=not args.fix_terminals,
+            optimize_terminals=args.rotate,
             uv_resolution=args.uv_resolution,
         )
         return 0
@@ -350,6 +357,7 @@ def _run_polish(args: argparse.Namespace, pp: PipelinePaths) -> int:
             output=out,
             visualize=False,
             subject=pp.target,
+            profile_phase2=args.polish_profile,
         )
         return 0
     except (FileNotFoundError, ValueError) as exc:
@@ -520,18 +528,27 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
         help="Last stage (default: gcode; use simulate for 3D viewer)",
     )
     run.add_argument(
-        "--polish",
+        "--no-polish",
         action="store_true",
-        help="Include optional polish (gentle repair) between synthesize and smooth",
+        help="Skip polish between synthesize and smooth (default: polish runs)",
     )
     run.add_argument(
         "--polish-mode",
         default="gentle",
         choices=["gentle", "repair", "refine", "ga-short"],
     )
+    run.add_argument(
+        "--polish-profile",
+        action="store_true",
+        help="Print per-round phase-2 timing breakdown during polish",
+    )
     run.add_argument("--preserve-entry-order", action="store_true")
     run.add_argument("--inherit-preset-terminals", action="store_true")
-    run.add_argument("--fix-terminals", action="store_true")
+    run.add_argument(
+        "--rotate",
+        action="store_true",
+        help="Synthesize: ±36° hub angle search around fiducial clicks",
+    )
     run.add_argument("--uv-resolution", type=int, default=100)
     run.add_argument("--smooth-tag", default="final")
     run.add_argument("--smoothing-strength", type=float, default=None)

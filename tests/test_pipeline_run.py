@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 
+from app.config_loader import default_assignments
 from app.pipeline.run import (
     STAGES,
     PipelinePaths,
     _active_stages,
     _layout_input,
+    _polish_enabled,
     _polished_layout,
 )
 
 
-def test_active_stages_default_skips_polish():
+def test_active_stages_default_includes_polish():
+    stages = _active_stages(from_stage="synthesize", to_stage="gcode", polish=True)
+    assert stages == [
+        "synthesize",
+        "polish",
+        "smooth",
+        "bundle",
+        "print-config",
+        "gcode",
+    ]
+
+
+def test_active_stages_without_polish():
     stages = _active_stages(from_stage="synthesize", to_stage="gcode", polish=False)
     assert stages == [
         "synthesize",
@@ -25,7 +41,7 @@ def test_active_stages_default_skips_polish():
 
 
 def test_active_stages_full_from_ply():
-    stages = _active_stages(from_stage="reconstruct", to_stage="gcode", polish=False)
+    stages = _active_stages(from_stage="reconstruct", to_stage="gcode", polish=True)
     assert stages[:5] == [
         "reconstruct",
         "clear-islands",
@@ -34,7 +50,7 @@ def test_active_stages_full_from_ply():
         "electrodes",
     ]
     assert stages[-1] == "gcode"
-    assert "polish" not in stages
+    assert "polish" in stages
 
 
 def test_active_stages_with_polish():
@@ -52,9 +68,19 @@ def test_active_stages_rejects_inverted_range():
         _active_stages(from_stage="gcode", to_stage="synthesize", polish=False)
 
 
+def test_polish_enabled_default():
+    args = argparse.Namespace(no_polish=False)
+    assert _polish_enabled(args) is True
+
+
+def test_polish_enabled_no_polish_flag():
+    args = argparse.Namespace(no_polish=True)
+    assert _polish_enabled(args) is False
+
+
 def test_pipeline_paths_for_target():
     pp = PipelinePaths.for_target(2)
-    assert pp.assignments == "s1_assignments"
+    assert pp.assignments == default_assignments()
     assert pp.ply.name == "2.ply"
     assert pp.cleaned.name == "2.stl"
     assert pp.layout.name == "synth_s2.json"

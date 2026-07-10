@@ -43,8 +43,74 @@ def orient_normals_outward(
     return out / lengths
 
 
+def orient_normals_along_path(
+    points: np.ndarray,
+    normals: np.ndarray,
+    head_center: np.ndarray,
+    *,
+    radial_threshold: float = 0.15,
+) -> np.ndarray:
+    """
+    Outward normals with continuity along a wire path.
+
+    Crown points have small ``|n·radial|`` so per-point outward tests flip B between
+    branches. Inherit neighbors only when the result stays outward — never flip a
+    normal inward just to match the previous point.
+    """
+    out = orient_normals_outward(points, normals, head_center)
+    n = len(out)
+    if n <= 1:
+        return out
+
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim == 1:
+        pts = pts.reshape(1, 3)
+    center = np.asarray(head_center, dtype=float).reshape(3)
+    radial_unit = pts - center
+    radial_norm = np.linalg.norm(radial_unit, axis=1, keepdims=True)
+    radial_norm = np.maximum(radial_norm, 1e-12)
+    radial_unit = radial_unit / radial_norm
+
+    def _outward_flip(normal: np.ndarray, i: int) -> np.ndarray:
+        if float(np.dot(normal, radial_unit[i])) < 0.0:
+            return -normal
+        return normal
+
+    def _enforce_forward(normals: np.ndarray) -> None:
+        for i in range(1, len(normals)):
+            if float(np.dot(normals[i], normals[i - 1])) >= 0.0:
+                continue
+            flipped = -normals[i]
+            if float(np.dot(flipped, radial_unit[i])) >= float(
+                np.dot(normals[i], radial_unit[i])
+            ):
+                normals[i] = flipped
+
+    def _fix_ambiguous(normals: np.ndarray) -> None:
+        radial_dot = np.sum(normals * radial_unit, axis=1)
+        for i in range(len(normals)):
+            if abs(radial_dot[i]) >= radial_threshold:
+                normals[i] = _outward_flip(normals[i], i)
+                continue
+            if i > 0:
+                normals[i] = _outward_flip(normals[i - 1].copy(), i)
+            elif i + 1 < len(normals):
+                normals[i] = _outward_flip(normals[i + 1].copy(), i)
+            else:
+                normals[i] = _outward_flip(normals[i], i)
+
+    _enforce_forward(out)
+    _fix_ambiguous(out)
+    _enforce_forward(out)
+    for i in range(n):
+        out[i] = _outward_flip(out[i], i)
+
+    lengths = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.maximum(lengths, 1e-12)
+
+
 def orient_trace_xyzn(trace: np.ndarray, head_center: np.ndarray) -> np.ndarray:
-    """Orient columns 3:6 of an Nx6 trace to point outward from ``head_center``."""
+    """Orient columns 3:6 of an Nx6 trace outward from head center."""
     out = np.asarray(trace, dtype=float).copy()
     out[:, 3:6] = orient_normals_outward(out[:, :3], out[:, 3:6], head_center)
     return out

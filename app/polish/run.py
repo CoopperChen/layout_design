@@ -1,4 +1,4 @@
-"""Stage C — optional repair, refine-v4, short GA."""
+"""Stage C — fixed-endpoint separation polish (default in `app run`)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,6 +18,8 @@ def run_repair(
     output: str | Path | None = None,
     *,
     electrodes_only: bool = False,
+    polish_cfg: dict | None = None,
+    profile_phase2: bool | None = None,
 ) -> dict:
     setup_runtime()
     from PYTHON.tools.layoutPreset import repair_applied_preset
@@ -28,10 +30,25 @@ def run_repair(
         if not stem.endswith("_repaired"):
             stem = f"{stem}_repaired"
         output = applied_path.parent / f"{stem}.json"
+
+    cfg = polish_cfg or load_defaults().get("polish", {})
+    do_profile = (
+        bool(profile_phase2)
+        if profile_phase2 is not None
+        else bool(cfg.get("profile", False))
+    )
     return repair_applied_preset(
         str(applied_path),
         output_path=str(output),
         electrodes_only=electrodes_only,
+        phase2_max_rounds=int(cfg.get("phase2_max_rounds", 20)),
+        aggressive_pass=bool(cfg.get("aggressive_pass", False)),
+        focus=str(cfg.get("focus", "separation")),
+        skip_phase1_when_electrode_free=bool(
+            cfg.get("skip_phase1_when_electrode_free", True)
+        ),
+        fixed_endpoints=bool(cfg.get("fixed_endpoints", True)),
+        profile_phase2=do_profile,
     )
 
 
@@ -80,7 +97,12 @@ def run_polish_mode(
 ) -> dict | None:
     result: dict | None = None
     if mode == "repair" or mode == "gentle":
-        result = run_repair(applied, output, electrodes_only=kwargs.get("electrodes_only", False))
+        result = run_repair(
+            applied,
+            output,
+            electrodes_only=kwargs.get("electrodes_only", False),
+            profile_phase2=kwargs.get("profile_phase2"),
+        )
     elif mode == "refine":
         result = run_refine(applied, output)
     elif mode in ("ga", "ga-short"):

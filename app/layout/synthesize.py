@@ -15,8 +15,9 @@ def run_synthesize(
     *,
     preserve_entry_order: bool = False,
     use_target_terminals: bool = True,
-    optimize_terminals: bool = True,
+    optimize_terminals: bool = False,
     uv_resolution: int = 100,  # reserved for future UV packaging
+    terminal_stop_mm: float | None = None,
 ) -> dict:
     setup_runtime()
     from PYTHON.tools.layoutPresetV4 import apply_layout_preset_v4_synthesize
@@ -54,6 +55,7 @@ def run_synthesize(
         preserve_entry_order=preserve_entry_order,
         use_target_terminals=use_target_terminals,
         optimize_terminals=optimize_terminals,
+        terminal_stop_mm=terminal_stop_mm,
     )
     cm = result.get("collision_metrics", {})
     print(

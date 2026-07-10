@@ -59,18 +59,6 @@ class SimulationScene:
     )
 
 
-def _jet_states(markers: np.ndarray) -> np.ndarray:
-    printing = False
-    states = np.zeros(len(markers), dtype=bool)
-    for i, m in enumerate(markers):
-        if m == 10:
-            printing = True
-        states[i] = printing
-        if m == 11:
-            printing = False
-    return states
-
-
 def _dedupe_consecutive_points(points: np.ndarray, *, min_dist: float = 1e-6) -> np.ndarray:
     """Drop consecutive duplicates so VTK line/tube filters stay valid."""
     pts = np.asarray(points, dtype=float)
@@ -81,6 +69,31 @@ def _dedupe_consecutive_points(points: np.ndarray, *, min_dist: float = 1e-6) ->
         if np.linalg.norm(p - out[-1]) >= min_dist:
             out.append(p)
     return np.vstack(out)
+
+
+def _dedupe_path_with_markers(
+    points: np.ndarray,
+    markers: np.ndarray,
+    *,
+    min_dist: float = 1e-6,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drop duplicate path points and keep markers aligned."""
+    pts = np.asarray(points, dtype=float)
+    mk = np.asarray(markers, dtype=float)
+    if len(pts) == 0:
+        return pts.reshape(0, 3), mk.reshape(0)
+    if len(mk) != len(pts):
+        raise ValueError("markers must match path length")
+
+    keep_pts = [pts[0]]
+    keep_mk = [float(mk[0])]
+    for i in range(1, len(pts)):
+        if np.linalg.norm(pts[i] - keep_pts[-1]) >= min_dist:
+            keep_pts.append(pts[i])
+            keep_mk.append(float(mk[i]))
+        elif float(mk[i]) in (10.0, 11.0):
+            keep_mk[-1] = float(mk[i])
+    return np.vstack(keep_pts), np.asarray(keep_mk, dtype=float)
 
 
 def _polyline(points: np.ndarray, *, min_dist: float = 1e-6):
@@ -127,14 +140,24 @@ def _grouped_colored_segments(
     return segments
 
 
-def _tip_segment_colors(markers: np.ndarray) -> list[str]:
+def _segment_jet_on(markers: np.ndarray) -> list[bool]:
+    """Jet active on motion from markers[i] to markers[i + 1]."""
     if len(markers) < 2:
         return []
-    states = _jet_states(markers)
-    return [
-        "lime" if (states[i + 1] or states[i]) else "tomato"
-        for i in range(len(markers) - 1)
-    ]
+    printing = False
+    active: list[bool] = []
+    for i in range(len(markers) - 1):
+        m = float(markers[i])
+        if m == 11:
+            printing = False
+        elif m == 10:
+            printing = True
+        active.append(printing)
+    return active
+
+
+def _tip_segment_colors(markers: np.ndarray) -> list[str]:
+    return ["lime" if on else "tomato" for on in _segment_jet_on(markers)]
 
 
 def _add_landmarks(
@@ -381,9 +404,10 @@ def show_simulation(
 
         if _visible("tip") and len(scene.tip_path) >= 2:
             prefix = _path_up_to(scene.tip_path, idx)
-            prefix = _dedupe_consecutive_points(prefix)
+            prefix_markers = scene.markers[: idx + 1]
+            prefix, prefix_markers = _dedupe_path_with_markers(prefix, prefix_markers)
             if len(prefix) >= 2:
-                colors = _tip_segment_colors(scene.markers[: idx + 1])
+                colors = _tip_segment_colors(prefix_markers)
                 for seg, color in _grouped_colored_segments(prefix, colors):
                     seg = _dedupe_consecutive_points(seg)
                     line = _polyline(seg)

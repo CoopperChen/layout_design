@@ -8,18 +8,41 @@ preprocess:
   full_circle: false
 
 synthesize:
-  assignments: s1_assignments  # data/presets/{name}.json — terminal LEFT/RIGHT map
+  assignments: subject1_best_v4  # data/presets/{name}.json — terminal LEFT/RIGHT map
   use_target_terminals: true
-  optimize_terminals: true
+  optimize_terminals: false
   preserve_entry_order: false
   uv_resolution: 100
+  terminal_stop_mm: 10.0  # shorten each wire before strip entry (0 = off)
+  terminal_min_points: 4
 
 polish:
-  mode: gentle  # gentle = repair; refine = refine-v4; ga-short = warm-start GA
-  phase2_max_rounds: 12
+  enabled: true  # run polish in `python -m app run` (override with --no-polish)
+  mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
+  focus: separation
+  phase2_max_rounds: 20
+  aggressive_pass: false
+  skip_phase1_when_electrode_free: true
+  fixed_endpoints: true
+  profile: false  # set true or use --profile / --polish-profile for timing breakdown
+  min_trace_separation_mm: 4.0
   ga_generations: 20
   ga_population: 20
 
 postprocess:
   smoothing_strength: 0.1
+  arm_inside_margin_mm: 0.0  # signed-distance tolerance for arm-in-mesh flip
+  engage_b_threshold_deg: 90
+  engage_xy_offset_default_mm: 20
+  engage_xy_offset_max_mm: 40
+  engage_xy_offset_step_mm: 1
+  engage_descent_min_clearance_mm: 20  # min tip clearance during engage Z-down / disengage Z-up legs
+  optimize_trace_order: true
+  trace_order_method: c_nearest_neighbor  # nearest_neighbor | c_nearest_neighbor
+  trace_order_start: first  # first | home
+  skip_origin_when_bc_close: true
+  c_short_transfer_max_delta_deg: 20
+  c_order_xy_weight: 0.05
+  axis_max_c_step_deg: 45  # fail convert if any in-trace C step exceeds this
+  terminal_min_points: 4
   matlab_folder: subject_optimized  # relative to data/output/matlab/
