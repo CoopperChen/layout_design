@@ -4,12 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.postprocess.mesh_normals import (
-    head_center_from_points,
-    orient_electrode_trace_xyzn,
-    orient_trace_xyzn,
-)
-
 from ..models import JobConfig, SubjectBundle, TraceChannel
 from ..transform.rotations import apply_rotation, roty, rotz
 from ..transform.scan2phys import scan2phys, scan2phys_direction
@@ -102,10 +96,5 @@ def align_subject(
         ch.interconnect[:, 3:6] = scan2phys_direction(ch.interconnect[:, 3:6], ps_shifted, pm)
         ch.electrode[:, :3] = scan2phys(ch.electrode[:, :3] + offset, ps_shifted, pm)
         ch.electrode[:, 3:6] = scan2phys_direction(ch.electrode[:, 3:6], ps_shifted, pm)
-
-    head_center = head_center_from_points(mesh_registered)
-    for ch in channels:
-        ch.interconnect = orient_trace_xyzn(ch.interconnect, head_center)
-        ch.electrode = orient_electrode_trace_xyzn(ch.electrode, head_center)
 
     return channels, mesh_registered

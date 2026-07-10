@@ -15,8 +15,9 @@ def run_synthesize(
     *,
     preserve_entry_order: bool = False,
     use_target_terminals: bool = True,
-    optimize_terminals: bool = True,
+    optimize_terminals: bool = False,
     uv_resolution: int = 100,  # reserved for future UV packaging
+    terminal_stop_mm: float | None = None,
 ) -> dict:
     setup_runtime()
     from PYTHON.tools.layoutPresetV4 import apply_layout_preset_v4_synthesize
@@ -27,8 +28,7 @@ def run_synthesize(
             f"Assignment/preset not found: {preset_path}\n"
             f"  Put {preset_path.name} in data/presets/, or run:\n"
             f"    python -m app build-assignments --reference 1 --id {preset_path.stem}\n"
-            f"  Or use the bundled preset:\n"
-            f"    python -m app synthesize --assignments subject1_best_v4 --target {target}"
+            f"  Default preset is set in config/defaults.yaml (synthesize.assignments)."
         )
 
     sid = int(target)
@@ -55,6 +55,7 @@ def run_synthesize(
         preserve_entry_order=preserve_entry_order,
         use_target_terminals=use_target_terminals,
         optimize_terminals=optimize_terminals,
+        terminal_stop_mm=terminal_stop_mm,
     )
     cm = result.get("collision_metrics", {})
     print(

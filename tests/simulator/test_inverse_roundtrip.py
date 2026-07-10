@@ -92,10 +92,6 @@ def test_nozzle_tip_print_positions_gap_standoff(subject_4_bundle, machine_confi
         machine_config.gap_size_mm,
         atol=1e-6,
     )
-    head_center = np.mean(mesh, axis=0)
-    radial = surface - head_center
-    radial_u = radial / np.maximum(np.linalg.norm(radial, axis=1, keepdims=True), 1e-12)
-    assert float(np.min(np.sum(normals2 * radial_u, axis=1))) > 0.0
 
 
 def test_undo_machine_zero_inverse(machine_config):

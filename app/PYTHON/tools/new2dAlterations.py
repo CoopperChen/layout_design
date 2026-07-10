@@ -10,6 +10,8 @@ from scipy.interpolate import splprep, splev
 import random
 import datetime
 
+from app.polish.phase2_profile import get_phase2_profile, profile_step
+
 _pv_module = None
 _init_conn_module = None
 
@@ -62,6 +64,7 @@ PHASE2_GREEDY_TRACE_HALF_SEPARATION = MIN_PATH_SEPARATION / 2.0
 PHASE2_SPACING_MAX_DETOUR_RATIO = 1.8
 PHASE2_PAIR_RESOLUTION_MAX_ROUNDS = 4
 PHASE2_RANDOM_ATTEMPTS_PER_TRACE = 4
+PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS = 12
 # Minimum centerline clearance between any two traces along their full route (fitness).
 TRACE_SEPARATION_MIN = 4.0
 TRACE_SEPARATION_SAMPLE_STEP = 0.25
@@ -165,7 +168,9 @@ def pin_path_endpoints_2d(path, start, end):
 
 
 def path_end_target(path_entry, terminals_2d):
-    """Return the 2D endpoint for a path (entry slot if assigned, else terminal anchor)."""
+    """Return the 2D wire end (truncated end if set, else strip entry / terminal anchor)."""
+    if path_entry.get('path_end_2d') is not None:
+        return np.asarray(path_entry['path_end_2d'], dtype=float)
     if path_entry.get('entry_point_2d') is not None:
         return np.asarray(path_entry['entry_point_2d'], dtype=float)
     if isinstance(path_entry, dict):
@@ -1606,7 +1611,9 @@ def slot_metadata_from_child_paths(child_paths):
     path_terminals = [p['terminal'] for p in child_paths]
     for entry in child_paths:
         name = entry['electrode']
-        if entry.get('entry_point_2d') is not None:
+        if entry.get('path_end_2d') is not None:
+            entry_points[name] = np.asarray(entry['path_end_2d'], dtype=float)
+        elif entry.get('entry_point_2d') is not None:
             entry_points[name] = np.asarray(entry['entry_point_2d'], dtype=float)
         if entry.get('slot_index') is not None:
             slot_index[name] = int(entry['slot_index'])
@@ -1845,6 +1852,80 @@ def _count_crossings_involving_path(
             use_dense_paths=use_dense_paths,
         )
     return total
+
+
+def _count_crossings_among_other_paths(
+    path_idx,
+    paths_2d,
+    path_terminals,
+    terminal_zones,
+    electrode_zones,
+    dense_path_cache=None,
+    use_dense_paths=True,
+):
+    """Crossings between path pairs that do not include path_idx."""
+    if path_terminals is None:
+        path_terminals = _infer_path_terminals(paths_2d, terminal_zones)
+    if use_dense_paths and dense_path_cache is None:
+        dense_path_cache = _build_crossing_detection_path_cache(
+            paths_2d, path_terminals, electrode_zones
+        )
+    total = 0
+    n_paths = len(paths_2d)
+    for i in range(n_paths):
+        for j in range(i + 1, n_paths):
+            if i == path_idx or j == path_idx:
+                continue
+            total += _pair_crossing_point_count(
+                paths_2d[i],
+                paths_2d[j],
+                path_terminals[i] if i < len(path_terminals) else None,
+                path_terminals[j] if j < len(path_terminals) else None,
+                terminal_zones,
+                electrode_zones,
+                dense_path_cache=dense_path_cache,
+                path_idx_a=i if use_dense_paths else None,
+                path_idx_b=j if use_dense_paths else None,
+                use_dense_paths=use_dense_paths,
+            )
+    return total
+
+
+def _layout_crossing_count_if_replaced(
+    path_idx,
+    trial_path,
+    paths_2d,
+    path_terminals,
+    terminal_zones,
+    electrode_zones,
+    crossings_among_others,
+    dense_path_cache=None,
+    use_dense_paths=True,
+):
+    """Global crossing count after replacing paths_2d[path_idx] with trial_path."""
+    if path_terminals is None:
+        path_terminals = _infer_path_terminals(paths_2d, terminal_zones)
+    involving = 0
+    n_paths = len(paths_2d)
+    for j in range(n_paths):
+        if j == path_idx:
+            continue
+        i, jj = (path_idx, j) if path_idx < j else (j, path_idx)
+        path_i = trial_path if i == path_idx else paths_2d[i]
+        path_j = trial_path if jj == path_idx else paths_2d[jj]
+        involving += _pair_crossing_point_count(
+            path_i,
+            path_j,
+            path_terminals[i] if i < len(path_terminals) else None,
+            path_terminals[jj] if jj < len(path_terminals) else None,
+            terminal_zones,
+            electrode_zones,
+            dense_path_cache=dense_path_cache,
+            path_idx_a=i if use_dense_paths and i != path_idx else None,
+            path_idx_b=jj if use_dense_paths and jj != path_idx else None,
+            use_dense_paths=use_dense_paths,
+        )
+    return int(crossings_among_others) + int(involving)
 
 
 def layout_crossing_count(
@@ -3783,6 +3864,9 @@ def apply_smart_collision_resolution(
     greedy_electrodes_only=False,
     phase2_max_pair_rounds: int | None = None,
     force_trace_resolution: bool = False,
+    focus_separation: bool = False,
+    fixed_endpoints: bool = False,
+    max_crossing_count: int | None = None,
 ):
     """Apply smart collision resolution if there are many collisions"""
     
@@ -3890,6 +3974,9 @@ def apply_smart_collision_resolution(
                 use_gentle_resolution=use_gentle_resolution,
                 greedy_electrodes_only=greedy_electrodes_only,
                 phase2_max_pair_rounds=phase2_max_pair_rounds,
+                focus_separation=focus_separation,
+                fixed_endpoints=fixed_endpoints,
+                max_crossing_count=max_crossing_count,
             )
             
             if greedy_electrodes_only:
@@ -4705,6 +4792,29 @@ def introduces_coterminal_ordered_crossings(
     return bool(after - before)
 
 
+def _pair_centerline_min_distance(
+    path_a,
+    path_b,
+    terminal_a,
+    terminal_b,
+    electrode_zones,
+):
+    """Minimum centerline distance between two paths outside terminal merge tails."""
+    line_a = _path_to_linestring(path_a)
+    line_b = _path_to_linestring(path_b)
+    if line_a is None or line_b is None:
+        return float("inf")
+
+    merge_tail_length = _terminal_merge_tail_length(electrode_zones)
+    pair_merge_union = _build_pair_merge_union(
+        path_a, path_b, terminal_a, terminal_b, merge_tail_length
+    )
+    min_dist = float("inf")
+    for pt in _linestring_sample_points(line_a, pair_merge_union):
+        min_dist = min(min_dist, float(line_b.distance(pt)))
+    return min_dist
+
+
 def _pair_layout_penalty(
     path_a,
     path_b,
@@ -4731,18 +4841,9 @@ def _pair_layout_penalty(
         path_idx_b=path_idx_b,
         pair_geometry=pair_geometry,
     )
-    line_a = _path_to_linestring(path_a)
-    line_b = _path_to_linestring(path_b)
-    if line_a is None or line_b is None:
-        return penalty
-
-    merge_tail_length = _terminal_merge_tail_length(electrode_zones)
-    pair_merge_union = _build_pair_merge_union(
-        path_a, path_b, terminal_a, terminal_b, merge_tail_length
+    min_dist = _pair_centerline_min_distance(
+        path_a, path_b, terminal_a, terminal_b, electrode_zones
     )
-    min_dist = float('inf')
-    for pt in _linestring_sample_points(line_a, pair_merge_union):
-        min_dist = min(min_dist, float(line_b.distance(pt)))
     if min_dist < min_separation:
         shortfall = min_separation - min_dist
         penalty += (shortfall / min_separation) ** 2
@@ -4755,9 +4856,11 @@ def _find_conflict_path_pairs(
     terminal_zones,
     electrode_zones,
     min_separation=PHASE2_INNER_TRACE_SEPARATION,
+    focus_separation: bool = False,
 ):
     """Return [(i, j, penalty)] for pairs with crossings, overlap, or tight separation."""
     pairs = {}
+    pair_min_dist = {}
     dense_path_cache = _build_crossing_detection_path_cache(
         paths, path_terminals, electrode_zones
     )
@@ -4789,7 +4892,19 @@ def _find_conflict_path_pairs(
             )
             if penalty > COLLISION_SCORE_EPSILON:
                 pairs[(i, j)] = penalty
+                pair_min_dist[(i, j)] = _pair_centerline_min_distance(
+                    paths[i],
+                    paths[j],
+                    path_terminals[i],
+                    path_terminals[j],
+                    electrode_zones,
+                )
 
+    if focus_separation:
+        return sorted(
+            ((i, j, penalty) for (i, j), penalty in pairs.items()),
+            key=lambda item: (pair_min_dist[(item[0], item[1])], -item[2]),
+        )
     return sorted(
         ((i, j, penalty) for (i, j), penalty in pairs.items()),
         key=lambda item: -item[2],
@@ -4822,6 +4937,9 @@ def _try_gentle_pair_trace_adjustment(
     slot_index_by_electrode=None,
     min_separation=PHASE2_INNER_TRACE_SEPARATION,
     max_random_attempts=PHASE2_RANDOM_ATTEMPTS_PER_TRACE,
+    focus_separation: bool = False,
+    fixed_endpoints: bool = False,
+    max_crossing_count: int | None = None,
 ):
     """
     Gently adjust one trace in a conflicting pair (spacing greedy, then small random nudge).
@@ -4849,86 +4967,156 @@ def _try_gentle_pair_trace_adjustment(
         electrode_zones,
         min_separation=min_separation,
     )
+    baseline_min_dist = _pair_centerline_min_distance(
+        path,
+        partner_path,
+        terminal_name,
+        path_terminals[partner_idx],
+        electrode_zones,
+    )
+    if focus_separation:
+        max_random_attempts = max(
+            max_random_attempts, PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS
+        )
+
+    crossing_cap_context = None
+    if max_crossing_count is not None:
+        crossing_dense_cache = _build_crossing_detection_path_cache(
+            paths, path_terminals, electrode_zones
+        )
+        crossings_among_others = _count_crossings_among_other_paths(
+            path_idx,
+            paths,
+            path_terminals,
+            terminal_zones,
+            electrode_zones,
+            dense_path_cache=crossing_dense_cache,
+        )
+        crossing_cap_context = (crossings_among_others, crossing_dense_cache)
 
     def _accept(trial_path):
-        trial_path = _lock_terminal_zone_tail(
-            path, trial_path, terminal_name, terminal_zones, start, end
-        )
-        trial_path = pin_path_endpoints_2d(trial_path, start, end)
-        if greed._paths_same_polyline(trial_path, path):
-            return None
-        if count_single_trace_electrode_violations(
-            trial_path, electrode_name, electrode_zones
-        ) > 0:
-            return None
-        if _path_chord_detour_ratio(trial_path, start, end) > PHASE2_SPACING_MAX_DETOUR_RATIO:
-            return None
-        trial_paths = [p.copy() for p in paths]
-        trial_paths[path_idx] = trial_path
-        trial_penalty = _pair_layout_penalty(
-            trial_paths[path_idx],
-            trial_paths[partner_idx],
-            terminal_name,
-            path_terminals[partner_idx],
-            terminal_zones,
-            electrode_zones,
-            min_separation=min_separation,
-        )
-        if trial_penalty + 1e-9 >= baseline_penalty:
-            return None
-        if slot_index_by_electrode and introduces_coterminal_ordered_crossings(
-            paths,
-            trial_paths,
-            path_electrodes,
-            path_terminals,
-            slot_index_by_electrode,
-            electrode_zones,
-            terminal_zones=terminal_zones,
-            changed_path_indices=(path_idx,),
-        ):
-            return None
-        if path_has_trace_reentry(
-            trial_path,
-            electrode_name,
-            terminal_name,
-            electrode_zones,
-            terminal_zones,
-        ):
-            return None
-        zone = terminal_zones.get(terminal_name)
-        if zone is not None and path_has_terminal_zone_reentry(trial_path, zone):
-            return None
-        return trial_paths, trial_penalty
+        with profile_step("accept_total"):
+            with profile_step("accept_pin"):
+                if fixed_endpoints:
+                    trial_path = pin_path_endpoints_2d(
+                        np.asarray(trial_path, dtype=float), start, end
+                    )
+                else:
+                    trial_path = _lock_terminal_zone_tail(
+                        path, trial_path, terminal_name, terminal_zones, start, end
+                    )
+                    trial_path = pin_path_endpoints_2d(trial_path, start, end)
+            if greed._paths_same_polyline(trial_path, path):
+                return None
+            with profile_step("accept_electrode_check"):
+                if count_single_trace_electrode_violations(
+                    trial_path, electrode_name, electrode_zones
+                ) > 0:
+                    return None
+                if _path_chord_detour_ratio(trial_path, start, end) > PHASE2_SPACING_MAX_DETOUR_RATIO:
+                    return None
+            if max_crossing_count is not None:
+                crossings_among_others, crossing_dense_cache = crossing_cap_context
+                with profile_step("accept_global_crossing"):
+                    trial_cross = _layout_crossing_count_if_replaced(
+                        path_idx,
+                        trial_path,
+                        paths,
+                        path_terminals,
+                        terminal_zones,
+                        electrode_zones,
+                        crossings_among_others,
+                        dense_path_cache=crossing_dense_cache,
+                    )
+                if int(trial_cross) > int(max_crossing_count):
+                    return None
+            trial_paths = [p.copy() for p in paths]
+            trial_paths[path_idx] = trial_path
+            with profile_step("accept_pair_metrics"):
+                trial_penalty = _pair_layout_penalty(
+                    trial_paths[path_idx],
+                    trial_paths[partner_idx],
+                    terminal_name,
+                    path_terminals[partner_idx],
+                    terminal_zones,
+                    electrode_zones,
+                    min_separation=min_separation,
+                )
+                trial_min_dist = _pair_centerline_min_distance(
+                    trial_paths[path_idx],
+                    trial_paths[partner_idx],
+                    terminal_name,
+                    path_terminals[partner_idx],
+                    electrode_zones,
+                )
+            separation_improved = trial_min_dist > baseline_min_dist + 0.05
+            penalty_improved = trial_penalty + 1e-9 < baseline_penalty
+            if focus_separation:
+                if not separation_improved and not penalty_improved:
+                    return None
+                if separation_improved and trial_penalty > baseline_penalty + 1e-6:
+                    return None
+            elif not penalty_improved:
+                return None
+            with profile_step("accept_coterminal_check"):
+                if slot_index_by_electrode and introduces_coterminal_ordered_crossings(
+                    paths,
+                    trial_paths,
+                    path_electrodes,
+                    path_terminals,
+                    slot_index_by_electrode,
+                    electrode_zones,
+                    terminal_zones=terminal_zones,
+                    changed_path_indices=(path_idx,),
+                ):
+                    return None
+            with profile_step("accept_reentry_check"):
+                if path_has_trace_reentry(
+                    trial_path,
+                    electrode_name,
+                    terminal_name,
+                    electrode_zones,
+                    terminal_zones,
+                ):
+                    return None
+                zone = terminal_zones.get(terminal_name)
+                if zone is not None and path_has_terminal_zone_reentry(trial_path, zone):
+                    return None
+            return trial_paths, trial_penalty
 
-    spacing_trial = _greedy_spacing_outside_terminal_zone(
-        np.asarray(path, dtype=float),
-        terminal_name,
-        terminal_zones,
-        electrode_name,
-        electrode_zones,
-        start,
-        end,
-        partner_path,
-    )
-    if spacing_trial is not None:
-        accepted = _accept(spacing_trial)
-        if accepted is not None:
-            return accepted
+    with profile_step("pair_adjust"):
+        with profile_step("pair_greedy"):
+            spacing_trial = _greedy_spacing_outside_terminal_zone(
+                np.asarray(path, dtype=float),
+                terminal_name,
+                terminal_zones,
+                electrode_name,
+                electrode_zones,
+                start,
+                end,
+                partner_path,
+            )
+        if spacing_trial is not None:
+            accepted = _accept(spacing_trial)
+            if accepted is not None:
+                return accepted
 
-    for _ in range(max_random_attempts):
-        random_trial = randomly_modify_path(
-            np.asarray(path, dtype=float).copy(),
-            electrode_name,
-            electrode_zones,
-            terminal_zones,
-            x_bounds=x_bounds,
-            target_electrode_pos=start,
-            target_terminal_pos=end,
-            target_terminal_name=terminal_name,
-        )
-        accepted = _accept(random_trial)
-        if accepted is not None:
-            return accepted
+        with profile_step("pair_random_loop"):
+            for _ in range(max_random_attempts):
+                with profile_step("pair_random_modify"):
+                    random_trial = randomly_modify_path(
+                        np.asarray(path, dtype=float).copy(),
+                        electrode_name,
+                        electrode_zones,
+                        terminal_zones,
+                        x_bounds=x_bounds,
+                        target_electrode_pos=start,
+                        target_terminal_pos=end,
+                        target_terminal_name=terminal_name,
+                    )
+                accepted = _accept(random_trial)
+                if accepted is not None:
+                    return accepted
 
     return None
 
@@ -4999,6 +5187,9 @@ def _resolve_phase2_ordered_trace_resolution(
     max_attempts_per_trace=8,
     min_separation=PHASE2_INNER_TRACE_SEPARATION,
     max_pair_rounds: int | None = None,
+    focus_separation: bool = False,
+    fixed_endpoints: bool = False,
+    max_crossing_count: int | None = None,
 ):
     """
     Phase 2 gentle resolution: for each conflicting pair, try spacing-greedy and small
@@ -5027,6 +5218,17 @@ def _resolve_phase2_ordered_trace_resolution(
         return pinned
 
     best_paths = _pin_all([path.copy() for path in paths])
+    if max_crossing_count is None:
+        with profile_step("phase2_baseline_crossings"):
+            max_crossing_count = int(
+                analyze_path_collisions(
+                    best_paths,
+                    terminal_zones,
+                    electrode_zones=electrode_zones,
+                    path_electrodes=path_electrodes,
+                    path_terminals=path_terminals,
+                )["crossing_count"]
+            )
     pair_rounds = (
         int(max_pair_rounds)
         if max_pair_rounds is not None
@@ -5034,20 +5236,26 @@ def _resolve_phase2_ordered_trace_resolution(
     )
 
     for round_idx in range(pair_rounds):
-        conflict_pairs = _find_conflict_path_pairs(
-            best_paths,
-            path_terminals,
-            terminal_zones,
-            electrode_zones,
-            min_separation=min_separation,
-        )
+        prof = get_phase2_profile()
+        if prof is not None:
+            prof.set_round(round_idx)
+        with profile_step("find_conflict_pairs"):
+            conflict_pairs = _find_conflict_path_pairs(
+                best_paths,
+                path_terminals,
+                terminal_zones,
+                electrode_zones,
+                min_separation=min_separation,
+                focus_separation=focus_separation,
+            )
         if not conflict_pairs:
-            print(f"Phase 2 pair resolution: no conflicts (round {round_idx + 1})")
+            label = "separation" if focus_separation else "conflicts"
+            print(f"Phase 2 pair resolution: no {label} (round {round_idx + 1})")
             break
 
         print(
             f"Phase 2 pair resolution round {round_idx + 1}: "
-            f"{len(conflict_pairs)} conflicting pair(s)"
+            f"{len(conflict_pairs)} {'tight' if focus_separation else 'conflicting'} pair(s)"
         )
         round_improved = False
         for i, j, pair_penalty in conflict_pairs:
@@ -5066,6 +5274,9 @@ def _resolve_phase2_ordered_trace_resolution(
                     entry_points_2d,
                     slot_index_by_electrode=slot_index_by_electrode,
                     min_separation=min_separation,
+                    focus_separation=focus_separation,
+                    fixed_endpoints=fixed_endpoints,
+                    max_crossing_count=max_crossing_count,
                 )
                 if result is None:
                     continue
@@ -5079,14 +5290,17 @@ def _resolve_phase2_ordered_trace_resolution(
         if not round_improved:
             print(f"Phase 2 pair resolution stopped (round {round_idx + 1}, no gain)")
             break
+        if prof is not None:
+            prof.print_round_summary(round_idx)
 
-    final = analyze_path_collisions(
-        best_paths,
-        terminal_zones,
-        electrode_zones=electrode_zones,
-        path_electrodes=path_electrodes,
-        path_terminals=path_terminals,
-    )
+    with profile_step("phase2_final_analysis"):
+        final = analyze_path_collisions(
+            best_paths,
+            terminal_zones,
+            electrode_zones=electrode_zones,
+            path_electrodes=path_electrodes,
+            path_terminals=path_terminals,
+        )
     print(
         f"Phase 2 pair final: crossings={final['crossing_count']}, "
         f"overlap={final['overlap_length']:.2f}, "
@@ -5308,6 +5522,9 @@ def smart_collision_resolution(
     use_gentle_resolution=True,
     greedy_electrodes_only=False,
     phase2_max_pair_rounds: int | None = None,
+    focus_separation: bool = False,
+    fixed_endpoints: bool = False,
+    max_crossing_count: int | None = None,
 ):
     """Collision resolution; mode depends on GA phase (see greedy_electrodes_only / use_gentle_resolution)."""
     if entry_points_2d is None:
@@ -5391,6 +5608,10 @@ def smart_collision_resolution(
             slot_index_by_electrode=slot_index_by_electrode,
             max_attempts_per_trace=max(max_attempts, 8),
             max_pair_rounds=phase2_max_pair_rounds,
+            min_separation=PHASE2_INNER_TRACE_SEPARATION,
+            focus_separation=focus_separation,
+            fixed_endpoints=fixed_endpoints,
+            max_crossing_count=max_crossing_count,
         )
 
     best_collision_points = initial['points']

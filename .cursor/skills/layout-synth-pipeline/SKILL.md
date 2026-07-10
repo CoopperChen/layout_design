@@ -26,7 +26,7 @@ A. PREPROCESS (per target subject)
 B. GENERATE LAYOUT (synthesize)
    assignment map + target geometry → new 2D paths, slots, surface 3D
 
-C. POLISH (optional) — wire separation only
+C. POLISH — fixed-endpoint separation (default in `run`; `--no-polish` to skip)
 
 D. POSTPROCESS — smooth → export-bundle → convert-gcode → simulate-gcode
 ```
@@ -61,11 +61,11 @@ python -m app visualize --applied data/output/layouts/synth_s2.json
 
 | Flag | Meaning |
 |------|---------|
-| *(default)* | Hubs from `fiducials_{target}.json`; optional ±36° search |
-| `--fix-terminals` | Exact hub clicks; may have more crossings |
+| *(default)* | Hubs from `fiducials_{target}.json`; optional `--rotate` for ±36° search |
+| `--rotate` | Hub angle search for clearance; may have fewer crossings |
 | `--inherit-preset-terminals` | **Legacy:** map reference hubs — not generate-first |
 
-**Internal:** target-native entry slots, straight/detour 2D, UV surface `path_points`, validate 0/0.
+**Internal:** target-native entry slots, straight/detour 2D, UV surface `path_points`, terminal tail truncation, validate 0/0.
 
 **Gate:** `crossing_count=0`, `electrode_violations=0` before polish/post.
 
@@ -87,13 +87,13 @@ Reference assignments: `build-assignments --reference 1` or copy `initial_termin
 
 ## C — Polish (optional)
 
-Only if generated layout needs more **separation** (not to invent layout).
+Only if generated layout needs more **separation** (endpoints fixed at electrode + truncated wire end).
 
 ```bash
 python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
 ```
 
-Requires `PYTHON/GA/greed.py` for repair/refine.
+Requires `PYTHON/GA/greed.py` for spacing adjustments. Does not move electrode or truncated wire endpoints; rejects moves that add crossings.
 
 ---
 

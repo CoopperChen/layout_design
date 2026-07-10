@@ -5,14 +5,17 @@ Unified pipeline CLI.
   python -m app paths --subject 2
   python -m app preprocess --subject 1 --step clear-islands
   python -m app build-assignments --reference 1 --id s1_assignments
-  python -m app synthesize --assignments s1_assignments --target 2
-  # --preset is alias for --assignments (terminal map only; paths are generated)
+  python -m app synthesize --target 2
   python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
   python -m app smooth --applied data/output/layouts/synth_s2.json
   python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
   python -m app init-print-config --subject {id}
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
+  python -m app run --target 2
+  python -m app run --target 2 --ply data/raw/2.ply --from synthesize
+  python -m app run --target 2 --to simulate
+  python -m app run --target 2 --no-polish --from synthesize
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import sys
 from pathlib import Path
 
 from app import paths
+from app.config_loader import default_assignments, resolve_assignments
 from app.preprocess import run as preprocess_run
 
 
@@ -50,6 +54,7 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print()
     print("B — Synthesize")
     print("  layout out:    ", paths.synth_layout(sid))
+    print("  assignments:   ", paths.preset_path(default_assignments()))
     print()
     print("D — Postprocess")
     print("  smooth:        ", paths.smooth_json(sid))
@@ -78,7 +83,7 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
 
 
 def _assignments_arg(args: argparse.Namespace) -> str:
-    return getattr(args, "assignments", None) or args.preset
+    return resolve_assignments(getattr(args, "assignments", None))
 
 
 def cmd_synthesize(args: argparse.Namespace) -> int:
@@ -91,8 +96,9 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
             output=args.out,
             preserve_entry_order=args.preserve_entry_order,
             use_target_terminals=not args.inherit_preset_terminals,
-            optimize_terminals=not args.fix_terminals,
+            optimize_terminals=args.rotate,
             uv_resolution=args.uv_resolution,
+            terminal_stop_mm=args.terminal_stop_mm,
         )
         if args.visualize:
             out = args.out or paths.synth_layout(args.target)
@@ -164,6 +170,7 @@ def cmd_polish(args: argparse.Namespace) -> int:
             clear_logs=not args.no_clear_logs,
             no_mutate_gen0=args.no_mutate_gen0,
             electrodes_only=args.electrodes_only,
+            profile_phase2=args.profile,
         )
         return 0
     except (FileNotFoundError, ValueError) as e:
@@ -340,14 +347,6 @@ def build_parser() -> argparse.ArgumentParser:
         "synthesize",
         help="Stage B: generate layout on target (paths + slots; not preset path replay)",
     )
-    sy.add_argument(
-        "--assignments",
-        "--preset",
-        dest="assignments",
-        required=True,
-        metavar="NAME",
-        help="Terminal assignment map in data/presets/ (LEFT/RIGHT per electrode only)",
-    )
     sy.add_argument("--target", type=int, required=True)
     sy.add_argument("--out")
     sy.add_argument("--preserve-entry-order", action="store_true")
@@ -357,9 +356,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Map TERMINAL_LEFT/RIGHT from preset via rigid landmarks (legacy S1→S2)",
     )
     sy.add_argument(
-        "--fix-terminals",
+        "--rotate",
         action="store_true",
-        help="Use target fiducial hub clicks exactly (no ±36° hub angle search)",
+        help="Search ±36° hub angle around fiducial clicks for fewer crossings",
+    )
+    sy.add_argument(
+        "--terminal-stop-mm",
+        type=float,
+        default=None,
+        help="Shorten each wire from strip entry (default: synthesize.terminal_stop_mm in config)",
     )
     sy.add_argument("--uv-resolution", type=int, default=100)
     sy.add_argument(
@@ -420,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     viz.set_defaults(func=cmd_visualize)
 
-    po = sub.add_parser("polish", help="Stage C (optional)")
+    po = sub.add_parser("polish", help="Stage C: fixed-endpoint separation polish")
     po.add_argument("--applied", required=True)
     po.add_argument(
         "--mode",
@@ -438,6 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--visualize",
         action="store_true",
         help="After polish, save 2D + 3D PNGs for the output layout",
+    )
+    po.add_argument(
+        "--profile",
+        action="store_true",
+        help="Print per-round phase-2 timing breakdown (find pairs, greedy, accept, …)",
     )
     po.set_defaults(func=cmd_polish)
 
@@ -540,8 +550,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     em.set_defaults(func=cmd_export_matlab)
 
+    from app.pipeline.run import add_run_parser
     from app.simulator.cli import add_simulate_gcode_parser
 
+    add_run_parser(sub)
     add_simulate_gcode_parser(sub)
 
     return p

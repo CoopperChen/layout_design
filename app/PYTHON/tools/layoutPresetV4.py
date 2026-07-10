@@ -1469,7 +1469,9 @@ def apply_layout_preset_v4_synthesize(
     preserve_entry_order: bool = False,
     use_tail_swap: bool = False,
     use_target_terminals: bool = False,
-    optimize_terminals: bool = True,
+    optimize_terminals: bool = False,
+    terminal_stop_mm: float | None = None,
+    terminal_min_points: int = 4,
 ) -> dict[str, Any]:
     """
     Target layout: free hub angle + preset strip offsets + straight/detour 2D paths.
@@ -1615,6 +1617,11 @@ def apply_layout_preset_v4_synthesize(
             entry_points_2d[electrode],
         )
 
+    if terminal_stop_mm is None:
+        from app.layout.terminal_truncate import default_terminal_stop_mm
+
+        terminal_stop_mm = default_terminal_stop_mm()
+
     mesh = _pyvista_read_stl(target_subject_id)
     uv_grid_raw = new2d.create_uv_grid(mesh, cz_pos, resolution=100)
     uv_grid_ctx = uv_grid_for_context(uv_grid_raw)
@@ -1647,13 +1654,26 @@ def apply_layout_preset_v4_synthesize(
         path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
         path_3d = pin_path_endpoints_3d(path_3d, e3d, end3d, mesh)
 
+        from app.layout.terminal_truncate import apply_wire_truncation
+
+        path_2d_arr = np.asarray(path_2d, dtype=float)
+        path_2d_trunc, path_3d_trunc, wire_end_3d = apply_wire_truncation(
+            path_2d_arr,
+            path_3d,
+            stop_mm=float(terminal_stop_mm),
+            min_points=int(terminal_min_points),
+        )
+        wire_end_2d = new2d.polar_projection(np.array([wire_end_3d]), cz_pos)[0]
+
         out: dict[str, Any] = {
             "electrode": electrode,
             "terminal": terminal,
-            "modified_path_2d": path_2d.tolist(),
-            "path_points": path_3d.tolist(),
+            "modified_path_2d": path_2d_trunc.tolist(),
+            "path_points": path_3d_trunc.tolist(),
             "entry_point_2d": end2d.tolist(),
             "entry_position_3d": end3d.tolist(),
+            "path_end_2d": wire_end_2d.tolist(),
+            "path_end_3d": wire_end_3d.tolist(),
         }
         if electrode in slot_index_live:
             out["slot_index"] = int(slot_index_live[electrode])
@@ -1699,6 +1719,7 @@ def apply_layout_preset_v4_synthesize(
                 k: v.tolist() for k, v in terminals_3d.items()
             },
             "terminal_2d_mode": terminal_2d_mode,
+            "terminal_stop_mm": float(terminal_stop_mm),
             "timestamp": datetime.now().isoformat(),
         },
         "preset_path": preset_path.replace("\\", "/"),
