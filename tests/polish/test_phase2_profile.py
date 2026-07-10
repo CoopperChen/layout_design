@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from app.polish.phase2_profile import (
-    Phase2Profile,
     profile_step,
     start_phase2_profile,
     stop_phase2_profile,

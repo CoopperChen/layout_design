@@ -427,7 +427,7 @@ def build_disengage_offset_rows(
         return np.zeros((0, 7), dtype=float)
 
     target = np.asarray(exit_row[:6], dtype=float).reshape(6).copy()
-    x, y, z = target[0], target[1], target[2]
+    x, y = target[0], target[1]
     dx, dy = off
     feed = 0.5 * float(machine.transition_speed_mm_min)
 

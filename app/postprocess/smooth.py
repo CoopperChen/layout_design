@@ -2,26 +2,14 @@
 
 from __future__ import annotations
 
-
-
 import json
-
 from pathlib import Path
-
-
 
 import numpy as np
 
-
-
 from app import paths
-
 from app.config_loader import load_defaults
-
 from app.runtime import setup_runtime
-
-
-
 
 
 def _smooth_3d_path(path: np.ndarray, smoothing_factor: float) -> np.ndarray:
@@ -123,7 +111,6 @@ def smooth_from_applied(
     setup_runtime()
 
     import PYTHON.tools.reconstructUsingUVmesh as recon
-
     import pyvista as pv
 
 

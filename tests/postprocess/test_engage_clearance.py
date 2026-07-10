@@ -439,7 +439,6 @@ def test_handoff_feeds_and_offset_leg_clearance():
         d_mm=machine.d_mm,
         calgap_z_mm=machine.calgap_z_mm,
     )
-    zsafe = round(float(np.max(mesh[:, 2])) + machine.zsafe_margin_mm)
     from app.postprocess.gcode.pipeline.process_traces import process_all_traces
 
     gcode_list = process_all_traces(

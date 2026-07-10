@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from app.preprocess.mesh_io import (
     _colors_look_valid,

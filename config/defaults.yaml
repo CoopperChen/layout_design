@@ -8,7 +8,7 @@ preprocess:
   full_circle: false
 
 synthesize:
-  assignments: subject1_best_v4  # data/presets/{name}.json — terminal LEFT/RIGHT map
+  assignments: s1_assignments  # data/presets/{name}.json — terminal LEFT/RIGHT map
   use_target_terminals: true
   optimize_terminals: false
   preserve_entry_order: false

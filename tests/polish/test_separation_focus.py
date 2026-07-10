@@ -6,7 +6,7 @@ import numpy as np
 from app.runtime import setup_runtime
 
 setup_runtime()
-from PYTHON.tools import new2dAlterations as n2d
+from PYTHON.tools import new2dAlterations as n2d  # noqa: E402
 
 
 def _straight_path(x0, y0, x1, y1, n=20):
