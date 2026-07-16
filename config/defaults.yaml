@@ -8,25 +8,26 @@ preprocess:
   full_circle: false
 
 synthesize:
-  assignments: s1_assignments  # data/presets/{name}.json — terminal LEFT/RIGHT map
+  assignments: subject1_best_v4  # data/presets/{name}.json — terminal LEFT/RIGHT map
   use_target_terminals: true
   optimize_terminals: false
   preserve_entry_order: false
   uv_resolution: 100
-  terminal_stop_mm: 10.0  # shorten each wire before strip entry (0 = off)
+  terminal_stop_mm: 20.0  # shorten each wire before strip entry (0 = off)
   terminal_min_points: 4
 
 polish:
   enabled: true  # run polish in `python -m app run` (override with --no-polish)
   mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
   focus: separation
-  phase2_max_rounds: 20
+  phase2_max_rounds: 50
   aggressive_pass: false
   skip_phase1_when_electrode_free: true
   fixed_endpoints: true
   profile: false  # set true or use --profile / --polish-profile for timing breakdown
-  min_trace_separation_mm: 4.0
-  ga_generations: 20
+  # Target centerline clearance (mm): phase-2 pair penalty + layout deficit metric.
+  min_trace_separation_mm: 6.0
+  ga_generations: 50
   ga_population: 20
 
 postprocess:
@@ -43,6 +44,12 @@ postprocess:
   skip_origin_when_bc_close: true
   c_short_transfer_max_delta_deg: 20
   c_order_xy_weight: 0.05
-  axis_max_c_step_deg: 45  # fail convert if any in-trace C step exceeds this
+  # Catch leftover ±(B,C) branch flips (~180°). Allow steep but real scalp curvature.
+  axis_max_c_step_deg: 90
+  # Calm C near the crown so tip does not serpentine from atan2(nx,ny) jitter.
+  normal_path_smooth_alpha: 0.5
+  normal_path_smooth_passes: 1
+  c_pole_nxy_min: 0.08  # inherit prior XY heading when |n_xy| is below this
+  c_max_slew_deg: 12  # max |ΔC| per sample while printing (anti-serpentine)
   terminal_min_points: 4
   matlab_folder: subject_optimized  # relative to data/output/matlab/

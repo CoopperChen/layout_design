@@ -4,11 +4,11 @@ from app.config_loader import default_assignments, resolve_assignments
 
 
 def test_default_assignments_from_yaml():
-    assert default_assignments() == "s1_assignments"
+    assert default_assignments() == "subject1_best_v4"
 
 
 def test_resolve_assignments_uses_default():
-    assert resolve_assignments(None) == "s1_assignments"
+    assert resolve_assignments(None) == "subject1_best_v4"
 
 
 def test_resolve_assignments_override():

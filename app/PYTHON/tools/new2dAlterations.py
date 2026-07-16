@@ -135,14 +135,25 @@ def polar_projection(points_3d, cz_pos):
     return np.column_stack([r*np.cos(theta), r*np.sin(theta)])
 
 
+def normalize_terminal_2d_mode(mode: str | None = None) -> str:
+    """Map layout metadata aliases to build_terminals_2d modes."""
+    raw = (mode or "inflated").strip().lower()
+    if raw in ("fiducial", "fiducial_native"):
+        return "fiducial"
+    if raw in ("inflated", "inflated_legacy"):
+        return "inflated"
+    return raw
+
+
 def build_terminals_2d(electrodes_2d, fiducials, cz_pos, *, mode="inflated"):
     """
     Build 2D terminal anchors for routing and visualization.
 
     mode:
-      inflated — legacy GA layout: hub angle from fiducial, radius pushed to ~1.2× max electrode r.
-      fiducial — hub at polar projection of the clicked TERMINAL_* (target-native strip entries).
+      inflated / inflated_legacy — hub angle from fiducial, radius ~1.2× max electrode r.
+      fiducial / fiducial_native — hub at polar projection of clicked TERMINAL_*.
     """
+    mode = normalize_terminal_2d_mode(mode)
     terminals_2d = {}
     for term in ["TERMINAL_LEFT", "TERMINAL_RIGHT"]:
         if term not in fiducials:
@@ -252,13 +263,15 @@ def _compute_x_bounds(electrodes_2d, terminals_2d, padding_factor=X_BOUNDS_PADDI
     return (min(x_positions) - x_padding, max(x_positions) + x_padding)
 
 
-def load_zones_for_subject(SUBJECT_ID: int):
-    """Build electrode and terminal safety zones for scoring (cached per subject)."""
+def load_zones_for_subject(SUBJECT_ID: int, terminal_2d_mode: str = "inflated"):
+    """Build electrode and terminal safety zones for scoring (cached per subject+mode)."""
     if not hasattr(load_zones_for_subject, "_cache"):
         load_zones_for_subject._cache = {}
 
-    if SUBJECT_ID in load_zones_for_subject._cache:
-        return load_zones_for_subject._cache[SUBJECT_ID]
+    mode = normalize_terminal_2d_mode(terminal_2d_mode)
+    cache_key = (int(SUBJECT_ID), mode)
+    if cache_key in load_zones_for_subject._cache:
+        return load_zones_for_subject._cache[cache_key]
 
     with open(f'data/json/electrode_positions_{SUBJECT_ID}.json') as f:
         electrodes = {k: np.array(v) for k, v in json.load(f).items()}
@@ -267,22 +280,16 @@ def load_zones_for_subject(SUBJECT_ID: int):
 
     cz_pos = electrodes['Cz']
     electrodes_2d = {k: polar_projection(np.array([v]), cz_pos)[0] for k, v in electrodes.items()}
-    max_dist = 1.2 * max(np.linalg.norm(list(electrodes_2d.values()), axis=1))
-    terminals_2d = {}
-    for term in ['TERMINAL_LEFT', 'TERMINAL_RIGHT']:
-        if term in fiducials:
-            pos = polar_projection(np.array([fiducials[term]]), cz_pos)[0]
-            angle = np.arctan2(pos[1], pos[0])
-            terminals_2d[term] = max_dist * np.array([np.cos(angle), np.sin(angle)])
+    terminals_2d = build_terminals_2d(electrodes_2d, fiducials, cz_pos, mode=mode)
 
     zones = create_zones(electrodes_2d, terminals_2d)
-    load_zones_for_subject._cache[SUBJECT_ID] = zones
+    load_zones_for_subject._cache[cache_key] = zones
     return zones
 
 
-def load_terminal_zones_for_subject(SUBJECT_ID: int):
+def load_terminal_zones_for_subject(SUBJECT_ID: int, terminal_2d_mode: str = "inflated"):
     """Backward-compatible helper returning terminal zones only."""
-    _, terminal_zones = load_zones_for_subject(SUBJECT_ID)
+    _, terminal_zones = load_zones_for_subject(SUBJECT_ID, terminal_2d_mode=terminal_2d_mode)
     return terminal_zones
 
 
@@ -291,16 +298,54 @@ _UV_GRID_CACHE = {}
 UV_GRID_RESOLUTION = 100
 
 
-def warm_subject_caches(SUBJECT_ID, electrodes, fiducials, original_paths):
+def _subject_layout_cache_key(SUBJECT_ID, terminal_2d_mode: str = "inflated"):
+    return (int(SUBJECT_ID), normalize_terminal_2d_mode(terminal_2d_mode))
+
+
+def clear_subject_layout_cache(SUBJECT_ID=None):
+    """Drop cached layouts for one subject (all modes) or the entire cache."""
+    if SUBJECT_ID is None:
+        _SUBJECT_LAYOUT_CACHE.clear()
+        return
+    sid = int(SUBJECT_ID)
+    for key in list(_SUBJECT_LAYOUT_CACHE):
+        if key == sid or (isinstance(key, tuple) and key and key[0] == sid):
+            _SUBJECT_LAYOUT_CACHE.pop(key, None)
+
+
+def warm_subject_caches(
+    SUBJECT_ID,
+    electrodes,
+    fiducials,
+    original_paths,
+    terminal_2d_mode: str = "inflated",
+):
     """Pre-build static per-subject layout + UV grid once at GA start."""
-    get_subject_layout(SUBJECT_ID, electrodes, fiducials, original_paths)
-    ctx = _SUBJECT_LAYOUT_CACHE[SUBJECT_ID]
+    get_subject_layout(
+        SUBJECT_ID,
+        electrodes,
+        fiducials,
+        original_paths,
+        terminal_2d_mode=terminal_2d_mode,
+    )
+    ctx = _SUBJECT_LAYOUT_CACHE[_subject_layout_cache_key(SUBJECT_ID, terminal_2d_mode)]
     get_cached_uv_grid(SUBJECT_ID, ctx['cz_pos'])
 
 
-def get_subject_layout(SUBJECT_ID, electrodes=None, fiducials=None, original_paths=None):
+def get_subject_layout(
+    SUBJECT_ID,
+    electrodes=None,
+    fiducials=None,
+    original_paths=None,
+    terminal_2d_mode: str = "inflated",
+):
     """Cached electrodes_2d, terminals, zones, optimized connections, and x_bounds."""
-    if SUBJECT_ID in _SUBJECT_LAYOUT_CACHE:
+    mode = normalize_terminal_2d_mode(terminal_2d_mode)
+    cache_key = _subject_layout_cache_key(SUBJECT_ID, mode)
+    if cache_key in _SUBJECT_LAYOUT_CACHE:
+        return _SUBJECT_LAYOUT_CACHE[cache_key]
+    # Legacy single-int keys from older callers / tests
+    if SUBJECT_ID in _SUBJECT_LAYOUT_CACHE and mode == "inflated":
         return _SUBJECT_LAYOUT_CACHE[SUBJECT_ID]
 
     if original_paths is None:
@@ -324,8 +369,8 @@ def get_subject_layout(SUBJECT_ID, electrodes=None, fiducials=None, original_pat
     electrodes_2d = {
         k: polar_projection(np.array([v]), cz_pos)[0] for k, v in electrodes.items()
     }
-    terminals_2d = build_terminals_2d(electrodes_2d, fiducials, cz_pos)
-    electrode_zones, terminal_zones = load_zones_for_subject(SUBJECT_ID)
+    terminals_2d = build_terminals_2d(electrodes_2d, fiducials, cz_pos, mode=mode)
+    electrode_zones, terminal_zones = create_zones(electrodes_2d, terminals_2d)
     path_electrodes = [conn['electrode'] for conn in optimized]
     path_terminals = [conn['terminal'] for conn in optimized]
     original_paths_2d = []
@@ -350,8 +395,9 @@ def get_subject_layout(SUBJECT_ID, electrodes=None, fiducials=None, original_pat
         'path_electrodes': path_electrodes,
         'path_terminals': path_terminals,
         'original_paths_2d': original_paths_2d,
+        'terminal_2d_mode': mode,
     }
-    _SUBJECT_LAYOUT_CACHE[SUBJECT_ID] = ctx
+    _SUBJECT_LAYOUT_CACHE[cache_key] = ctx
     return ctx
 
 
@@ -2288,7 +2334,7 @@ def analyze_path_collisions(
             'trace_separation_deficit_normalized': 0.0,
             'trace_separation_violations': 0,
             'min_trace_separation': min_pairwise_distance,
-            'trace_separation_min_required': TRACE_SEPARATION_MIN,
+            'trace_separation_min_required': min_separation,
             'clearance_deficit': 0.0,
             'electrode_violations': electrode_violations,
             'collision_score': collision_score,
@@ -2317,6 +2363,7 @@ def analyze_path_collisions(
         paths_2d,
         path_terminals=path_terminals,
         terminal_zones=terminal_zones,
+        min_separation=min_separation,
         electrode_zones=electrode_zones,
     )
     trace_separation_deficit = trace_separation['trace_separation_deficit']
@@ -3867,12 +3914,23 @@ def apply_smart_collision_resolution(
     focus_separation: bool = False,
     fixed_endpoints: bool = False,
     max_crossing_count: int | None = None,
+    min_separation: float | None = None,
+    terminal_2d_mode: str = "inflated",
 ):
     """Apply smart collision resolution if there are many collisions"""
     
     THRESHOLD_COLLISIONS = 500 # UNDER THIS VALUE WE APPLY SMART COLLISION RESOLUTION
+    if min_separation is None:
+        min_separation = PHASE2_INNER_TRACE_SEPARATION
+    min_separation = float(min_separation)
     
-    ctx = get_subject_layout(SUBJECT_ID, electrodes, fiducials, original_paths)
+    ctx = get_subject_layout(
+        SUBJECT_ID,
+        electrodes,
+        fiducials,
+        original_paths,
+        terminal_2d_mode=terminal_2d_mode,
+    )
     electrodes_2d = ctx['electrodes_2d']
     terminals_2d = ctx['terminals_2d']
     electrode_zones = ctx['electrode_zones']
@@ -3891,6 +3949,7 @@ def apply_smart_collision_resolution(
         electrode_zones=electrode_zones,
         path_electrodes=path_electrodes,
         path_terminals=path_terminals,
+        min_separation=min_separation,
         metrics_mode=metrics_mode,
         slot_index_by_electrode=slot_index or None,
     )
@@ -3977,6 +4036,7 @@ def apply_smart_collision_resolution(
                 focus_separation=focus_separation,
                 fixed_endpoints=fixed_endpoints,
                 max_crossing_count=max_crossing_count,
+                min_separation=min_separation,
             )
             
             if greedy_electrodes_only:
@@ -4012,6 +4072,7 @@ def apply_smart_collision_resolution(
             electrode_zones=electrode_zones,
             path_electrodes=path_electrodes,
             path_terminals=path_terminals,
+            min_separation=min_separation,
             metrics_mode=metrics_mode,
             slot_index_by_electrode=slot_index or None,
         )
@@ -5300,6 +5361,7 @@ def _resolve_phase2_ordered_trace_resolution(
             electrode_zones=electrode_zones,
             path_electrodes=path_electrodes,
             path_terminals=path_terminals,
+            min_separation=min_separation,
         )
     print(
         f"Phase 2 pair final: crossings={final['crossing_count']}, "
@@ -5525,10 +5587,14 @@ def smart_collision_resolution(
     focus_separation: bool = False,
     fixed_endpoints: bool = False,
     max_crossing_count: int | None = None,
+    min_separation: float | None = None,
 ):
     """Collision resolution; mode depends on GA phase (see greedy_electrodes_only / use_gentle_resolution)."""
     if entry_points_2d is None:
         entry_points_2d = {}
+    if min_separation is None:
+        min_separation = PHASE2_INNER_TRACE_SEPARATION
+    min_separation = float(min_separation)
 
     clean_paths = []
     for path in paths:
@@ -5580,6 +5646,7 @@ def smart_collision_resolution(
         electrode_zones=electrode_zones,
         path_electrodes=path_electrodes,
         path_terminals=path_terminals,
+        min_separation=min_separation,
     )
     if initial['collision_score'] < COLLISION_SCORE_EPSILON:
         return paths
@@ -5608,7 +5675,7 @@ def smart_collision_resolution(
             slot_index_by_electrode=slot_index_by_electrode,
             max_attempts_per_trace=max(max_attempts, 8),
             max_pair_rounds=phase2_max_pair_rounds,
-            min_separation=PHASE2_INNER_TRACE_SEPARATION,
+            min_separation=min_separation,
             focus_separation=focus_separation,
             fixed_endpoints=fixed_endpoints,
             max_crossing_count=max_crossing_count,

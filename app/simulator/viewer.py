@@ -301,6 +301,97 @@ def _marker_label(marker: float) -> str:
     return "—"
 
 
+def render_simulation_screenshot(
+    scene: SimulationScene,
+    out_path: str,
+    *,
+    title: str = "G-code toolpath simulation",
+    window_size: tuple[int, int] = (1800, 1500),
+    transparent_background: bool = True,
+    camera_direction: tuple[float, float, float] = (0.9, -0.5, 0.55),
+    show_legend: bool = False,
+    jetting_only: bool = True,
+) -> str:
+    """Off-screen still of the finished toolpath (full path + arm at last step).
+
+    Reuses the module-level draw helpers so the framing matches the interactive
+    viewer, but renders the whole path at once for a publication panel.
+    """
+    import pyvista as pv
+
+    plotter = pv.Plotter(window_size=window_size, off_screen=True)
+    plotter.set_background("white")
+
+    faces = np.hstack(
+        [np.full((len(scene.mesh_faces), 1), 3), scene.mesh_faces]
+    ).ravel()
+    mesh = pv.PolyData(scene.mesh_points, faces)
+    scale = mesh.length * 0.012 if mesh.length > 0 else 5.0
+    last = max(0, len(scene.tip_path) - 1)
+
+    if "mesh" in scene.layers:
+        plotter.add_mesh(mesh, color="#d9d2c7", opacity=0.45, smooth_shading=True)
+    if "landmarks" in scene.layers:
+        _add_landmarks(plotter, scene, scale=scale, colors=("red", "green", "blue"))
+    if "origin" in scene.layers:
+        _add_machine_origin(plotter, scene, scale=scale)
+
+    if "cnc" in scene.layers and len(scene.cnc_path) >= 2:
+        _add_line_mesh(plotter, _polyline(scene.cnc_path), color="dimgray", line_width=2)
+    if (
+        "programmed" in scene.layers
+        and scene.programmed_path is not None
+        and len(scene.programmed_path) >= 2
+    ):
+        _add_line_mesh(
+            plotter, _polyline(scene.programmed_path), color="silver", line_width=2
+        )
+
+    if "tip" in scene.layers and len(scene.tip_path) >= 2:
+        pts, mk = _dedupe_path_with_markers(scene.tip_path, scene.markers)
+        colors = _tip_segment_colors(mk)
+        for seg, color in _grouped_colored_segments(pts, colors):
+            if jetting_only and color != "lime":
+                continue
+            _add_line_mesh(plotter, _polyline(seg), color=color, line_width=6)
+
+    if "arm" in scene.layers:
+        arm_step = last
+        jet_on = _segment_jet_on(scene.markers)
+        active = [i for i, on in enumerate(jet_on) if on]
+        if active:
+            arm_step = active[len(active) // 2]
+        _add_arm_skeleton(plotter, scene, arm_step, scale=scale)
+
+    if title:
+        plotter.add_title(title, font_size=13)
+    if show_legend:
+        plotter.add_legend(
+            labels=[[label, color] for label, color in LEGEND_ENTRIES],
+            bcolor=(1.0, 1.0, 1.0),
+            face=None,
+            size=(0.28, 0.30),
+            loc="upper right",
+        )
+
+    focal = np.asarray(scene.tip_path, dtype=float)
+    focal = focal[np.isfinite(focal).all(axis=1)]
+    center = focal.mean(axis=0) if len(focal) else mesh.center
+    span = float(np.linalg.norm(mesh.bounds[1::2] - np.asarray(mesh.bounds[0::2])))
+    span = span or 200.0
+    d = np.asarray(camera_direction, dtype=float)
+    d = d / (np.linalg.norm(d) or 1.0)
+    plotter.camera_position = [
+        tuple(center + d * span * 1.4),
+        tuple(center),
+        (0.0, 0.0, 1.0),
+    ]
+
+    plotter.screenshot(out_path, transparent_background=transparent_background)
+    plotter.close()
+    return out_path
+
+
 def show_simulation(
     scene: SimulationScene,
     *,

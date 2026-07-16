@@ -118,6 +118,7 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
     Lift modified_path_2d onto the head mesh (UV grid + closest-point snap).
 
     Replaces straight 3D chords from older synthesize runs (path_lift=straight_synthesize).
+    Prefer path_end_* (truncated wire end) over strip entry when present.
     """
     setup_runtime()
     import PYTHON.tools.new2dAlterations as new2d
@@ -147,10 +148,7 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         uv_ctx = recon.UVReconstructionContext(uv_grid_for_context(uv_raw), mesh)
 
     terminal_2d_mode = data.get("metadata", {}).get("terminal_2d_mode", "inflated_legacy")
-    if terminal_2d_mode == "fiducial_native":
-        t2d_mode = "fiducial"
-    else:
-        t2d_mode = "inflated"
+    t2d_mode = new2d.normalize_terminal_2d_mode(terminal_2d_mode)
     electrodes_2d, terminals_2d, _ = build_layout_2d(
         electrodes, layout_fiducials, terminal_2d_mode=t2d_mode
     )
@@ -161,8 +159,11 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
 
     out = deepcopy(data)
     lift = data.get("metadata", {}).get("path_lift")
+    # Synthesize/polish already store surface path_points (incl. truncation).
+    # Only re-lift legacy straight chords.
+    keep_stored_lifts = ("smooth", "uv_surface_synthesize")
     for conn in out.get("paths", []):
-        if conn.get("path_points") and lift in ("smooth",):
+        if conn.get("path_points") and lift in keep_stored_lifts:
             continue
         if conn.get("path_points") and not conn.get("modified_path_2d"):
             continue
@@ -172,28 +173,46 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         t3d = np.asarray(layout_fiducials[terminal], dtype=float)
         path_2d = np.asarray(conn["modified_path_2d"], dtype=float)
         e2d = electrodes_2d[electrode]
-        if conn.get("entry_point_2d") is not None:
-            end2d = np.asarray(conn["entry_point_2d"], dtype=float)
+
+        if conn.get("path_end_3d") is not None:
+            end3d = np.asarray(conn["path_end_3d"], dtype=float)
         else:
-            end2d = new2d.polar_projection(np.array([t3d]), cz_pos)[0]
-        end3d = entry_3d_for_strip(
-            end2d,
-            uv_ctx,
-            mesh,
-            e3d=e3d,
-            terminal_3d=t3d,
-            e2d=e2d,
-            cz_pos=cz_pos,
-            terminal_2d_mode=terminal_2d_mode,
-            terminal_zone_size=terminal_zone_size,
-        )
+            if conn.get("path_end_2d") is not None:
+                end2d = np.asarray(conn["path_end_2d"], dtype=float)
+            elif conn.get("entry_point_2d") is not None:
+                end2d = np.asarray(conn["entry_point_2d"], dtype=float)
+            else:
+                end2d = new2d.polar_projection(np.array([t3d]), cz_pos)[0]
+            end3d = entry_3d_for_strip(
+                end2d,
+                uv_ctx,
+                mesh,
+                e3d=e3d,
+                terminal_3d=t3d,
+                e2d=e2d,
+                cz_pos=cz_pos,
+                terminal_2d_mode=terminal_2d_mode,
+                terminal_zone_size=terminal_zone_size,
+            )
 
         path_3d = uv_ctx.reconstruct(e3d, end3d, path_2d)
         path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
         path_3d = pin_path_endpoints_3d(path_3d, e3d, end3d, mesh)
         conn["path_points"] = path_3d.tolist()
-        if conn.get("entry_point_2d") is not None:
-            conn["entry_position_3d"] = end3d.tolist()
+        if conn.get("entry_point_2d") is not None and conn.get("entry_position_3d") is None:
+            # Preserve strip entry if missing; do not overwrite truncated wire end.
+            entry_2d = np.asarray(conn["entry_point_2d"], dtype=float)
+            conn["entry_position_3d"] = entry_3d_for_strip(
+                entry_2d,
+                uv_ctx,
+                mesh,
+                e3d=e3d,
+                terminal_3d=t3d,
+                e2d=e2d,
+                cz_pos=cz_pos,
+                terminal_2d_mode=terminal_2d_mode,
+                terminal_zone_size=terminal_zone_size,
+            ).tolist()
     return out
 
 

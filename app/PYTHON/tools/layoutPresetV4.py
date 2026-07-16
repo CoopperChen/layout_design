@@ -607,7 +607,7 @@ def entry_3d_for_strip(
         end3d = entry_3d_from_chord_fraction(e3d, terminal_3d, e2d, entry_2d, cz_pos)
 
     if (
-        terminal_2d_mode == TERMINAL_2D_FIDUCIAL
+        new2d.normalize_terminal_2d_mode(terminal_2d_mode) == "fiducial"
         and mesh is not None
         and terminal_zone_size is not None
         and terminal_zone_size > 0
@@ -1664,6 +1664,9 @@ def apply_layout_preset_v4_synthesize(
             min_points=int(terminal_min_points),
         )
         wire_end_2d = new2d.polar_projection(np.array([wire_end_3d]), cz_pos)[0]
+        path_2d_trunc = new2d.pin_path_endpoints_2d(
+            path_2d_trunc, e2d, wire_end_2d
+        )
 
         out: dict[str, Any] = {
             "electrode": electrode,
@@ -2000,9 +2003,20 @@ def uncross_applied_layout(
     electrodes, _ = load_subject_data(target_id)
     fiducials, _ = resolve_layout_fiducials(target_id, data)
     original_paths = ensure_init_connection_paths(target_id, electrodes, fiducials)
-    if hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
+    terminal_2d_mode = data.get("metadata", {}).get(
+        "terminal_2d_mode", "inflated_legacy"
+    )
+    if hasattr(new2d, "clear_subject_layout_cache"):
+        new2d.clear_subject_layout_cache(target_id)
+    elif hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
         new2d._SUBJECT_LAYOUT_CACHE.pop(target_id, None)
-    ctx = new2d.get_subject_layout(target_id, electrodes, fiducials, original_paths)
+    ctx = new2d.get_subject_layout(
+        target_id,
+        electrodes,
+        fiducials,
+        original_paths,
+        terminal_2d_mode=terminal_2d_mode,
+    )
 
     child = _child_from_applied_data(data)
     paths = [np.asarray(p["modified_path_2d"], dtype=float) for p in child["paths"]]

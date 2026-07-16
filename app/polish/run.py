@@ -49,6 +49,7 @@ def run_repair(
         ),
         fixed_endpoints=bool(cfg.get("fixed_endpoints", True)),
         profile_phase2=do_profile,
+        min_trace_separation=float(cfg.get("min_trace_separation_mm", 4.0)),
     )
 
 

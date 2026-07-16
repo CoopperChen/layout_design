@@ -30,6 +30,8 @@ def simulate_gcode(
     layers: set[str] | None = None,
     animate: bool = False,
     verbose: bool = False,
+    screenshot: str | Path | None = None,
+    title: str | None = None,
 ) -> None:
     setup_runtime()
     import numpy as np
@@ -44,7 +46,11 @@ def simulate_gcode(
     )
     from app.simulator.parser import parse_gcode_file
     from app.simulator.registration.mesh import register_mesh_full
-    from app.simulator.viewer import SimulationScene, show_simulation
+    from app.simulator.viewer import (
+        SimulationScene,
+        render_simulation_screenshot,
+        show_simulation,
+    )
 
     gcode_path = Path(gcode)
     if not gcode_path.is_absolute():
@@ -185,7 +191,16 @@ def simulate_gcode(
         layers=layers or {"mesh", "landmarks", "origin", "tip", "arm"},
     )
 
-    title = f"Subject {subject_bundle.subject_id} — {gcode_path.name}"
+    if title is None:
+        title = f"Subject {subject_bundle.subject_id} — {gcode_path.name}"
+    if screenshot is not None:
+        out = Path(screenshot)
+        if not out.is_absolute():
+            out = paths.REPO_ROOT / out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        render_simulation_screenshot(scene, str(out), title=title)
+        print(f"Simulation screenshot: {out}")
+        return
     show_simulation(scene, title=title, animate=animate)
 
 

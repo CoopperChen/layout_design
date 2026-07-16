@@ -12,6 +12,17 @@ from app.config_loader import load_defaults
 from app.runtime import setup_runtime
 
 
+_TARGET_SEGMENT_MM = 3.0
+_MAX_SMOOTH_POINTS = 300
+
+
+def _resampled_count(path: np.ndarray) -> int:
+    """Point count for ~_TARGET_SEGMENT_MM spacing (denser toolpath, gentler axis steps)."""
+    total = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())
+    n = int(np.ceil(total / _TARGET_SEGMENT_MM)) + 1
+    return int(np.clip(n, len(path), _MAX_SMOOTH_POINTS))
+
+
 def _smooth_3d_path(path: np.ndarray, smoothing_factor: float) -> np.ndarray:
 
     from scipy.interpolate import splev, splprep
@@ -44,6 +55,8 @@ def _smooth_3d_path(path: np.ndarray, smoothing_factor: float) -> np.ndarray:
 
         s_param = smoothing_factor * len(cleaned_path) * 10
 
+        n_out = _resampled_count(cleaned_path)
+
         strategies = [
 
             (3, s_param),
@@ -70,7 +83,7 @@ def _smooth_3d_path(path: np.ndarray, smoothing_factor: float) -> np.ndarray:
 
                 tck, _u = splprep(cleaned_path.T, s=s, k=k)
 
-                u_new = np.linspace(0, 1, len(path))
+                u_new = np.linspace(0, 1, n_out)
 
                 smoothed_path = np.column_stack(splev(u_new, tck))
 

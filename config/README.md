@@ -10,7 +10,7 @@ Key fields in `defaults.yaml`:
 |-----|---------|---------|
 | `preprocess.poisson_depth` | `12` | `run`, `preprocess reconstruct` |
 | `preprocess.align_head` | `true` | `run` reconstruct (disable with `--no-align-head`) |
-| `synthesize.assignments` | `s1_assignments` | `run`, `synthesize` |
+| `synthesize.assignments` | `subject1_best_v4` | `run`, `synthesize` |
 | `postprocess.smoothing_strength` | `0.1` | `run`, `smooth` |
 
 Per-subject overrides can be added later as `config/subjects/{id}.yaml`.

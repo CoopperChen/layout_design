@@ -22,4 +22,7 @@ python -m app run --target 2 --from polish --to polish --polish-profile
 
 Or set `polish.profile: true` in `config/defaults.yaml`.
 
+Trace clearance target: `polish.min_trace_separation_mm` (default `4.0`) controls both
+phase-2 pair spacing penalties and the layout separation-deficit metric.
+
 Optional logs: `data/output/logs/subject_{id}/`

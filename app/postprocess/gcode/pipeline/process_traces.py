@@ -9,12 +9,17 @@ from app.postprocess.gcode.kinematics.arm_clearance import (
     HeadMeshInsideChecker,
     resolve_normal_arm_clearance,
 )
+from app.postprocess.mesh_normals import (
+    smooth_normals_along_path,
+    stabilize_normals_near_pole,
+)
 
 from ..kinematics.axis_angles import compute_axis_angles
-from ..kinematics.feed_rate import compute_feed_rates
+from ..kinematics.feed_rate import compute_print_feed_rates
 from ..kinematics.flip_correction import (
     correct_flip,
     enforce_axis_continuity,
+    limit_c_slew,
     validate_axis_continuity,
 )
 from ..kinematics.machine_zero import apply_machine_zero_offset
@@ -38,6 +43,7 @@ def process_trace(
     coords_include_gap: bool = False,
     mesh_points: np.ndarray | None = None,
     mesh_faces: np.ndarray | None = None,
+    channel_name: str | None = None,
 ) -> np.ndarray:
     """
     Process one Nx6 trace into gcode rows [X, Y, Z, B, C, F, marker].
@@ -67,21 +73,39 @@ def process_trace(
                 coords_include_gap=coords_include_gap,
             )
 
+    pp = load_defaults().get("postprocess", {})
+    smooth_alpha = float(pp.get("normal_path_smooth_alpha", 0.5))
+    smooth_passes = int(pp.get("normal_path_smooth_passes", 1))
+    if smooth_passes > 0 and smooth_alpha > 0.0:
+        en = smooth_normals_along_path(
+            en, alpha=smooth_alpha, passes=smooth_passes
+        )
+    nxy_min = float(pp.get("c_pole_nxy_min", 0.08))
+    if nxy_min > 0.0:
+        en = stabilize_normals_near_pole(en, nxy_min=nxy_min)
+
     g = apply_machine_zero_offset(g, machine)
     b_angles, c_angles = compute_axis_angles(en)
     b_angles, c_angles = correct_flip(b_angles, c_angles)
     b_angles, c_angles = enforce_axis_continuity(b_angles, c_angles)
-    max_c_step = float(
-        load_defaults().get("postprocess", {}).get("axis_max_c_step_deg", 45.0)
-    )
-    validate_axis_continuity(b_angles, c_angles, max_c_step_deg=max_c_step)
+    c_slew = float(pp.get("c_max_slew_deg", 12.0))
+    if c_slew > 0.0:
+        b_angles, c_angles = limit_c_slew(
+            b_angles, c_angles, max_step_deg=c_slew
+        )
+    max_c_step = float(pp.get("axis_max_c_step_deg", 90.0))
+    try:
+        validate_axis_continuity(b_angles, c_angles, max_c_step_deg=max_c_step)
+    except ValueError as exc:
+        label = channel_name or "trace"
+        raise ValueError(f"{label}: {exc}") from exc
     offset_gap = 0.0 if coords_include_gap else None
     g = apply_tool_offset(g, en, c_angles, machine, gap_mm=offset_gap)
 
     b_angles = np.round(b_angles, 2)
     c_angles = np.round(c_angles, 2)
 
-    feed = compute_feed_rates(g, data[:, :3], machine)
+    feed = compute_print_feed_rates(g, b_angles, c_angles, machine)
 
     return np.column_stack([g, b_angles, c_angles, feed, np.zeros(len(g))])
 
@@ -117,6 +141,7 @@ def process_all_traces(
                         machine,
                         mesh_points=mesh_points,
                         mesh_faces=mesh_faces,
+                        channel_name=ch.name,
                     )
                 )
                 break
@@ -134,6 +159,7 @@ def process_all_traces(
                         coords_include_gap=True,
                         mesh_points=mesh_points,
                         mesh_faces=mesh_faces,
+                        channel_name=ch.name,
                     )
                 )
                 break
@@ -147,6 +173,7 @@ def process_all_traces(
                 coords_include_gap=coords_include_gap,
                 mesh_points=mesh_points,
                 mesh_faces=mesh_faces,
+                channel_name=ch.name,
             )
         )
 
