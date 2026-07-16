@@ -11,7 +11,6 @@ from app import paths
 from app.config_loader import load_defaults
 from app.runtime import setup_runtime
 
-
 _TARGET_SEGMENT_MM = 3.0
 _MAX_SMOOTH_POINTS = 300
 

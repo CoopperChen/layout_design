@@ -120,6 +120,22 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
     Replaces straight 3D chords from older synthesize runs (path_lift=straight_synthesize).
     Prefer path_end_* (truncated wire end) over strip entry when present.
     """
+    out = deepcopy(data)
+    lift = data.get("metadata", {}).get("path_lift")
+    # Synthesize/polish already store surface path_points (incl. truncation).
+    # Only re-lift legacy straight chords.
+    keep_stored_lifts = ("smooth", "uv_surface_synthesize")
+    paths = out.get("paths", [])
+    needs_lift = any(
+        not (
+            (conn.get("path_points") and lift in keep_stored_lifts)
+            or (conn.get("path_points") and not conn.get("modified_path_2d"))
+        )
+        for conn in paths
+    )
+    if not needs_lift:
+        return out
+
     setup_runtime()
     import PYTHON.tools.new2dAlterations as new2d
     import PYTHON.tools.reconstructUsingUVmesh as recon
@@ -157,12 +173,7 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         ez, _ = new2d.create_zones(electrodes_2d, terminals_2d)
         terminal_zone_size = float(ez["metadata"].get("terminal_zone_size", 0.0))
 
-    out = deepcopy(data)
-    lift = data.get("metadata", {}).get("path_lift")
-    # Synthesize/polish already store surface path_points (incl. truncation).
-    # Only re-lift legacy straight chords.
-    keep_stored_lifts = ("smooth", "uv_surface_synthesize")
-    for conn in out.get("paths", []):
+    for conn in paths:
         if conn.get("path_points") and lift in keep_stored_lifts:
             continue
         if conn.get("path_points") and not conn.get("modified_path_2d"):
