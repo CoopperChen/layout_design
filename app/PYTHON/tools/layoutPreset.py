@@ -214,7 +214,7 @@ def sync_terminal_fiducials_json(
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
     if hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
-        new2d._SUBJECT_LAYOUT_CACHE.pop(subject_id, None)
+        new2d.clear_subject_layout_cache(subject_id)
     print(f"Updated {path} terminal positions (backup: {backup})")
     return path
 
@@ -264,7 +264,10 @@ def build_layout_2d(
         k: new2d.polar_projection(np.array([v]), cz_pos)[0] for k, v in electrodes.items()
     }
     terminals_2d = new2d.build_terminals_2d(
-        electrodes_2d, fiducials, cz_pos, mode=terminal_2d_mode
+        electrodes_2d,
+        fiducials,
+        cz_pos,
+        mode=new2d.normalize_terminal_2d_mode(terminal_2d_mode),
     )
     return electrodes_2d, terminals_2d, cz_pos
 
@@ -749,6 +752,7 @@ def repair_applied_preset(
     skip_phase1_when_electrode_free: bool = True,
     fixed_endpoints: bool = True,
     profile_phase2: bool = False,
+    min_trace_separation: float | None = None,
 ) -> dict[str, Any]:
     """
   Polish layout: fixed electrode + truncated wire ends; improve trace separation
@@ -766,14 +770,29 @@ def repair_applied_preset(
         f"RIGHT={terminals_3d['TERMINAL_RIGHT'].round(1).tolist()})"
     )
     original_paths = ensure_init_connection_paths(target_id, electrodes, fiducials)
-    if hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
+    terminal_2d_mode = data.get("metadata", {}).get(
+        "terminal_2d_mode", "inflated_legacy"
+    )
+    if hasattr(new2d, "clear_subject_layout_cache"):
+        new2d.clear_subject_layout_cache(target_id)
+    elif hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
         new2d._SUBJECT_LAYOUT_CACHE.pop(target_id, None)
-    new2d.warm_subject_caches(target_id, electrodes, fiducials, original_paths)
+    new2d.warm_subject_caches(
+        target_id,
+        electrodes,
+        fiducials,
+        original_paths,
+        terminal_2d_mode=terminal_2d_mode,
+    )
 
     child = _child_from_applied_data(data)
     before = data.get("collision_metrics", {})
     focus_separation = focus == "separation"
     baseline_crossings = int(before.get("crossing_count") or 0)
+    if min_trace_separation is None:
+        min_trace_separation = float(new2d.PHASE2_INNER_TRACE_SEPARATION)
+    else:
+        min_trace_separation = float(min_trace_separation)
     print(
         f"Before polish: collision_score={before.get('collision_score')}, "
         f"crossings={before.get('crossing_count')}, "
@@ -783,7 +802,8 @@ def repair_applied_preset(
     if focus_separation:
         print(
             f"Polish: fixed endpoints, separation-only "
-            f"(phase2 rounds={phase2_max_rounds}, max_crossings={baseline_crossings})"
+            f"(phase2 rounds={phase2_max_rounds}, max_crossings={baseline_crossings}, "
+            f"min_sep={min_trace_separation:.2f}mm)"
         )
 
     skip_phase1 = (
@@ -804,6 +824,7 @@ def repair_applied_preset(
             fiducials,
             original_paths,
             greedy_electrodes_only=True,
+            terminal_2d_mode=terminal_2d_mode,
         )
 
     if not electrodes_only:
@@ -827,6 +848,8 @@ def repair_applied_preset(
                 focus_separation=focus_separation,
                 fixed_endpoints=fixed_endpoints,
                 max_crossing_count=baseline_crossings,
+                min_separation=min_trace_separation,
+                terminal_2d_mode=terminal_2d_mode,
             )
         finally:
             if profile_phase2:
@@ -846,6 +869,8 @@ def repair_applied_preset(
                 use_gentle_resolution=False,
                 force_trace_resolution=True,
                 focus_separation=focus_separation,
+                min_separation=min_trace_separation,
+                terminal_2d_mode=terminal_2d_mode,
             )
 
     metadata_extra = {
@@ -858,6 +883,7 @@ def repair_applied_preset(
         metadata_extra["polish_focus"] = "separation"
     if fixed_endpoints:
         metadata_extra["polish_fixed_endpoints"] = True
+    metadata_extra["polish_min_trace_separation_mm"] = min_trace_separation
     result = _package_applied_result(
         target_id, child, metadata_extra, uv_resolution=uv_resolution, fiducials=fiducials
     )
@@ -899,7 +925,7 @@ def _sync_terminal_assignments_from_applied(
     with open(out_path, "w") as f:
         json.dump(assignments, f, indent=2)
     if hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
-        new2d._SUBJECT_LAYOUT_CACHE.pop(subject_id, None)
+        new2d.clear_subject_layout_cache(subject_id)
     print(f"Synced terminal assignments → {out_path}")
     return assignments
 
@@ -1012,7 +1038,7 @@ def seed_ga_generation_zero(
 
     original_paths = ensure_init_connection_paths(subject_id, electrodes, fiducials)
     if hasattr(new2d, "_SUBJECT_LAYOUT_CACHE"):
-        new2d._SUBJECT_LAYOUT_CACHE.pop(subject_id, None)
+        new2d.clear_subject_layout_cache(subject_id)
     new2d.warm_subject_caches(subject_id, electrodes, fiducials, original_paths)
 
     genetics.set_ga_optimization_phase(1)
@@ -1200,7 +1226,11 @@ def visualize_applied_preset(
         layout_fiducials = dict(fiducials)
         for term, pos in stored_terminals.items():
             layout_fiducials[term] = np.asarray(pos, dtype=float)
-    electrodes_2d, terminals_2d, _ = build_layout_2d(electrodes, layout_fiducials)
+    electrodes_2d, terminals_2d, _ = build_layout_2d(
+        electrodes,
+        layout_fiducials,
+        terminal_2d_mode=meta.get("terminal_2d_mode", "inflated"),
+    )
     electrode_zones, terminal_zones = new2d.create_zones(electrodes_2d, terminals_2d)
 
     path_specs = data.get("paths", [])

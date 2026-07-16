@@ -1,5 +1,5 @@
 from .axis_angles import compute_axis_angles
-from .feed_rate import compute_feed_rates
+from .feed_rate import compute_feed_rates, compute_print_feed_rates, tip_positions_from_poses
 from .flip_correction import (
     correct_flip,
     enforce_axis_continuity,
@@ -18,4 +18,6 @@ __all__ = [
     "validate_axis_continuity",
     "apply_tool_offset",
     "compute_feed_rates",
+    "compute_print_feed_rates",
+    "tip_positions_from_poses",
 ]

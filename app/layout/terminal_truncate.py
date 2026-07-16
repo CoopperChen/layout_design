@@ -16,6 +16,13 @@ def default_terminal_min_points() -> int:
     return int(cfg.get("terminal_min_points", 4))
 
 
+def path_arc_length(path: np.ndarray) -> float:
+    pts = np.asarray(path, dtype=float)
+    if len(pts) < 2:
+        return 0.0
+    return float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
+
+
 def truncate_terminal_tail(
     path: np.ndarray,
     *,
@@ -67,14 +74,25 @@ def apply_wire_truncation(
     stop_mm: float,
     min_points: int = 4,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Truncate 2D/3D wire paths from the terminal end; return (2d, 3d, wire_end_3d)."""
+    """
+    Truncate using 3D arc length in mm, then shorten 2D by the same fraction.
+
+    Returns (path_2d_trunc, path_3d_trunc, wire_end_3d). Caller should pin the
+    2D end to the polar projection of wire_end_3d so path_end_2d matches.
+    """
+    path_2d = np.asarray(path_2d, dtype=float)
+    path_3d = np.asarray(path_3d, dtype=float)
     if stop_mm <= 0.0:
-        end3d = np.asarray(path_3d, dtype=float)[-1]
-        return (
-            np.asarray(path_2d, dtype=float).copy(),
-            np.asarray(path_3d, dtype=float).copy(),
-            end3d.copy(),
-        )
-    p2 = truncate_terminal_tail(path_2d, stop_mm=stop_mm, min_points=min_points)
+        end3d = path_3d[-1].copy()
+        return path_2d.copy(), path_3d.copy(), end3d
+
     p3 = truncate_terminal_tail(path_3d, stop_mm=stop_mm, min_points=min_points)
-    return p2, p3, np.asarray(p3[-1], dtype=float).copy()
+    wire_end_3d = np.asarray(p3[-1], dtype=float).copy()
+
+    len3 = path_arc_length(path_3d)
+    kept3 = path_arc_length(p3)
+    frac_kept = (kept3 / len3) if len3 > 1e-12 else 1.0
+    len2 = path_arc_length(path_2d)
+    stop_2d = max(0.0, len2 * (1.0 - frac_kept))
+    p2 = truncate_terminal_tail(path_2d, stop_mm=stop_2d, min_points=min_points)
+    return p2, p3, wire_end_3d

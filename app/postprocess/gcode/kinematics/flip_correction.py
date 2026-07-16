@@ -72,6 +72,38 @@ def enforce_axis_continuity(
     return b, c
 
 
+def limit_c_slew(
+    b_angles: np.ndarray,
+    c_angles: np.ndarray,
+    *,
+    max_step_deg: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Cap consecutive |ΔC| so the printer cannot swing the arm tip per sample.
+
+    Slight tip-orientation lag vs the raw normal is preferred over serpentine
+    tracks from crown atan2 jitter. B is left unchanged.
+    """
+    b = np.asarray(b_angles, dtype=float).copy()
+    c = np.asarray(c_angles, dtype=float).copy()
+    if len(c) <= 1 or max_step_deg <= 0.0:
+        return b, c
+
+    limit = float(max_step_deg)
+    for i in range(1, len(c)):
+        # Signed shortest-path delta in (-180, 180]
+        delta = (float(c[i]) - float(c[i - 1]) + 180.0) % 360.0 - 180.0
+        if abs(delta) <= limit:
+            continue
+        c[i] = float(c[i - 1]) + float(np.sign(delta)) * limit
+        # Keep C in a conventional range similar to axis-angle outputs.
+        if c[i] > 180.0:
+            c[i] -= 360.0
+        elif c[i] <= -180.0:
+            c[i] += 360.0
+    return b, c
+
+
 def max_c_step_deg(c_angles: np.ndarray) -> float:
     if len(c_angles) <= 1:
         return 0.0

@@ -109,6 +109,104 @@ def orient_normals_along_path(
     return out / np.maximum(lengths, 1e-12)
 
 
+def smooth_normals_along_path(
+    normals: np.ndarray,
+    *,
+    alpha: float = 0.5,
+    passes: int = 1,
+) -> np.ndarray:
+    """
+    Exponential blend of neighboring normals (forward then backward).
+
+    Reduces azimuth jitter when ``n`` is nearly vertical so C does not whip
+    between samples and drag the tip in a serpentine.
+    """
+    out = np.asarray(normals, dtype=float).copy()
+    if out.ndim == 1:
+        out = out.reshape(1, 3)
+    n = len(out)
+    if n <= 1 or passes <= 0 or alpha <= 0.0:
+        lengths = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / np.maximum(lengths, 1e-12)
+
+    a = float(np.clip(alpha, 0.0, 1.0))
+    for _ in range(int(passes)):
+        for i in range(1, n):
+            blended = (1.0 - a) * out[i] + a * out[i - 1]
+            norm = np.linalg.norm(blended)
+            if norm > 1e-12:
+                out[i] = blended / norm
+        for i in range(n - 2, -1, -1):
+            blended = (1.0 - a) * out[i] + a * out[i + 1]
+            norm = np.linalg.norm(blended)
+            if norm > 1e-12:
+                out[i] = blended / norm
+
+    lengths = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.maximum(lengths, 1e-12)
+
+
+def stabilize_normals_near_pole(
+    normals: np.ndarray,
+    *,
+    nxy_min: float = 0.08,
+) -> np.ndarray:
+    """
+    Softly inherit XY heading when |n_xy| is small (crown).
+
+    Weight goes to 1 at the pole and to 0 at ``nxy_min``, so leaving the crown
+    does not create a single large C cliff.
+    """
+    out = np.asarray(normals, dtype=float).copy()
+    if out.ndim == 1:
+        out = out.reshape(1, 3)
+    n = len(out)
+    if n <= 1 or nxy_min <= 0.0:
+        lengths = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / np.maximum(lengths, 1e-12)
+
+    threshold = float(nxy_min)
+
+    def _blend_pass(order: range) -> None:
+        for i in order:
+            prev = i - 1 if i > 0 else i + 1
+            if prev < 0 or prev >= n:
+                continue
+            nxy = float(np.hypot(out[i, 0], out[i, 1]))
+            if nxy >= threshold:
+                continue
+            prev_xy = out[prev, :2]
+            prev_len = float(np.linalg.norm(prev_xy))
+            if prev_len < 1e-12:
+                continue
+            weight = 1.0 - (nxy / threshold)
+            curr_dir = out[i, :2]
+            curr_len = float(np.linalg.norm(curr_dir))
+            if curr_len < 1e-12:
+                curr_dir = prev_xy / prev_len
+                curr_len = 1.0
+            else:
+                curr_dir = curr_dir / curr_len
+            prev_dir = prev_xy / prev_len
+            mixed = (1.0 - weight) * curr_dir + weight * prev_dir
+            mixed_len = float(np.linalg.norm(mixed))
+            if mixed_len < 1e-12:
+                continue
+            mixed = mixed / mixed_len
+            scale = max(nxy, 1e-6)
+            out[i, 0] = mixed[0] * scale
+            out[i, 1] = mixed[1] * scale
+            norm = np.linalg.norm(out[i])
+            if norm > 1e-12:
+                out[i] /= norm
+
+    _blend_pass(range(1, n))
+    _blend_pass(range(n - 2, -1, -1))
+
+    lengths = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.maximum(lengths, 1e-12)
+
+
 def orient_trace_xyzn(trace: np.ndarray, head_center: np.ndarray) -> np.ndarray:
     """Orient columns 3:6 of an Nx6 trace outward from head center."""
     out = np.asarray(trace, dtype=float).copy()

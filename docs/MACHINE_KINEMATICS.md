@@ -129,6 +129,18 @@ If **C** crosses zero with **|C| > 20°** on both sides, negate **B and C** on a
 
 Use `arm_offset_xy_matlab(c, a)` for the sin/cos arm term in the postprocessor (not the simulator rigid chain).
 
+## Print feedrate (constant tip speed)
+
+Controller **F** commands **C-pivot (XYZ)** speed. For each print segment:
+
+```
+F = V_tip · ||ΔC_pivot|| / ||Δtip_FK||
+```
+
+with ``V_tip = speed_mm_min``, clamped to ``max_speed_mm_min``.
+
+``Δtip_FK`` is the rigid forward-kinematics tip travel for the programmed ``(X,Y,Z,B,C)`` poses — not the raw scalp chord — so B/C swings that move the tip are included. Using the path chord alone sets **F too high** during orientation changes (tip serpentine at max feed).
+
 ## Simulator (`simulate-gcode`)
 
 **Runtime (confirmed on machine):** controller moves **C pivot** to programmed **X,Y,Z**; **B,C** command the arm/tool. No postprocessor runs at print time.

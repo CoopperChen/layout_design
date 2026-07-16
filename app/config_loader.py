@@ -31,7 +31,7 @@ def default_assignments() -> str:
     cfg = load_defaults()
     name = cfg.get("synthesize", {}).get("assignments") or cfg.get("assignments")
     if not name:
-        return "s1_assignments"
+        return "subject1_best_v4"
     return str(name)
 
 
