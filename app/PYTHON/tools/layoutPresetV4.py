@@ -45,6 +45,7 @@ SYNTH_ENTRY_SLIDE_MAX_ROUNDS = 120
 SYNTH_MIN_SLOT_GAP = 0.45
 SYNTH_TAIL_SWAP_SEPARATION = 1.0
 SYNTH_TAIL_SWAP_MAX_ROUNDS = 200
+SYNTH_ENTRY_SWAP_MAX_ROUNDS = 80
 
 
 def _metrics_dict(analysis: dict) -> dict:
@@ -1153,6 +1154,93 @@ def _separate_entry_points(
     )
 
 
+def _uncross_by_entry_order_swap(
+    paths: list[np.ndarray],
+    path_electrodes: list[str],
+    path_terminals: list[str],
+    electrodes_2d: dict[str, np.ndarray],
+    entry_points: dict[str, np.ndarray],
+    electrode_zones: dict,
+    slot_index: dict[str, int] | None = None,
+    *,
+    max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
+) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
+    """
+    If two same-terminal traces cross, swap their strip entry slots and replan.
+
+    Accepts a swap only when total pairwise crossings decrease. Runs before
+    geometric detour uncross so near-hub X patterns resolve by order, not bends.
+    """
+    paths = [np.asarray(p, dtype=float).copy() for p in paths]
+    entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
+    slots = {k: int(v) for k, v in (slot_index or {}).items()}
+
+    def _replan(idx: int) -> np.ndarray:
+        name = path_electrodes[idx]
+        start = electrodes_2d[name]
+        end = entries[name]
+        path = _path_with_electrode_detour(start, end, name, electrode_zones)
+        return new2d.pin_path_endpoints_2d(path, start, end)
+
+    for round_idx in range(max_rounds):
+        cross_total = _count_pair_crossings(paths)
+        if cross_total == 0:
+            break
+
+        improved = False
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _first_crossing_point(paths[i], paths[j]) is None:
+                    continue
+
+                name_a = path_electrodes[i]
+                name_b = path_electrodes[j]
+                if name_a not in entries or name_b not in entries:
+                    continue
+
+                entries[name_a], entries[name_b] = (
+                    entries[name_b].copy(),
+                    entries[name_a].copy(),
+                )
+                if name_a in slots and name_b in slots:
+                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+
+                trial = list(paths)
+                trial[i] = _replan(i)
+                trial[j] = _replan(j)
+                new_cross = _count_pair_crossings(trial)
+                if new_cross < cross_total:
+                    paths = trial
+                    improved = True
+                    print(
+                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
+                        f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
+                    )
+                    break
+
+                # Revert rejected swap
+                entries[name_a], entries[name_b] = (
+                    entries[name_b].copy(),
+                    entries[name_a].copy(),
+                )
+                if name_a in slots and name_b in slots:
+                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+            if improved:
+                break
+
+        if not improved:
+            if cross_total > 0:
+                print(
+                    f"  Entry-order swap stopped at round {round_idx + 1} "
+                    f"(crossings={cross_total})"
+                )
+            break
+
+    return paths, entries, slots
+
+
 def _uncross_by_tail_swap(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1535,7 +1623,7 @@ def apply_layout_preset_v4_synthesize(
     )
     if terminal_2d_mode == TERMINAL_2D_FIDUCIAL:
         hub_msg = f"{hub_msg} (fiducial strip zones)"
-    print(f"v4 synthesize: {entry_mode} → {hub_msg} → straight/detour paths")
+    print(f"v4 synthesize: {entry_mode} → {hub_msg} → straight/detour + entry-order swap")
 
     if optimize_terminals:
         terminals_3d, layout_fiducials, electrodes_2d, terminals_2d, cz_pos = (
@@ -1592,6 +1680,16 @@ def apply_layout_preset_v4_synthesize(
         paths_2d.append(
             _path_with_electrode_detour(e2d, end2d, electrode, electrode_zones)
         )
+    # Same-terminal crossings: swap strip entry order and replan (default path).
+    paths_2d, entry_points_2d, slot_index_live = _uncross_by_entry_order_swap(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        electrodes_2d,
+        entry_points_2d,
+        electrode_zones,
+        slot_index=slot_index_live,
+    )
     if use_tail_swap and preserve_entry_order:
         paths_2d, entry_points_2d = _uncross_by_tail_swap(
             paths_2d,
