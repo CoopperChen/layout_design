@@ -25,6 +25,7 @@ STAGES: tuple[str, ...] = (
     "smooth",
     "bundle",
     "print-config",
+    "record-pm",
     "gcode",
     "simulate",
 )
@@ -201,12 +202,23 @@ def _validate_inputs(
         _require_file(pp.layout if first == "polish" else layout, first)
     elif first == "bundle":
         _require_file(pp.smooth, first)
-    elif first in {"print-config", "gcode", "simulate"}:
+    elif first in {"print-config", "record-pm", "gcode", "simulate"}:
         _require_file(pp.smooth, "smooth")
     if first in {"gcode", "simulate"}:
         if not pp.bundle.is_dir():
             raise FileNotFoundError(
                 f"Cannot start pipeline at {first}: missing bundle dir {pp.bundle}"
+            )
+    if first == "gcode":
+        from app.postprocess.print_config import pm_is_measured
+
+        pm_path = Path(args.pm_file or args.config or pp.print_config)
+        if not pm_path.is_absolute():
+            pm_path = paths.REPO_ROOT / pm_path
+        if not pm_is_measured(pm_path):
+            raise FileNotFoundError(
+                f"Cannot start pipeline at gcode: physical landmarks not measured in {pm_path}\n"
+                f"Run record-pm (or --from record-pm), or pass a measured --pm-file."
             )
     if first == "simulate":
         _require_file(pp.gcode, "gcode")
@@ -240,6 +252,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         "smooth": lambda: _run_smooth(args, _layout_input(pp, stages, polish=polish), pp),
         "bundle": lambda: _run_bundle(args, pp),
         "print-config": lambda: _run_print_config(args, pp),
+        "record-pm": lambda: _run_record_pm(args, pp),
         "gcode": lambda: _run_gcode(args, pp),
         "simulate": lambda: _run_simulate(args, pp),
     }
@@ -268,7 +281,11 @@ def _run_reconstruct(args: argparse.Namespace, pp: PipelinePaths) -> int:
     from app.preprocess.run import run_reconstruct
 
     ply = _input_ply(args, pp)
-    _print_step("reconstruct", f"{ply} → STL/OBJ for subject {pp.target}")
+    _print_step(
+        "reconstruct",
+        f"{ply} → STL/OBJ for subject {pp.target}\n"
+        "  Keys: Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm",
+    )
     try:
         return run_reconstruct(
             pp.target,
@@ -284,7 +301,11 @@ def _run_reconstruct(args: argparse.Namespace, pp: PipelinePaths) -> int:
 def _run_clear_islands(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
-    _print_step("clear-islands", f"→ {pp.cleaned}")
+    _print_step(
+        "clear-islands",
+        f"→ {pp.cleaned}\n"
+        "  AFTER window: Space/Enter/S/close = SAVE · Q = discard",
+    )
     try:
         return run_step("clear-islands", pp.target)
     except FileNotFoundError as exc:
@@ -295,7 +316,11 @@ def _run_clear_islands(pp: PipelinePaths) -> int:
 def _run_fiducials(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
-    _print_step("fiducials", "Interactive: pick anatomy, terminals, landmarks on OBJ")
+    _print_step(
+        "fiducials",
+        "Interactive pick on OBJ\n"
+        "  Space/Enter = confirm pick · S/close = save · Q = discard",
+    )
     try:
         return run_step("fiducials", pp.target)
     except FileNotFoundError as exc:
@@ -306,7 +331,11 @@ def _run_fiducials(pp: PipelinePaths) -> int:
 def _run_cz(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
-    _print_step("cz", f"→ {pp.cz}")
+    _print_step(
+        "cz",
+        f"→ {pp.cz}\n"
+        "  Space/Enter/S/close = SAVE · Q = discard",
+    )
     try:
         return run_step("cz", pp.target)
     except FileNotFoundError as exc:
@@ -317,7 +346,11 @@ def _run_cz(pp: PipelinePaths) -> int:
 def _run_electrodes(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
-    _print_step("electrodes", f"→ {pp.electrodes}")
+    _print_step(
+        "electrodes",
+        f"→ {pp.electrodes}\n"
+        "  Space/Enter/S/close = SAVE · Q = discard",
+    )
     try:
         return run_step("electrodes", pp.target)
     except FileNotFoundError as exc:
@@ -416,10 +449,49 @@ def _run_print_config(args: argparse.Namespace, pp: PipelinePaths) -> int:
     _print_step("init-print-config", str(pp.print_config))
     try:
         out = init_print_config(pp.target, force=args.force_print_config)
-        print(f"Wrote print config: {out}")
-        print("Edit physical_landmarks_mm after measuring on the printhead.")
+        print(f"Wrote print config scaffold: {out}")
+        print("Next stage record-pm fills physical_landmarks_mm from the CNC.")
         return 0
     except FileExistsError as exc:
+        print(exc)
+        return 1
+
+
+def _run_record_pm(args: argparse.Namespace, pp: PipelinePaths) -> int:
+    from app.postprocess.print_config import pm_is_measured
+    from app.postprocess.record_pm import record_physical_landmarks
+
+    force = bool(getattr(args, "force_record_pm", False))
+    if pm_is_measured(pp.print_config) and not force:
+        print(
+            f"\n=== record-pm ===\n"
+            f"Using measured landmarks in {pp.print_config} "
+            f"(pass --force-record-pm to re-capture)"
+        )
+        return 0
+
+    _print_step(
+        "record-pm",
+        f"Interactive CNC work-pose capture → {pp.print_config}\n"
+        "  Keys: Enter/Space=capture (save when all 3 done) · "
+        "1/2/3=jump · n/p=next/prev · s=save · q=quit\n"
+        "  Start Mach4 UDP publisher first (see config/postprocessor/README.md).",
+    )
+    try:
+        out = record_physical_landmarks(
+            pp.target,
+            bind_ip=getattr(args, "pm_bind_ip", "0.0.0.0"),
+            port=int(getattr(args, "pm_port", 62100)),
+            stale_sec=float(getattr(args, "pm_stale_ms", 500)) / 1000.0,
+            force=True,
+            output=pp.print_config,
+        )
+        print(f"Wrote measured pm: {out}")
+        return 0
+    except SystemExit as exc:
+        code = exc.code
+        return 0 if code in (None, 0) else (code if isinstance(code, int) else 1)
+    except (FileExistsError, FileNotFoundError, ValueError, OSError) as exc:
         print(exc)
         return 1
 
@@ -491,8 +563,9 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
             "Run the end-to-end workflow for one subject. "
             f"Input PLY defaults to data/raw/{{id}}.ply; assignment preset: "
             f"{default_assignments()} (config/defaults.yaml). "
-            "Fiducials and electrodes open interactive UIs. "
-            "Use --from synthesize to skip preprocess when already done."
+            "Interactive GUIs use Space/Enter/S to confirm/save and Q to discard. "
+            "Use --from synthesize to skip preprocess when already done. "
+            "G-code waits for measured physical landmarks (record-pm)."
         ),
     )
     run.add_argument("--target", type=int, required=True, help="Subject id")
@@ -558,7 +631,29 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
     run.add_argument(
         "--force-print-config",
         action="store_true",
-        help="Overwrite pm YAML even if it already exists",
+        help="Overwrite pm YAML scaffold even if it already exists",
+    )
+    run.add_argument(
+        "--force-record-pm",
+        action="store_true",
+        help="Re-capture CNC landmarks even if pm YAML is already measured",
+    )
+    run.add_argument(
+        "--pm-port",
+        type=int,
+        default=62100,
+        help="UDP port for Mach4 work-pose publisher (record-pm)",
+    )
+    run.add_argument(
+        "--pm-bind-ip",
+        default="0.0.0.0",
+        help="UDP bind address for record-pm (default: 0.0.0.0)",
+    )
+    run.add_argument(
+        "--pm-stale-ms",
+        type=float,
+        default=500.0,
+        help="Treat CNC pose older than this many ms as stale (record-pm)",
     )
     run.add_argument("--config", help="pm YAML for convert-gcode")
     run.add_argument("--pm-file", help="Alias for --config")

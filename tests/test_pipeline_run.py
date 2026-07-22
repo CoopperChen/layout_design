@@ -25,6 +25,7 @@ def test_active_stages_default_includes_polish():
         "smooth",
         "bundle",
         "print-config",
+        "record-pm",
         "gcode",
     ]
 
@@ -36,6 +37,7 @@ def test_active_stages_without_polish():
         "smooth",
         "bundle",
         "print-config",
+        "record-pm",
         "gcode",
     ]
 
@@ -51,6 +53,7 @@ def test_active_stages_full_from_ply():
     ]
     assert stages[-1] == "gcode"
     assert "polish" in stages
+    assert "record-pm" in stages
 
 
 def test_active_stages_with_polish():
@@ -60,7 +63,14 @@ def test_active_stages_with_polish():
 
 def test_active_stages_resume_from_smooth():
     stages = _active_stages(from_stage="smooth", to_stage="simulate", polish=False)
-    assert stages == ["smooth", "bundle", "print-config", "gcode", "simulate"]
+    assert stages == [
+        "smooth",
+        "bundle",
+        "print-config",
+        "record-pm",
+        "gcode",
+        "simulate",
+    ]
 
 
 def test_active_stages_rejects_inverted_range():
@@ -121,4 +131,6 @@ def test_stage_order_starts_with_preprocess():
     assert STAGES[0] == "reconstruct"
     assert STAGES[4] == "electrodes"
     assert "synthesize" in STAGES
+    assert STAGES.index("record-pm") == STAGES.index("print-config") + 1
+    assert STAGES.index("gcode") == STAGES.index("record-pm") + 1
     assert STAGES[-1] == "simulate"

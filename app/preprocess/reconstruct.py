@@ -48,15 +48,26 @@ def display_inlier_outlier(cloud, indices) -> None:
     outlier_cloud = cloud.select_by_index(indices, invert=True)
     outlier_cloud.paint_uniform_color([1, 0, 0])
     inlier_cloud.paint_uniform_color([0.8, 0.8, 0.8])
+    print(
+        "\nOutlier preview: close the window to continue "
+        "(review only — no keys).\n"
+    )
     o3d.visualization.draw_geometries(
         [inlier_cloud, outlier_cloud],
         window_name="Outlier removal (gray=inlier, red=outlier)",
     )
 
 
+# GLFW key codes used by Open3D VisualizerWithKeyCallback
+_KEY_SPACE = 32
+_KEY_ENTER = 257
+_KEY_ESCAPE = 256
+
+
 def interactive_normal_flip_viewer(geometry):
     """
-    F — toggle normals; Enter — confirm; Esc — cancel flip adjustment.
+    F — toggle normals; Space/Enter/S — confirm; Esc/Q — skip flip adjustment.
+    Closing the window confirms the current flip state.
     Returns True if normals were flipped and confirmed.
     """
     o3d = _require_open3d()
@@ -77,16 +88,21 @@ def interactive_normal_flip_viewer(geometry):
             print(f"Normals {'flipped' if flip_state['flipped'] else 'restored'}")
             vis.update_geometry(geometry_copy)
             return False
-        if key == 256:
+        if key in (_KEY_ENTER, _KEY_SPACE, ord("s"), ord("S")):
             vis.destroy_window()
             return False
-        if key == 27:
+        if key in (_KEY_ESCAPE, ord("q"), ord("Q")):
             flip_state["should_skip"] = True
             vis.destroy_window()
             return False
         return False
 
-    print("\nNormal flip viewer: F toggle | Enter confirm | Esc skip adjustment\n")
+    print(
+        "\nNormal flip viewer:\n"
+        "  F = toggle normals\n"
+        "  Space / Enter / S (or close) = confirm\n"
+        "  Esc / Q = skip adjustment\n"
+    )
 
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window(window_name="Normal Flip Viewer")
@@ -96,7 +112,18 @@ def interactive_normal_flip_viewer(geometry):
     opt = vis.get_render_option()
     opt.point_show_normal = True
     configure_renderer_lighting(vis)
-    for code in (ord("f"), ord("F"), 256, 27):
+    key_codes = (
+        ord("f"),
+        ord("F"),
+        _KEY_ENTER,
+        _KEY_SPACE,
+        ord("s"),
+        ord("S"),
+        _KEY_ESCAPE,
+        ord("q"),
+        ord("Q"),
+    )
+    for code in key_codes:
         vis.register_key_callback(code, lambda v, k=code: on_key_press(v, k, 2, 0))
     vis.run()
 
@@ -251,12 +278,12 @@ def interactive_head_rotation_viewer(mesh) -> bool:
             return set_camera(vis, [0, 1, 0], [0, 0, 1], "-Y axis (back side)")
         elif key == ord("6"):
             return set_camera(vis, [0, 0, 1], [0, -1, 0], "-Z axis (bottom)")
-        elif key == 256:
+        elif key in (_KEY_ENTER, _KEY_SPACE, ord("s"), ord("S")):
             rotation_state["confirmed"] = True
             vis.destroy_window()
-            print("Confirmed")
+            print("Confirmed — keeping current orientation")
             return False
-        elif key == 27:
+        elif key in (_KEY_ESCAPE, ord("q"), ord("Q")):
             rotation_state["canceled"] = True
             vis.destroy_window()
             print("Canceled — restoring original orientation")
@@ -280,7 +307,8 @@ def interactive_head_rotation_viewer(mesh) -> bool:
     print("  Arrows: roll/pitch ±2.5° | A/D: yaw ±2.5°")
     print("  1 top (XY) | 2 side (YZ) | 3 front (XZ)")
     print("  4 back (-X) | 5 back side (-Y) | 6 bottom (-Z)")
-    print("  Enter confirm | Esc cancel")
+    print("  Space / Enter / S (or close) = confirm")
+    print("  Esc / Q = cancel (restore original)")
     print("  Axes: +X red, +Y green, +Z blue; negative axes shown as cylinders")
     print("=" * 72 + "\n")
 
@@ -295,7 +323,8 @@ def interactive_head_rotation_viewer(mesh) -> bool:
         262, 263, 264, 265,
         ord("a"), ord("A"), ord("d"), ord("D"),
         ord("1"), ord("2"), ord("3"), ord("4"), ord("5"), ord("6"),
-        256, 27,
+        _KEY_ENTER, _KEY_SPACE, ord("s"), ord("S"),
+        _KEY_ESCAPE, ord("q"), ord("Q"),
     )
     for code in key_codes:
         vis.register_key_callback(code, lambda v, k=code: on_key_press(v, k, 2, 0))
@@ -306,7 +335,10 @@ def interactive_head_rotation_viewer(mesh) -> bool:
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
         return False
-    return rotation_state["confirmed"]
+    # Closing the window without a key = accept current orientation
+    if not rotation_state["confirmed"]:
+        print("Window closed — keeping current orientation")
+    return True
 
 
 def reconstruct_from_ply(

@@ -8,6 +8,24 @@
 
 **Run from repository root** (`layout_design/`).
 
+### Install (first-time clone)
+
+Python **3.10+**. Create a project venv and install from `pyproject.toml`:
+
+```powershell
+cd layout_design
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"   # runtime + pytest/ruff; omit [dev] for runtime only
+```
+
+Dependencies come from `pyproject.toml`: `numpy`, `scipy`, `open3d`, `pyvista`, `shapely`, `matplotlib`, `mne`, `pyyaml` (plus `pytest` / `ruff` with `[dev]`). The `.venv/` folder is gitignored — recreate it on each machine.
+
+Activate later sessions with `.\.venv\Scripts\Activate.ps1` (Linux/macOS: `source .venv/bin/activate`).
+
+Then initialize the data tree:
+
 ```powershell
 python -m app init-data
 python -m app paths --subject 2
@@ -15,7 +33,7 @@ python -m app paths --subject 2
 
 Console alias: `layout <command> …` (same as `python -m app`).
 
-See [docs/GOAL.md](docs/GOAL.md) for scope.
+More setup detail: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md). Scope: [docs/GOAL.md](docs/GOAL.md).
 
 ---
 
@@ -25,7 +43,7 @@ For a new subject, the usual input is a **PLY point cloud**. Use a single comman
 
 ```powershell
 # 1. Place scan: data/raw/2.ply
-# 2. One-time: build assignment map from reference subject 1
+# 2. One-time: assignment map (or use default subject1_best_v4 in config)
 python -m app build-assignments --reference 1 --id s1_assignments
 
 # 3. Full pipeline (interactive fiducials + electrodes in the middle)
@@ -36,16 +54,17 @@ python -m app run --target 2
 
 | Stage | Type | What it does |
 |-------|------|----------------|
-| `reconstruct` | automated | PLY → `data/raw/{id}.stl` + textured `.obj` (Poisson mesh) |
-| `clear-islands` | automated | Remove small mesh islands → `data/cleaned_scans/{id}.stl` |
-| `fiducials` | **interactive** | Pick nasion, LPA, RPA, inion, terminals, calibration landmarks on OBJ |
-| `cz` | automated | Compute Cz from anatomy slices |
-| `electrodes` | **interactive** | Place / confirm 10–20 electrode positions |
+| `reconstruct` | **interactive** | PLY → STL/OBJ (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
+| `clear-islands` | **review** | Remove islands → cleaned STL (Space/Enter/S/close save · Q discard) |
+| `fiducials` | **interactive** | Pick anatomy/terminals/landmarks (Space/Enter confirm pick · S/close save · Q discard) |
+| `cz` | **preview** | Compute Cz (Space/Enter/S/close save · Q discard) |
+| `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
 | `synthesize` | automated | Generate wire layout → `data/output/layouts/synth_s{id}.json` |
 | `smooth` | automated | B-spline 3D paths → `data/output/smooth/smooth_s{id}_final.json` |
 | `bundle` | automated | Export `data/output/bundles/subject_{id}/` |
-| `print-config` | automated | Create pm YAML if missing (`config/postprocessor/subjects/subject_{id}.yaml`) |
-| `gcode` | automated | Write `data/output/gcode/subject_{id}_post/allinterconnects.txt` (+ electrodes) |
+| `print-config` | automated | Create empty pm YAML scaffold if missing |
+| `record-pm` | **interactive (CNC)** | Capture work-pose landmarks via Mach4 UDP (skipped if already measured) |
+| `gcode` | automated | Write G-code (requires measured pm from `record-pm`) |
 
 Optional stages (not in default run):
 
@@ -59,7 +78,7 @@ The pipeline **stops on first failure** and prints which stage failed. Resume wi
 ### `run` — common examples
 
 ```powershell
-# Default: PLY at data/raw/2.ply, preset s1_assignments, through G-code
+# Default: PLY at data/raw/2.ply, preset from config (subject1_best_v4), through G-code
 python -m app run --target 2
 
 # Custom PLY path
@@ -99,7 +118,7 @@ python -m app run --target 2 --to electrodes
 
 Valid `--from` / `--to` values (in order):
 
-`reconstruct` → `clear-islands` → `fiducials` → `cz` → `electrodes` → `synthesize` → `polish` → `smooth` → `bundle` → `print-config` → `gcode` → `simulate`
+`reconstruct` → `clear-islands` → `fiducials` → `cz` → `electrodes` → `synthesize` → `polish` → `smooth` → `bundle` → `print-config` → `record-pm` → `gcode` → `simulate`
 
 #### Preprocess (reconstruct)
 
@@ -112,7 +131,7 @@ Valid `--from` / `--to` values (in order):
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| *(preset)* | `s1_assignments` | Terminal LEFT/RIGHT map — **not a CLI flag**; set in `config/defaults.yaml` → `synthesize.assignments` |
+| *(preset)* | `subject1_best_v4` | Terminal LEFT/RIGHT map — **not a CLI flag**; set in `config/defaults.yaml` → `synthesize.assignments` |
 | `--preserve-entry-order` | off | Keep reference strip slot order (full v4 presets only) |
 | `--inherit-preset-terminals` | off | **Legacy:** rigid-map reference hub positions onto target |
 | `--rotate` | off | ±36° hub angle search around fiducial clicks (may reduce crossings) |
@@ -132,7 +151,11 @@ Valid `--from` / `--to` values (in order):
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--force-print-config` | off | Overwrite existing pm YAML |
+| `--force-print-config` | off | Overwrite existing empty pm YAML scaffold |
+| `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
+| `--pm-port` | `62100` | Mach4 work-pose UDP port for `record-pm` |
+| `--pm-bind-ip` | `0.0.0.0` | UDP bind address for `record-pm` |
+| `--pm-stale-ms` | `500` | Ignore CNC pose older than this (ms) |
 | `--config` / `--pm-file` | auto | Physical landmarks YAML for registration |
 | `--machine` | `config/postprocessor/machine_default.yaml` | Machine geometry and speeds |
 | `--gcode-output` | `data/output/gcode/` | G-code output base directory |
@@ -140,6 +163,8 @@ Valid `--from` / `--to` values (in order):
 | `--electrode` | `all` | `all`, channel name (`C3`), or 1-based index |
 | `--rot0y`, `--rot0z` | `0` | Bed rotation (degrees); must match simulate |
 | `--legacy-subject` | — | Legacy `.mat` folder instead of bundle |
+
+The default `run` path includes **`record-pm`** before **`gcode`**: jog the tip on the machine, confirm with Enter/Space, then `s` to save. If pm is already measured, that stage is skipped unless `--force-record-pm`.
 
 #### Simulator (when `--to simulate`)
 
@@ -168,28 +193,30 @@ preprocess:
   full_circle: false
 
 synthesize:
-  assignments: s1_assignments              # data/presets/{name}.json — LEFT/RIGHT map
+  assignments: subject1_best_v4            # data/presets/{name}.json — LEFT/RIGHT map
   use_target_terminals: true
   optimize_terminals: false
   preserve_entry_order: false
   uv_resolution: 100
+  terminal_stop_mm: 20.0
 
 polish:
   mode: gentle
-  ga_generations: 20
+  min_trace_separation_mm: 6.0
+  phase2_max_rounds: 50
+  ga_generations: 50
   ga_population: 20
 
 postprocess:
   smoothing_strength: 0.1
 ```
 
-**Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (e.g. `s1_assignments.json`). Create it once:
+**Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (default **`subject1_best_v4`**). Optional custom map:
 
 ```powershell
 python -m app build-assignments --reference 1 --id s1_assignments
+# then set synthesize.assignments: s1_assignments in config/defaults.yaml
 ```
-
-Requires `data/json/initial_terminal_assignments_1.json` (or run preprocess assignments on subject 1).
 
 `python -m app paths --subject 2` prints canonical paths including the active assignment preset.
 
@@ -288,7 +315,12 @@ Modes: `gentle` (repair), `repair`, `refine`, `ga-short`. Output: e.g. `synth_s2
 ```powershell
 python -m app smooth --applied data/output/layouts/synth_s2.json
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
+
+# Physical landmarks at the machine (preferred):
+python -m app record-pm --subject 2
+# Or empty scaffold + manual YAML edit:
 python -m app init-print-config --subject 2
+
 python -m app convert-gcode --bundle data/output/bundles/subject_2
 python -m app list-electrodes --bundle data/output/bundles/subject_2
 python -m app simulate-gcode `
@@ -301,6 +333,47 @@ Use **layout JSON** (`synth_s*.json`) for `visualize` / `polish` / `smooth` inpu
 Legacy MATLAB: `python -m app export-matlab --input data/output/smooth/smooth_s2_final.json`
 
 Full argument tables: [docs/CLI.md](docs/CLI.md)
+
+---
+
+## Physical landmarks (print time)
+
+Digital calibration picks in `fiducials_{id}.json` are **scan-frame**. At print time you must measure the same three markers on the real head in **machine work coordinates** and store them as `physical_landmarks_mm` (pm). That registration drives `convert-gcode` / `simulate-gcode`.
+
+### Automated capture (CNC DRO + keyboard)
+
+1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (set `TARGET_IP` / port `62100`).
+2. Mount the end-effector; jog the tip to each marker.
+3. Capture:
+
+```powershell
+python -m app record-pm --subject 2
+python -m app record-pm --subject 2 --force   # overwrite existing YAML
+```
+
+| Key | Action |
+|-----|--------|
+| Enter / Space | Capture current work XYZ for the selected landmark |
+| 1 / 2 / 3 | Jump to central / left / back |
+| n / p | Next / previous |
+| s | Save YAML |
+| q | Abort |
+
+**Order:** `landmark_central` → `landmark_left` → `landmark_back`.  
+Central is stored as `[0,0,0]`; left/back are **relative** to the central DRO (no need to zero work coords).
+
+Output: `config/postprocessor/subjects/subject_{id}.yaml` (includes optional `capture:` audit of raw DRO and B/C).
+
+### Manual alternative
+
+```powershell
+python -m app init-print-config --subject 2
+# edit physical_landmarks_mm by hand
+```
+
+### Details
+
+Full Mach4 / UDP / frame notes: **[config/postprocessor/README.md](config/postprocessor/README.md)** · kinematics: [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md)
 
 ---
 
@@ -345,7 +418,7 @@ layout_design/
 ├── data/                   # Pipeline I/O (see data/README.md)
 ├── docs/                   # CLI.md, PIPELINE.md, MACHINE_KINEMATICS.md, …
 ├── legacy_gcode_examples/  # MATLAB reference (optional)
-├── scripts/                # Sample data helpers
+├── scripts/                # Mach4 work-pose Lua, NSF helpers, …
 └── tests/
 ```
 
@@ -355,9 +428,12 @@ Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Environment
 
-Use the genetic_SHAPE venv if system Python lacks the scientific stack:
+Use the project venv (see [Install](#install-first-time-clone)):
 
-`D:\Research\genetic_layout_design\genetic_SHAPE\genetic\Scripts\python.exe -m app run --target 2`
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m app run --target 2
+```
 
 ---
 

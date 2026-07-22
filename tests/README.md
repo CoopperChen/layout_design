@@ -1,8 +1,9 @@
 # Tests
 
-Run from repository root:
+Activate the project venv, then from repository root:
 
 ```bash
+# once: python -m venv .venv && source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest                    # fast tests only (default: -m "not slow")
 pytest -m slow -v         # real-mesh export (minutes)

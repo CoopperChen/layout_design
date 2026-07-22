@@ -5,6 +5,7 @@ import argparse
 import os
 import runpy
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from app import paths
@@ -18,14 +19,34 @@ _PREP_SCRIPTS = {
     "electrodes": "PYTHON/0_PREP/3_placeElectrodes.py",
 }
 
+_EXPECTED_OUTPUTS: dict[str, Callable[[int], Path]] = {
+    "clear-islands": paths.cleaned_scan,
+    "fiducials": paths.fiducials_json,
+    "cz": paths.cz_json,
+    "electrodes": paths.electrode_positions_json,
+}
 
-def _run_script(relative: str, subject_id: int) -> None:
+
+def _exit_code(exc: SystemExit) -> int:
+    code = exc.code
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _run_script(relative: str, subject_id: int) -> int:
     setup_runtime()
     os.environ["LAYOUT_SUBJECT_ID"] = str(subject_id)
     script = paths.APP_DIR / relative
     if not script.exists():
         raise FileNotFoundError(script)
-    runpy.run_path(str(script), run_name="__main__")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        return _exit_code(exc)
+    return 0
 
 
 def run_reconstruct(
@@ -45,13 +66,33 @@ def run_reconstruct(
     )
 
 
+_EXPECTED_HINTS: dict[str, str] = {
+    "clear-islands": "Space/Enter/S or close the AFTER window to save (Q discards).",
+    "fiducials": "S or close window to save picks (Q discards).",
+    "cz": "Space/Enter/S or close to save Cz (Q discards).",
+    "electrodes": "Space/Enter/S or close to save (Q discards).",
+}
+
+
 def run_step(step: str, subject_id: int) -> int:
     if step not in _PREP_SCRIPTS:
         raise ValueError(f"Unknown step {step!r}. Choose from: {', '.join(_PREP_SCRIPTS)}")
     script = _PREP_SCRIPTS[step]
     if script is None:
         return run_reconstruct(subject_id)
-    _run_script(script, subject_id)
+    rc = _run_script(script, subject_id)
+    if rc != 0:
+        return rc
+    expected_fn = _EXPECTED_OUTPUTS.get(step)
+    if expected_fn is not None:
+        out = expected_fn(subject_id)
+        if not Path(out).is_file():
+            hint = _EXPECTED_HINTS.get(step, "Confirm/save in the GUI.")
+            print(
+                f"Stage {step!r} finished without writing {out}.\n  {hint}",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 

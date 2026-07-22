@@ -1,16 +1,29 @@
-import os
-import pyvista as pv
-import numpy as np
-import json
-from pathlib import Path
-import mne
 import colorsys
+import json
+import os
+from pathlib import Path
+
+import mne
+import numpy as np
+import pyvista as pv
 
 SUBJECT_ID = int(os.environ.get("LAYOUT_SUBJECT_ID", "1"))
 
-mesh = pv.read(f"data/cleaned_scans/{SUBJECT_ID}.stl")
-fid = json.load(open(f"data/json/fiducials_{SUBJECT_ID}.json"))
-Cz = np.array(json.load(open(f"data/json/Cz_{SUBJECT_ID}.json"))["Cz"])
+_cleaned = Path(f"data/cleaned_scans/{SUBJECT_ID}.stl")
+_fid_path = Path(f"data/json/fiducials_{SUBJECT_ID}.json")
+_cz_path = Path(f"data/json/Cz_{SUBJECT_ID}.json")
+for _p in (_cleaned, _fid_path, _cz_path):
+    if not _p.is_file():
+        raise FileNotFoundError(
+            f"Missing {_p} — finish clear-islands / fiducials / cz first "
+            f"(confirm with Space/Enter in those GUIs)."
+        )
+
+mesh = pv.read(str(_cleaned))
+with _fid_path.open(encoding="utf-8") as _f:
+    fid = json.load(_f)
+with _cz_path.open(encoding="utf-8") as _f:
+    Cz = np.array(json.load(_f)["Cz"])
 
 channel_pairs = [
     ["Fp1", "Fp2"],
@@ -197,13 +210,20 @@ def _add_static_legend():
     )
 
 
+_save_state = {"saved": False, "discard": False}
+
+
 def save_electrode_positions(SUBJECT_ID: int):
     global electrode_positions
+    if not electrode_positions:
+        print("No electrode positions to save yet.")
+        return
     output_path = Path(f"data/json/electrode_positions_{SUBJECT_ID}.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(electrode_positions, f, indent=4)
-    print("Electrode coordinates saved ✅")
+    _save_state["saved"] = True
+    print(f"Electrode coordinates saved → {output_path}")
 
 
 pl.add_mesh(mesh, color="white", opacity=0.88)
@@ -247,18 +267,44 @@ pl.add_slider_widget(
 )
 
 
-def key_press_callback(SUBJECT_ID: int):
-    def callback(iren, event):
-        key = iren.GetKeySym()
-        if key.lower() == "s":
-            save_electrode_positions(SUBJECT_ID=SUBJECT_ID)
-
-    return callback
+def _confirm_and_close() -> None:
+    save_electrode_positions(SUBJECT_ID=SUBJECT_ID)
+    pl.close()
 
 
-pl.iren.add_observer("KeyPressEvent", key_press_callback(SUBJECT_ID=SUBJECT_ID))
-pl.add_text("Press 'S' to save electrode positions", position="lower_edge", font_size=12)
+def _discard() -> None:
+    _save_state["discard"] = True
+    pl.close()
+
+
+pl.add_key_event("space", _confirm_and_close)
+pl.add_key_event("Return", _confirm_and_close)
+pl.add_key_event("s", lambda: save_electrode_positions(SUBJECT_ID=SUBJECT_ID))
+pl.add_key_event("q", _discard)
+pl.add_text(
+    "Space / Enter / S / close = save · Q = discard",
+    position="lower_edge",
+    font_size=12,
+)
 
 _add_static_legend()
 update_plot(size_adjustment)
+print(
+    "\nElectrodes review:\n"
+    "  Adjust size slider, then Space / Enter / S (or close) to save\n"
+    "  Q = discard (nothing written)\n"
+)
 pl.show()
+
+if _save_state["discard"]:
+    print("Electrodes discarded (Q) — nothing written.", flush=True)
+    raise SystemExit(1)
+
+if not electrode_positions:
+    print("ERROR: no electrode positions computed — check fiducials / Cz.", flush=True)
+    raise SystemExit(1)
+
+if not _save_state["saved"]:
+    save_electrode_positions(SUBJECT_ID=SUBJECT_ID)
+
+raise SystemExit(0)

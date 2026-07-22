@@ -46,6 +46,11 @@ New subjects should run entirely in `layout_design`. See [PIPELINE.md](PIPELINE.
 ## Environment
 
 ```powershell
-cd D:\Research\layout_design
-pip install -e ".[dev]"
+cd D:\Research\layout_design   # or your clone path
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
+
+See [GETTING_STARTED.md](GETTING_STARTED.md) for the full first-time setup.

@@ -10,6 +10,7 @@ Unified pipeline CLI.
   python -m app smooth --applied data/output/layouts/synth_s2.json
   python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
   python -m app init-print-config --subject {id}
+  python -m app record-pm --subject {id}
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
   python -m app run --target 2
@@ -260,11 +261,35 @@ def cmd_init_print_config(args: argparse.Namespace) -> int:
     try:
         out = init_print_config(args.subject, force=args.force)
         print(f"Wrote print config: {out}")
-        print("Edit physical_landmarks_mm after measuring with end-effector on printhead.")
+        print("Edit physical_landmarks_mm, or run: python -m app record-pm --subject", args.subject)
         return 0
     except FileExistsError as e:
         print(e, file=sys.stderr)
         return 1
+
+
+def cmd_record_pm(args: argparse.Namespace) -> int:
+    from app.postprocess.record_pm import record_physical_landmarks
+
+    try:
+        out = record_physical_landmarks(
+            args.subject,
+            bind_ip=args.bind_ip,
+            port=args.port,
+            stale_sec=args.stale_ms / 1000.0,
+            force=args.force,
+            output=args.output,
+        )
+        print(f"Saved physical landmarks: {out}")
+        return 0
+    except FileExistsError as e:
+        print(e, file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"UDP bind failed: {e}", file=sys.stderr)
+        return 1
+    except SystemExit as e:
+        return int(e.code) if isinstance(e.code, int) else 1
 
 
 def cmd_convert_gcode(args: argparse.Namespace) -> int:
@@ -500,6 +525,35 @@ def build_parser() -> argparse.ArgumentParser:
     ipc.add_argument("--subject", type=int, required=True)
     ipc.add_argument("--force", action="store_true", help="Overwrite existing file")
     ipc.set_defaults(func=cmd_init_print_config)
+
+    rpm = sub.add_parser(
+        "record-pm",
+        help="Capture physical landmarks from live CNC work pose (UDP) with keyboard confirm",
+    )
+    rpm.add_argument("--subject", type=int, required=True)
+    rpm.add_argument(
+        "--port",
+        type=int,
+        default=62100,
+        help="Mach4 work-pose UDP port (default: 62100)",
+    )
+    rpm.add_argument(
+        "--bind-ip",
+        default="0.0.0.0",
+        help="UDP bind address (default: 0.0.0.0)",
+    )
+    rpm.add_argument(
+        "--stale-ms",
+        type=float,
+        default=500.0,
+        help="Ignore work pose older than this many ms (default: 500)",
+    )
+    rpm.add_argument(
+        "--output",
+        help="Output YAML (default: config/postprocessor/subjects/subject_{id}.yaml)",
+    )
+    rpm.add_argument("--force", action="store_true", help="Overwrite existing file")
+    rpm.set_defaults(func=cmd_record_pm)
 
     cg = sub.add_parser("convert-gcode", help="Stage D: bundle → 5-axis G-code")
     cg.add_argument("--bundle", required=True, help="Bundle dir")
