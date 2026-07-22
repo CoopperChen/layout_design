@@ -25,7 +25,7 @@ Typical end-to-end (recommended):
 
 ```bash
 python -m app init-data
-python -m app build-assignments --reference 1 --id s1_assignments   # once
+python -m app build-assignments --reference 1 --id s1_assignments   # optional custom map
 # Place data/raw/2.ply, then:
 python -m app run --target 2
 ```
@@ -63,9 +63,9 @@ python -m app run --target 2 --no-polish --from synthesize
 | Stage | Interactive? | Confirm keys | Output / effect |
 |-------|--------------|--------------|-----------------|
 | `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl`, `{id}.obj` |
-| `clear-islands` | **review** | AFTER: Space/Enter/S/close = save · Q = discard | `data/cleaned_scans/{id}.stl` |
+| `clear-islands` | no | — | `data/cleaned_scans/{id}.stl` |
 | `fiducials` | **yes** | Space/Enter = confirm pick · S/close = save · Q = discard | `data/json/fiducials_{id}.json` |
-| `cz` | **preview** | Space/Enter/S/close = save · Q = discard | `data/json/Cz_{id}.json` |
+| `cz` | no | — | `data/json/Cz_{id}.json` |
 | `electrodes` | **yes** | Space/Enter/S/close = save · Q = discard | `data/json/electrode_positions_{id}.json` |
 | `synthesize` | no | — | `data/output/layouts/synth_s{id}.json` |
 | `polish` | no | — | `*_repaired.json` (skip with `--no-polish`) |
@@ -199,11 +199,11 @@ python -m app build-assignments --reference 1 --id s1_assignments
 | `--id` / `--preset-id` | yes | Output preset name (saved under `data/presets/`) |
 | `--out` | no | Override output path |
 
-**Output:** `data/presets/{id}.json` with `terminal_assignments` only.
+**Output:** `data/presets/{id}.json` with `terminal_assignments` only. The default preset **`subject1_best_v4`** ships in the repo (assignment-only); other custom presets remain local/gitignored unless you force-add them.
 
 ### `synthesize`
 
-Generate per-subject wire layout on a target head. Uses the assignment preset from **`config/defaults.yaml`** (`synthesize.assignments`, default `s1_assignments`).
+Generate per-subject wire layout on a target head. Uses the assignment preset from **`config/defaults.yaml`** (`synthesize.assignments`, default `subject1_best_v4`).
 
 ```bash
 python -m app synthesize --target 2 --visualize

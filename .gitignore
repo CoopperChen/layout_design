@@ -31,6 +31,8 @@ data/json/*.json
 data/presets/*.json
 !data/presets/.gitkeep
 !data/presets/*.example.json
+# Default assignment map shipped with the repo (required for `run` / synthesize)
+!data/presets/subject1_best_v4.json
 
 # Postprocess
 data/output/smooth/*.json

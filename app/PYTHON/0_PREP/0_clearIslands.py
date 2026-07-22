@@ -1,4 +1,4 @@
-"""Remove small mesh islands from reconstructed STL."""
+"""Remove small mesh islands from reconstructed STL (automated, no GUI)."""
 
 from __future__ import annotations
 
@@ -55,69 +55,21 @@ def main(SUBJECT_ID: int) -> int:
     if not Path(file_path).is_file():
         raise FileNotFoundError(file_path)
     original_mesh = pv.read(file_path)
-
-    p_before = pv.Plotter(window_size=(800, 600), title="Before Cleaning")
-    p_before.add_mesh(original_mesh, color="lightgray", opacity=1.0)
-    p_before.add_text(
-        "Original mesh — close window (or Space/Enter) to continue",
-        position="upper_edge",
-    )
-    p_before.show_bounds()
-
-    def _close_before() -> None:
-        p_before.close()
-
-    p_before.add_key_event("space", _close_before)
-    p_before.add_key_event("Return", _close_before)
-    print(
-        "\nClear-islands (1/2): review BEFORE window.\n"
-        "  Close window or Space/Enter to continue.\n"
-    )
-    p_before.show()
+    n_before = int(original_mesh.n_cells)
 
     cleaned_mesh = remove_islands(
         original_mesh,
         min_size_ratio=0.02,
         min_absolute_size=200,
     )
-
-    p_after = pv.Plotter(window_size=(800, 600), title="After Cleaning")
-    p_after.add_mesh(cleaned_mesh, color="lightgray", opacity=1.0)
-    p_after.add_text(
-        "Cleaned mesh — close / Space / Enter / S = SAVE · Q = discard",
-        position="upper_edge",
-    )
-    p_after.show_bounds()
-
-    state = {"save": True}
-
-    def _confirm_save() -> None:
-        state["save"] = True
-        p_after.close()
-
-    def _discard() -> None:
-        state["save"] = False
-        p_after.close()
-
-    p_after.add_key_event("space", _confirm_save)
-    p_after.add_key_event("Return", _confirm_save)
-    p_after.add_key_event("s", _confirm_save)
-    p_after.add_key_event("q", _discard)
-
-    print(
-        "\nClear-islands (2/2): review AFTER window.\n"
-        "  Close window / Space / Enter / S → SAVE cleaned mesh\n"
-        "  Q → discard (pipeline cannot continue without cleaned STL)\n"
-    )
-    p_after.show()
-
-    if not state["save"]:
-        print("Cleaned mesh NOT saved (Q). Need data/cleaned_scans/ for later stages.")
-        return 1
+    n_after = int(cleaned_mesh.n_cells)
 
     output_path = f"data/cleaned_scans/{SUBJECT_ID}.stl"
     save_as_stl(cleaned_mesh, output_path)
-    print(f"Cleaned mesh saved to: {output_path}")
+    print(
+        f"Clear-islands: {n_before} → {n_after} cells; "
+        f"saved {output_path}"
+    )
     return 0
 
 
