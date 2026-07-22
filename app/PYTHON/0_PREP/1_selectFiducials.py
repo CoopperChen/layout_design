@@ -97,7 +97,11 @@ def main() -> int:
     if picked:
         print(f"Recalled {len(picked)} point(s) from {paths.fiducials_json(SUBJECT_ID)}")
 
-    state: dict = {"idx": _first_missing_index(picked), "last_pt": None}
+    state: dict = {
+        "idx": _first_missing_index(picked),
+        "last_pt": None,
+        "discard": False,
+    }
 
     print("Controls:")
     print("  Rotate: left-click + drag")
@@ -105,7 +109,8 @@ def main() -> int:
     print("  Space / Enter: confirm current pick")
     print("  1–9: jump to landmark (re-pick)")
     print("  n / p: next / previous landmark")
-    print("  Close window when done to save")
+    print("  S or close window: save and finish")
+    print("  Q: discard (nothing written)")
 
     plotter = pv.Plotter(window_size=(2000, 2000))
     _add_head_mesh(plotter, mesh)
@@ -171,7 +176,7 @@ def main() -> int:
             state["idx"] = idx + 1
             show_instr(current_label())
         else:
-            show_instr("All points set — close window to save")
+            show_instr("All points set — S / close = save · Q = discard")
 
     def jump_to(index: int) -> None:
         index = max(0, min(index, len(PICK_SEQUENCE) - 1))
@@ -191,15 +196,28 @@ def main() -> int:
     def on_prev() -> None:
         jump_to(state["idx"] - 1)
 
+    def on_save_finish() -> None:
+        plotter.close()
+
+    def on_discard() -> None:
+        state["discard"] = True
+        plotter.close()
+
     plotter.iren.add_observer("RightButtonPressEvent", on_right_click)
     plotter.add_key_event("space", on_confirm)
     plotter.add_key_event("Return", on_confirm)
     plotter.add_key_event("n", on_next)
     plotter.add_key_event("p", on_prev)
+    plotter.add_key_event("s", on_save_finish)
+    plotter.add_key_event("q", on_discard)
     for digit in range(1, 10):
         plotter.add_key_event(str(digit), lambda d=digit: jump_to(d - 1))
 
     plotter.show()
+
+    if state["discard"]:
+        print("Fiducials discarded (Q) — nothing written.", file=sys.stderr)
+        return 1
 
     if not picked:
         print("No points saved.", file=sys.stderr)

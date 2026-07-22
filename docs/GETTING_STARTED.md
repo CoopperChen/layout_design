@@ -1,16 +1,29 @@
 # Getting started
 
-## 1. Environment
+## 1. Environment (venv + pyproject.toml)
 
-Use the existing genetic_SHAPE venv (recommended until a dedicated venv is created):
+Python **3.10+**. From the repository root:
 
 ```powershell
-$py = "D:\Research\genetic_layout_design\genetic_SHAPE\genetic\Scripts\python.exe"
-cd D:\Research\layout_design
-& $py -m pip install -e .
+cd D:\Research\layout_design   # or your clone path
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-Or any Python 3.10+ with: `numpy`, `scipy`, `pyvista`, `shapely`, `matplotlib`, `mne`, `pyyaml`.
+Linux / macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+Runtime deps are declared in `pyproject.toml` (`numpy`, `scipy`, `open3d`, `pyvista`, `shapely`, `matplotlib`, `mne`, `pyyaml`). `[dev]` adds `pytest` and `ruff`. `.venv/` is gitignored.
+
+Re-activate in later shells: `.\.venv\Scripts\Activate.ps1` (or `source .venv/bin/activate`).
 
 ## 2. Initialize data tree
 
@@ -70,11 +83,12 @@ python -m app polish --applied data/output/layouts/synth_s2_refined.json --mode 
 python -m app smooth --applied data/output/layouts/synth_s2.json
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
 python -m app init-print-config --subject 2
+python -m app record-pm --subject 2
 python -m app list-electrodes --bundle data/output/bundles/subject_2
 python -m app convert-gcode --bundle data/output/bundles/subject_2
 ```
 
-Edit `config/postprocessor/subjects/subject_2.yaml` with measured `pm` (end-effector on printhead → touch three calibration points). Trace/channel: `--trace interconnect --electrode C3`. See `config/postprocessor/README.md`.
+`record-pm` fills `physical_landmarks_mm` from the CNC work DRO (Enter/Space to capture, `s` to save). Prefer that over hand-editing the YAML. Trace/channel: `--trace interconnect --electrode C3`. See `config/postprocessor/README.md`.
 
 ### Verify G-code on head mesh
 

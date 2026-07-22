@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from app import paths
@@ -28,7 +29,7 @@ def test_init_print_config_creates_pm_only_yaml(tmp_path: Path, monkeypatch):
     text = out.read_text(encoding="utf-8")
     assert "physical_landmarks_mm" in text
     assert "process:" not in text
-    pm = load_physical_landmarks(out)
+    pm = load_physical_landmarks(out, require_measured=False)
     assert pm.shape == (3, 3)
 
 
@@ -41,6 +42,39 @@ def test_init_print_config_refuses_overwrite(tmp_path: Path, monkeypatch):
     init_print_config(7)
     with pytest.raises(FileExistsError):
         init_print_config(7)
+
+
+def test_load_scaffold_rejects_when_require_measured():
+    from app.postprocess.print_config import validate_landmark_triangle
+
+    with pytest.raises(ValueError, match="empty scaffold"):
+        validate_landmark_triangle(np.zeros((3, 3)))
+
+
+def test_load_physical_landmarks_rejects_scaffold(tmp_path: Path):
+    path = tmp_path / "subject_0.yaml"
+    path.write_text(
+        "physical_landmarks_mm:\n  - [0, 0, 0]\n  - [0, 0, 0]\n  - [0, 0, 0]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="empty scaffold|record-pm"):
+        load_physical_landmarks(path)
+
+
+def test_pm_is_measured(tmp_path: Path):
+    from app.postprocess.print_config import pm_is_measured
+
+    missing = tmp_path / "missing.yaml"
+    assert pm_is_measured(missing) is False
+
+    scaffold = tmp_path / "scaffold.yaml"
+    scaffold.write_text(
+        "physical_landmarks_mm:\n  - [0, 0, 0]\n  - [0, 0, 0]\n  - [0, 0, 0]\n",
+        encoding="utf-8",
+    )
+    assert pm_is_measured(scaffold) is False
+
+    assert pm_is_measured(SYNTHETIC_PM) is True
 
 
 def test_load_synthetic_pm():

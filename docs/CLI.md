@@ -19,7 +19,7 @@ Console entry point (same interface): `layout <command> …`
 | A — Preprocess | `preprocess` |
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
 | C — Polish (optional) | `polish` |
-| D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
+| D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `record-pm`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
 
 Typical end-to-end (recommended):
 
@@ -37,12 +37,13 @@ python -m app preprocess --subject 2 --step fiducials
 python -m app synthesize --target 2
 python -m app smooth --applied data/output/layouts/synth_s2.json
 python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
-python -m app init-print-config --subject 2
+python -m app record-pm --subject 2                    # preferred: CNC DRO + keyboard
+# python -m app init-print-config --subject 2          # empty scaffold only
 python -m app convert-gcode --bundle data/output/bundles/subject_2
 python -m app simulate-gcode --gcode data/output/gcode/subject_2_post/allinterconnects.txt --bundle data/output/bundles/subject_2
 ```
 
-**Assignment preset:** default `s1_assignments` in `config/defaults.yaml` → `synthesize.assignments`. Not a CLI flag on `synthesize` or `run`.
+**Assignment preset:** default `subject1_best_v4` in `config/defaults.yaml` → `synthesize.assignments`. Not a CLI flag on `synthesize` or `run`.
 
 ---
 
@@ -59,20 +60,23 @@ python -m app run --target 2 --no-polish --from synthesize
 
 ### Stages (in order)
 
-| Stage | Interactive? | Output / effect |
-|-------|--------------|-----------------|
-| `reconstruct` | align UI optional | `data/raw/{id}.stl`, `{id}.obj` |
-| `clear-islands` | no | `data/cleaned_scans/{id}.stl` |
-| `fiducials` | **yes** | `data/json/fiducials_{id}.json` |
-| `cz` | no | `data/json/Cz_{id}.json` |
-| `electrodes` | **yes** | `data/json/electrode_positions_{id}.json` |
-| `synthesize` | no | `data/output/layouts/synth_s{id}.json` |
-| `polish` | yes | `*_repaired.json` (skip with `--no-polish`) |
-| `smooth` | no | `data/output/smooth/smooth_s{id}_final.json` |
-| `bundle` | no | `data/output/bundles/subject_{id}/` |
-| `print-config` | no | pm YAML (skipped if exists) |
-| `gcode` | no | `data/output/gcode/subject_{id}_post/` |
-| `simulate` | viewer | PyVista 3D viewer |
+| Stage | Interactive? | Confirm keys | Output / effect |
+|-------|--------------|--------------|-----------------|
+| `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl`, `{id}.obj` |
+| `clear-islands` | **review** | AFTER: Space/Enter/S/close = save · Q = discard | `data/cleaned_scans/{id}.stl` |
+| `fiducials` | **yes** | Space/Enter = confirm pick · S/close = save · Q = discard | `data/json/fiducials_{id}.json` |
+| `cz` | **preview** | Space/Enter/S/close = save · Q = discard | `data/json/Cz_{id}.json` |
+| `electrodes` | **yes** | Space/Enter/S/close = save · Q = discard | `data/json/electrode_positions_{id}.json` |
+| `synthesize` | no | — | `data/output/layouts/synth_s{id}.json` |
+| `polish` | no | — | `*_repaired.json` (skip with `--no-polish`) |
+| `smooth` | no | — | `data/output/smooth/smooth_s{id}_final.json` |
+| `bundle` | no | — | `data/output/bundles/subject_{id}/` |
+| `print-config` | no | — | empty pm YAML scaffold if missing |
+| `record-pm` | **yes (CNC)** | Enter/Space = capture (save when all 3 done) · `s` = save · `q` = quit | measured `physical_landmarks_mm` in pm YAML |
+| `gcode` | no | — | `data/output/gcode/subject_{id}_post/` (requires measured pm) |
+| `simulate` | viewer | — | PyVista 3D viewer |
+
+**GUI convention (all save-capable steps):** **Space / Enter / S** confirm or save · **Q** discard · **closing the window** saves (same as confirm), unless you pressed Q first. Fiducials: Space/Enter confirms each pick; S/close finishes and writes the file.
 
 ### Arguments
 
@@ -95,7 +99,11 @@ python -m app run --target 2 --no-polish --from synthesize
 | `--allow-terminal-landmarks` | off | Bundle export without calibration landmarks |
 | `--skip-validation` | off | Skip export validation |
 | `--quiet` | off | Quiet bundle export |
-| `--force-print-config` | off | Overwrite existing pm YAML |
+| `--force-print-config` | off | Overwrite existing pm YAML scaffold |
+| `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
+| `--pm-port` | `62100` | Mach4 work-pose UDP port (`record-pm`) |
+| `--pm-bind-ip` | `0.0.0.0` | UDP bind for `record-pm` |
+| `--pm-stale-ms` | `500` | Stale pose threshold for `record-pm` |
 | `--config` / `--pm-file` | auto | pm YAML for G-code |
 | `--machine` | `machine_default.yaml` | Machine config |
 | `--gcode-output` | `data/output/gcode/` | G-code base dir |
@@ -335,7 +343,38 @@ python -m app init-print-config --subject 2
 
 **Output:** `config/postprocessor/subjects/subject_{id}.yaml`
 
-Edit `physical_landmarks_mm` after measuring with end-effector on printhead. See [config/postprocessor/README.md](../config/postprocessor/README.md).
+Prefer **`record-pm`** to fill values from the live CNC. Manual edit of `physical_landmarks_mm` remains supported. Full guide: [config/postprocessor/README.md](../config/postprocessor/README.md).
+
+---
+
+### `record-pm`
+
+Capture `physical_landmarks_mm` from the live CNC **work** DRO (UDP) with keyboard confirmation.
+
+**Prerequisites:** Mach4 publishing JSON work pose via [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua) (default port `62100`).
+
+```bash
+python -m app record-pm --subject 2
+python -m app record-pm --subject 2 --force
+python -m app record-pm --subject 2 --port 62100 --bind-ip 0.0.0.0
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--subject` | — | Subject id (required) |
+| `--port` | `62100` | UDP listen port |
+| `--bind-ip` | `0.0.0.0` | Bind address |
+| `--stale-ms` | `500` | Ignore packets older than this many ms |
+| `--output` | auto | Override YAML path |
+| `--force` | off | Overwrite existing file |
+
+**Keys:** Enter/Space = capture (or save when all 3 done) · 1/2/3 = jump · n/p = next/prev · s = save · q = quit.
+
+**Order:** `landmark_central` → `landmark_left` → `landmark_back`. Central becomes `[0,0,0]`; left/back are relative to the central touch DRO.
+
+**Output:** `config/postprocessor/subjects/subject_{id}.yaml` (plus optional `capture:` audit block).
+
+Details (Mach4 setup, packet format, frames): [config/postprocessor/README.md](../config/postprocessor/README.md).
 
 ---
 
