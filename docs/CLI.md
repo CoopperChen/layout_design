@@ -94,6 +94,8 @@ python -m app run --target 2 --no-polish --from synthesize
 | `--inherit-preset-terminals` | off | Synthesize: legacy rigid hub map |
 | `--rotate` | off | Synthesize: ±36° hub angle search around fiducial clicks |
 | `--uv-resolution` | `100` | Synthesize UV grid |
+| `--visualize` / `--no-visualize` | on | After synthesize/polish/smooth: 2D PNG + 3D view |
+| `--no-show` | off | With visualize: save PNG only (skip 3D windows) |
 | `--smooth-tag` | `final` | Smooth output tag |
 | `--smoothing-strength` | config | B-spline smoothing factor |
 | `--allow-terminal-landmarks` | off | Bundle export without calibration landmarks |
@@ -206,7 +208,8 @@ python -m app build-assignments --reference 1 --id s1_assignments
 Generate per-subject wire layout on a target head. Uses the assignment preset from **`config/defaults.yaml`** (`synthesize.assignments`, default `subject1_best_v4`).
 
 ```bash
-python -m app synthesize --target 2 --visualize
+python -m app synthesize --target 2
+# default: writes layout then opens 2D PNG + 3D view (--no-visualize to skip)
 ```
 
 | Argument | Default | Description |
@@ -217,9 +220,9 @@ python -m app synthesize --target 2 --visualize
 | `--inherit-preset-terminals` | off | Legacy: rigid-map reference hub positions |
 | `--rotate` | off | ±36° hub angle search around fiducial clicks (may reduce crossings) |
 | `--uv-resolution` | `100` | UV grid resolution for 3D lift |
-| `--visualize` | off | After synth: 2D PNG + interactive 3D |
+| `--visualize` / `--no-visualize` | on | After synth: 2D PNG + interactive 3D |
 | `--show` | off | Also open 2D matplotlib window |
-| `--no-show` | off | With `--visualize`: save PNG only, no 3D window |
+| `--no-show` | off | With visualize: save PNG only, no 3D window |
 | `--skip-collisions` | off | Skip collision markers in visualize |
 
 **Output:** `data/output/layouts/synth_s{id}.json`
@@ -246,7 +249,7 @@ python -m app visualize --applied data/output/layouts/synth_s2.json
 | `--show-2d` | off | Open interactive 2D window |
 | `--skip-collisions` | off | Skip 2D collision markers |
 
-**Note:** Use **layout JSON** (`synth_s*.json`), not smooth JSON.
+**Note:** Accepts layout JSON (`synth_s*.json`) or smooth JSON (`smooth_s*.json`).
 
 ---
 
@@ -271,7 +274,7 @@ python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
 | `--no-clear-logs` | off | Keep previous polish logs |
 | `--no-mutate-gen0` | off | Disable gen-0 mutation (`ga-short`) |
 | `--electrodes-only` | off | Polish electrode zones only |
-| `--visualize` | off | Save 2D + 3D PNGs after polish |
+| `--visualize` / `--no-visualize` | on | After polish: 2D PNG + interactive 3D |
 
 **Output:** e.g. `synth_s2_repaired.json`, `synth_s2_refined.json`
 
@@ -293,6 +296,8 @@ python -m app smooth --applied data/output/layouts/synth_s2.json
 | `--out` | auto | Output smooth JSON (`smooth_s{id}_final.json`) |
 | `--tag` | `final` | Output filename tag |
 | `--strength` | config | B-spline smoothing factor (e.g. `0.1`) |
+| `--visualize` / `--no-visualize` | on | After smooth: 2D PNG + interactive 3D |
+| `--no-show` | off | With visualize: save PNG only, no 3D window |
 
 **Output:** `data/output/smooth/smooth_s{id}_{tag}.json` (includes `collision_metrics` from layout when present)
 

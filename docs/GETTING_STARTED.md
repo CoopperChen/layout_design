@@ -55,7 +55,8 @@ python -m app preprocess --subject 2 --step assignments
 
 ```powershell
 python -m app build-assignments --reference 1 --id s1_assignments
-python -m app synthesize --assignments s1_assignments --target 2 --visualize
+python -m app synthesize --assignments s1_assignments --target 2
+# default: 2D PNG + 3D view after synthesize (--no-visualize to skip)
 # --preset is an alias for --assignments
 ```
 

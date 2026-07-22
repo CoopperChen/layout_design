@@ -59,8 +59,8 @@ python -m app run --target 2
 | `fiducials` | **interactive** | Pick anatomy/terminals/landmarks (Space/Enter confirm pick · S/close save · Q discard) |
 | `cz` | automated | Compute Cz → `data/json/Cz_{id}.json` |
 | `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
-| `synthesize` | automated | Generate wire layout → `data/output/layouts/synth_s{id}.json` |
-| `smooth` | automated | B-spline 3D paths → `data/output/smooth/smooth_s{id}_final.json` |
+| `synthesize` | automated + view | Generate layout → PNG + 3D (`--no-visualize` to skip) |
+| `smooth` | automated + view | B-spline paths → PNG + 3D (`--no-visualize` to skip) |
 | `bundle` | automated | Export `data/output/bundles/subject_{id}/` |
 | `print-config` | automated | Create empty pm YAML scaffold if missing |
 | `record-pm` | **interactive (CNC)** | Capture work-pose landmarks via Mach4 UDP (skipped if already measured) |
@@ -70,7 +70,7 @@ Optional stages (not in default run):
 
 | Stage | How to include |
 |-------|----------------|
-| `polish` | Default in `run` (skip with `--no-polish`) |
+| `polish` | Default in `run` (skip with `--no-polish`); visualizes after (same as synthesize/smooth) |
 | `simulate` | Add `--to simulate` (opens PyVista G-code viewer at the end) |
 
 The pipeline **stops on first failure** and prints which stage failed. Resume with `--from <stage>`.
@@ -199,16 +199,19 @@ synthesize:
   preserve_entry_order: false
   uv_resolution: 100
   terminal_stop_mm: 20.0
+  visualize: true
 
 polish:
   mode: gentle
   min_trace_separation_mm: 6.0
-  phase2_max_rounds: 50
-  ga_generations: 50
+  phase2_max_rounds: 20
+  ga_generations: 20
   ga_population: 20
+  visualize: true
 
 postprocess:
   smoothing_strength: 0.1
+  visualize: true
 ```
 
 **Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (default **`subject1_best_v4`**, tracked in git as an assignment-only LEFT/RIGHT map). Optional custom map:

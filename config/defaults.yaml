@@ -15,23 +15,26 @@ synthesize:
   uv_resolution: 100
   terminal_stop_mm: 20.0  # shorten each wire before strip entry (0 = off)
   terminal_min_points: 4
+  visualize: true  # 2D PNG + 3D view after synthesize (CLI: --no-visualize)
 
 polish:
   enabled: true  # run polish in `python -m app run` (override with --no-polish)
   mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
   focus: separation
-  phase2_max_rounds: 50
+  phase2_max_rounds: 20
   aggressive_pass: false
   skip_phase1_when_electrode_free: true
   fixed_endpoints: true
   profile: false  # set true or use --profile / --polish-profile for timing breakdown
   # Target centerline clearance (mm): phase-2 pair penalty + layout deficit metric.
   min_trace_separation_mm: 6.0
-  ga_generations: 50
+  ga_generations: 20
   ga_population: 20
+  visualize: true  # 2D PNG + 3D view after polish (CLI: --no-visualize)
 
 postprocess:
   smoothing_strength: 0.1
+  visualize: true  # 2D PNG + 3D view after smooth (CLI: --no-visualize)
   arm_inside_margin_mm: 0.0  # signed-distance tolerance for arm-in-mesh flip
   engage_b_threshold_deg: 90
   engage_xy_offset_default_mm: 20

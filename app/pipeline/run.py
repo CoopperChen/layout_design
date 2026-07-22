@@ -364,6 +364,14 @@ def _run_synthesize(args: argparse.Namespace, pp: PipelinePaths) -> int:
             optimize_terminals=args.rotate,
             uv_resolution=args.uv_resolution,
         )
+        if getattr(args, "visualize", True):
+            from app.layout.visualize import visualize_after_stage
+
+            _print_step("visualize", f"after synthesize → {pp.layout}")
+            visualize_after_stage(
+                pp.layout,
+                show_3d=not getattr(args, "no_show", False),
+            )
         return 0
     except Exception as exc:
         print(f"synthesize failed: {exc}")
@@ -384,6 +392,14 @@ def _run_polish(args: argparse.Namespace, pp: PipelinePaths) -> int:
             subject=pp.target,
             profile_phase2=args.polish_profile,
         )
+        if getattr(args, "visualize", True):
+            from app.layout.visualize import visualize_after_stage
+
+            _print_step("visualize", f"after polish → {out}")
+            visualize_after_stage(
+                out,
+                show_3d=not getattr(args, "no_show", False),
+            )
         return 0
     except (FileNotFoundError, ValueError) as exc:
         print(exc)
@@ -399,12 +415,20 @@ def _run_smooth(
 
     _print_step("smooth", f"{applied} → {pp.smooth}")
     try:
-        smooth_mod.smooth_from_applied(
+        out = smooth_mod.smooth_from_applied(
             applied,
             output=pp.smooth,
             tag=args.smooth_tag,
             smoothing_strength=args.smoothing_strength,
         )
+        if getattr(args, "visualize", True):
+            from app.layout.visualize import visualize_after_stage
+
+            _print_step("visualize", f"after smooth → {out}")
+            visualize_after_stage(
+                out,
+                show_3d=not getattr(args, "no_show", False),
+            )
         return 0
     except (FileNotFoundError, ValueError, OSError) as exc:
         print(exc)
@@ -615,6 +639,17 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
         help="Synthesize: ±36° hub angle search around fiducial clicks",
     )
     run.add_argument("--uv-resolution", type=int, default=100)
+    run.add_argument(
+        "--visualize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After synthesize/polish/smooth: 2D PNG + interactive 3D (default: on)",
+    )
+    run.add_argument(
+        "--no-show",
+        action="store_true",
+        help="With visualize: save 2D PNG only, skip interactive 3D windows",
+    )
     run.add_argument("--smooth-tag", default="final")
     run.add_argument("--smoothing-strength", type=float, default=None)
     run.add_argument("--allow-terminal-landmarks", action="store_true")
