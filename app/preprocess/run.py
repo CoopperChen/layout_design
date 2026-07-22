@@ -67,7 +67,7 @@ def run_reconstruct(
 
 
 _EXPECTED_HINTS: dict[str, str] = {
-    "clear-islands": "Space/Enter/S or close the AFTER window to save (Q discards).",
+    "clear-islands": "Expected automated write of cleaned STL failed.",
     "fiducials": "S or close window to save picks (Q discards).",
     "cz": "Space/Enter/S or close to save Cz (Q discards).",
     "electrodes": "Space/Enter/S or close to save (Q discards).",

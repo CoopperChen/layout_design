@@ -28,8 +28,7 @@ def main(SUBJECT_ID: int) -> int:
     if not cleaned.is_file():
         raise FileNotFoundError(
             f"Missing cleaned mesh: {cleaned}\n"
-            f"Run clear-islands and SAVE the cleaned mesh first "
-            f"(close the AFTER window, or Space/Enter/S)."
+            f"Run clear-islands first (writes data/cleaned_scans/{SUBJECT_ID}.stl)."
         )
     if not fid_path.is_file():
         raise FileNotFoundError(f"Missing fiducials: {fid_path}")

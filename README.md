@@ -55,7 +55,7 @@ python -m app run --target 2
 | Stage | Type | What it does |
 |-------|------|----------------|
 | `reconstruct` | **interactive** | PLY → STL/OBJ (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
-| `clear-islands` | **review** | Remove islands → cleaned STL (Space/Enter/S/close save · Q discard) |
+| `clear-islands` | automated | Remove islands → `data/cleaned_scans/{id}.stl` |
 | `fiducials` | **interactive** | Pick anatomy/terminals/landmarks (Space/Enter confirm pick · S/close save · Q discard) |
 | `cz` | **preview** | Compute Cz (Space/Enter/S/close save · Q discard) |
 | `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |

@@ -63,7 +63,7 @@ python -m app run --target 2 --no-polish --from synthesize
 | Stage | Interactive? | Confirm keys | Output / effect |
 |-------|--------------|--------------|-----------------|
 | `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl`, `{id}.obj` |
-| `clear-islands` | **review** | AFTER: Space/Enter/S/close = save · Q = discard | `data/cleaned_scans/{id}.stl` |
+| `clear-islands` | no | — | `data/cleaned_scans/{id}.stl` |
 | `fiducials` | **yes** | Space/Enter = confirm pick · S/close = save · Q = discard | `data/json/fiducials_{id}.json` |
 | `cz` | **preview** | Space/Enter/S/close = save · Q = discard | `data/json/Cz_{id}.json` |
 | `electrodes` | **yes** | Space/Enter/S/close = save · Q = discard | `data/json/electrode_positions_{id}.json` |
