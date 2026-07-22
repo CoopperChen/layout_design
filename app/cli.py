@@ -103,9 +103,11 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
         )
         if args.visualize:
             out = args.out or paths.synth_layout(args.target)
-            syn.run_visualize(
+            from app.layout.visualize import visualize_after_stage
+
+            visualize_after_stage(
                 out,
-                mode="both",
+                enabled=True,
                 show=args.show,
                 show_3d=not args.no_show,
                 skip_collisions=args.skip_collisions,
@@ -183,12 +185,21 @@ def cmd_smooth(args: argparse.Namespace) -> int:
     from app.postprocess import smooth as smooth_mod
 
     try:
-        smooth_mod.smooth_from_applied(
+        out = smooth_mod.smooth_from_applied(
             args.applied,
             output=args.out,
             tag=args.tag,
             smoothing_strength=args.strength,
         )
+        if args.visualize:
+            from app.layout.visualize import visualize_after_stage
+
+            visualize_after_stage(
+                out,
+                enabled=True,
+                show_3d=not getattr(args, "no_show", False),
+                skip_collisions=getattr(args, "skip_collisions", False),
+            )
         return 0
     except (FileNotFoundError, ValueError, OSError) as e:
         print(e, file=sys.stderr)
@@ -394,14 +405,15 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--uv-resolution", type=int, default=100)
     sy.add_argument(
         "--visualize",
-        action="store_true",
-        help="After synthesize: save 2D PNG and open interactive 3D window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After synthesize: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
     )
     sy.add_argument("--show", action="store_true", help="Also open interactive 2D matplotlib window")
     sy.add_argument(
         "--no-show",
         action="store_true",
-        help="With --visualize: save 2D PNG only, skip 3D window",
+        help="With visualize: save 2D PNG only, skip 3D window",
     )
     sy.add_argument(
         "--skip-collisions",
@@ -466,8 +478,9 @@ def build_parser() -> argparse.ArgumentParser:
     po.add_argument("--electrodes-only", action="store_true")
     po.add_argument(
         "--visualize",
-        action="store_true",
-        help="After polish, save 2D + 3D PNGs for the output layout",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After polish: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
     )
     po.add_argument(
         "--profile",
@@ -481,6 +494,22 @@ def build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--out")
     sm.add_argument("--tag", default="final")
     sm.add_argument("--strength", type=float)
+    sm.add_argument(
+        "--visualize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After smooth: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
+    )
+    sm.add_argument(
+        "--no-show",
+        action="store_true",
+        help="With visualize: save 2D PNG only, skip 3D window",
+    )
+    sm.add_argument(
+        "--skip-collisions",
+        action="store_true",
+        help="Skip 2D collision markers (faster visualize)",
+    )
     sm.set_defaults(func=cmd_smooth)
 
     eb = sub.add_parser(

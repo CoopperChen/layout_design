@@ -319,6 +319,26 @@ def visualize_layout(
     return out_2d, out_3d
 
 
+def visualize_after_stage(
+    applied: str | Path,
+    *,
+    enabled: bool = True,
+    show: bool = False,
+    show_3d: bool = True,
+    skip_collisions: bool = False,
+) -> tuple[Path | None, Path | None] | None:
+    """Default post-stage view: 2D PNG + interactive 3D (no-op when disabled)."""
+    if not enabled:
+        return None
+    return visualize_layout(
+        applied,
+        mode="both",
+        show=show,
+        show_3d=show_3d,
+        skip_collisions=skip_collisions,
+    )
+
+
 def _show_3d_interactive(
     data: dict,
     *,
