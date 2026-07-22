@@ -57,7 +57,7 @@ python -m app run --target 2
 | `reconstruct` | **interactive** | PLY → STL/OBJ (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
 | `clear-islands` | automated | Remove islands → `data/cleaned_scans/{id}.stl` |
 | `fiducials` | **interactive** | Pick anatomy/terminals/landmarks (Space/Enter confirm pick · S/close save · Q discard) |
-| `cz` | **preview** | Compute Cz (Space/Enter/S/close save · Q discard) |
+| `cz` | automated | Compute Cz → `data/json/Cz_{id}.json` |
 | `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
 | `synthesize` | automated | Generate wire layout → `data/output/layouts/synth_s{id}.json` |
 | `smooth` | automated | B-spline 3D paths → `data/output/smooth/smooth_s{id}_final.json` |
@@ -211,7 +211,7 @@ postprocess:
   smoothing_strength: 0.1
 ```
 
-**Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (default **`subject1_best_v4`**). Optional custom map:
+**Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (default **`subject1_best_v4`**, tracked in git as an assignment-only LEFT/RIGHT map). Optional custom map:
 
 ```powershell
 python -m app build-assignments --reference 1 --id s1_assignments

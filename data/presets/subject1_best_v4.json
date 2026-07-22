@@ -1,0 +1,28 @@
+{
+  "preset_version": 4,
+  "preset_id": "subject1_best_v4",
+  "assignment_only": true,
+  "electrode_layout": "standard_10-20",
+  "source_subject_id": 1,
+  "terminal_assignments": {
+    "Fp1": "TERMINAL_LEFT",
+    "Fp2": "TERMINAL_RIGHT",
+    "F7": "TERMINAL_LEFT",
+    "F8": "TERMINAL_RIGHT",
+    "F3": "TERMINAL_LEFT",
+    "F4": "TERMINAL_RIGHT",
+    "T7": "TERMINAL_LEFT",
+    "T8": "TERMINAL_RIGHT",
+    "C3": "TERMINAL_LEFT",
+    "C4": "TERMINAL_RIGHT",
+    "P7": "TERMINAL_LEFT",
+    "P8": "TERMINAL_RIGHT",
+    "P3": "TERMINAL_LEFT",
+    "P4": "TERMINAL_RIGHT",
+    "O1": "TERMINAL_LEFT",
+    "O2": "TERMINAL_RIGHT",
+    "Fz": "TERMINAL_LEFT",
+    "Cz": "TERMINAL_LEFT",
+    "Pz": "TERMINAL_RIGHT"
+  }
+}

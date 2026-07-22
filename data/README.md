@@ -34,7 +34,7 @@ Print registration (`pm`) lives in `config/postprocessor/subjects/`, not under `
 
 ## Assignment map (`presets/`)
 
-Cross-subject input: **`terminal_assignments`** only. Create:
+Cross-subject input: **`terminal_assignments`** only. Default map **`subject1_best_v4.json`** is tracked in git (used by `config/defaults.yaml`). Create a custom map:
 
 ```bash
 python -m app build-assignments --reference 1 --id s1_assignments
@@ -52,7 +52,7 @@ python -m app build-assignments --reference 1 --id s1_assignments
 
 ## Git
 
-Large meshes and generated artifacts are gitignored. Empty directories are tracked via `.gitkeep`. Commit preset templates and example schemas only (no PHI).
+Large meshes and generated artifacts are gitignored. Empty directories are tracked via `.gitkeep`. The default assignment preset `data/presets/subject1_best_v4.json` is tracked; other `data/presets/*.json` stay local unless you force-add them.
 
 **Never commit:**
 

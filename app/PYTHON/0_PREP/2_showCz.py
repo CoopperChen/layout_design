@@ -1,4 +1,4 @@
-"""Compute Cz from cleaned mesh + fiducials; preview and save."""
+"""Compute Cz from cleaned mesh + fiducials (automated, no GUI)."""
 
 from __future__ import annotations
 
@@ -67,44 +67,6 @@ def main(SUBJECT_ID: int) -> int:
     i, j = np.unravel_index(np.argmin(d2), d2.shape)
     cz = 0.5 * (a[i] + b[j])
     print("Cz = ", cz.tolist())
-
-    pl = pv.Plotter(window_size=(800, 600))
-    pl.add_mesh(mesh, color="cyan", opacity=0.3)
-    pl.add_mesh(loop_fb, color="red", line_width=3)
-    pl.add_mesh(loop_lr, color="green", line_width=3)
-    pl.add_mesh(
-        pv.Sphere(center=cz, radius=mesh.length * 0.01),
-        color="yellow",
-    )
-    pl.add_text(
-        "Cz preview — Space / Enter / S / close = SAVE · Q = discard",
-        font_size=12,
-    )
-
-    state = {"save": True}
-
-    def _confirm_save() -> None:
-        state["save"] = True
-        pl.close()
-
-    def _discard() -> None:
-        state["save"] = False
-        pl.close()
-
-    pl.add_key_event("space", _confirm_save)
-    pl.add_key_event("Return", _confirm_save)
-    pl.add_key_event("s", _confirm_save)
-    pl.add_key_event("q", _discard)
-    print(
-        "\nCz review:\n"
-        "  Space / Enter / S (or close) = SAVE Cz\n"
-        "  Q = discard (pipeline needs Cz_{id}.json)\n"
-    )
-    pl.show()
-
-    if not state["save"]:
-        print("Cz NOT saved (Q).")
-        return 1
 
     out = Path(f"data/json/Cz_{SUBJECT_ID}.json")
     out.parent.mkdir(parents=True, exist_ok=True)

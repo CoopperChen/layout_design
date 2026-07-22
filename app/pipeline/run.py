@@ -327,11 +327,7 @@ def _run_fiducials(pp: PipelinePaths) -> int:
 def _run_cz(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
-    _print_step(
-        "cz",
-        f"→ {pp.cz}\n"
-        "  Space/Enter/S/close = SAVE · Q = discard",
-    )
+    _print_step("cz", f"→ {pp.cz} (automated)")
     try:
         return run_step("cz", pp.target)
     except FileNotFoundError as exc:
