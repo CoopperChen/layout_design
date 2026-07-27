@@ -8,12 +8,18 @@ Canonical paths: `app/paths.py`. This document describes **what** each artifact 
 
 Raw structured-light / photogrammetry point cloud. Input to the **reconstruct** preprocess step.
 
-### `data/raw/{id}.stl` and `data/raw/{id}.obj`
+### `data/raw/{id}.stl`
 
-Per subject you need **both** meshes with the **same geometry** (from reconstruct or external export):
+Poisson mesh from reconstruct (geometry only). Input to **clear-islands**.
 
-- **STL** — used by clear-islands, electrodes, geodesics, synthesize, smooth, and MATLAB `HeadMesh.mat`
-- **OBJ** (textured) — used **only** by `select_fiducials` for interactive picking on the color scan
+### `data/raw/{id}.obj`
+
+Imported textured OBJ (same subject basename as the PLY/STL). Place it under
+`data/raw/` before **align-obj**. That step ICP-aligns it to the cleaned STL and
+**overwrites** the same path with the synced mesh used by `select_fiducials`.
+
+Vertex colors live in `{id}_vertex_colors.npy` / `{id}_color_ref.ply`; transform
+audit in `{id}_obj_to_stl.npy`.
 
 OBJ may also live under `data/cleaned_scans/{id}.obj`; pipeline steps never read it.
 
@@ -23,7 +29,7 @@ Single connected head mesh after `0_clearIslands` (small islands removed). Canon
 
 ### `data/json/fiducials_{id}.json`
 
-Keys (3D coordinates as lists; picked on OBJ, valid on STL):
+Keys (3D coordinates as lists; picked on synced OBJ, valid on STL):
 
 - `nasion`, `lpa`, `rpa`, `inion` — anatomical registration
 - `TERMINAL_LEFT`, `TERMINAL_RIGHT` — rear harness terminal clicks

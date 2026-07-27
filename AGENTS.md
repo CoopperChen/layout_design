@@ -10,7 +10,7 @@ Repository root `layout_design/`. Paths via `app.paths`.
 
 ## Pipeline
 
-1. **A** Preprocess target subject (mesh, fiducials with TERMINAL_*, electrodes)
+1. **A** Preprocess target subject (STL mesh, align textured OBJ, fiducials with TERMINAL_*, electrodes)
 2. **B** `synthesize` — **create** paths from assignment map + target geometry (default)
 3. **C** Polish optional (paths only, not hub discovery)
 4. **D** Smooth → export-bundle → convert-gcode → simulate-gcode

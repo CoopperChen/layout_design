@@ -76,9 +76,37 @@ def test_transfer_vertex_colors_from_points():
     source_pts = np.asarray(mesh.vertices, dtype=float)
     source_colors = np.tile([1.0, 0.0, 0.0], (len(source_pts), 1))
 
-    transfer_vertex_colors_from_points(mesh, source_pts, source_colors)
+    transfer_vertex_colors_from_points(mesh, source_pts, source_colors, knn=1)
     assert mesh.has_vertex_colors()
     assert np.allclose(np.asarray(mesh.vertex_colors)[0], [1.0, 0.0, 0.0])
+
+
+def test_transfer_vertex_colors_knn_blends():
+    o3d = _require_open3d()
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector([[0.0, 0.0, 0.0]])
+    mesh.triangles = o3d.utility.Vector3iVector([[0, 0, 0]])
+    source_pts = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    source_colors = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    transfer_vertex_colors_from_points(
+        mesh, source_pts, source_colors, knn=2, max_distance_mm=10.0
+    )
+    c = np.asarray(mesh.vertex_colors)[0]
+    # Nearest is red; blue neighbor is farther so red should dominate.
+    assert c[0] > c[2]
+    assert c[1] < 0.1
 
 
 def test_color_ref_roundtrip(tmp_path: Path):

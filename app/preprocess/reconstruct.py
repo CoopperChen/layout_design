@@ -1,9 +1,11 @@
 """
-Stage A — PLY point cloud → textured OBJ + STL (Poisson reconstruction).
+Stage A — PLY point cloud → STL (Poisson reconstruction).
 
-Adapted from point-cloud reconstruction workflow: statistical outlier removal,
-interactive normal flip, Poisson meshing, hole fill, color transfer, optional
-head alignment. Outputs paired ``data/raw/{id}.obj`` and ``data/raw/{id}.stl``.
+Statistical outlier removal, interactive normal flip, Poisson meshing, hole
+fill, optional head alignment. Writes ``data/raw/{id}.stl`` only.
+
+Textured picking mesh comes from a separately imported OBJ aligned to this STL
+via the ``align-obj`` preprocess step (not from PLY color transfer).
 """
 from __future__ import annotations
 
@@ -12,7 +14,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import scipy.spatial
 
 from app import paths
 from app.runtime import setup_runtime
@@ -141,7 +142,16 @@ def interactive_normal_flip_viewer(geometry):
     return flip_state["flipped"]
 
 
-def transfer_colors_to_mesh(mesh, source) -> None:
+def transfer_colors_to_mesh(
+    mesh,
+    source,
+    *,
+    knn: int = 8,
+    max_distance_mm: float | None = 8.0,
+) -> None:
+    """Copy PLY/mesh colors onto Poisson vertices (IDW k-NN)."""
+    from app.preprocess.mesh_io import transfer_vertex_colors_from_points
+
     o3d = _require_open3d()
     if isinstance(source, o3d.geometry.PointCloud):
         if not source.has_colors():
@@ -162,11 +172,57 @@ def transfer_colors_to_mesh(mesh, source) -> None:
     else:
         raise TypeError("Source must be PointCloud or TriangleMesh")
 
-    mesh_vertices = np.asarray(mesh.vertices)
-    tree = scipy.spatial.cKDTree(source_points)
-    _, indices = tree.query(mesh_vertices, k=1)
-    mesh.vertex_colors = o3d.utility.Vector3dVector(source_colors[indices])
-    print(f"Transferred colors to {len(mesh.vertices)} mesh vertices")
+    transfer_vertex_colors_from_points(
+        mesh,
+        source_points,
+        source_colors,
+        knn=knn,
+        max_distance_mm=max_distance_mm,
+    )
+    print(
+        f"Transferred colors to {len(mesh.vertices)} mesh vertices "
+        f"(knn={knn}, max_distance_mm={max_distance_mm})"
+    )
+
+
+def trim_poisson_by_density(
+    mesh,
+    densities,
+    *,
+    quantile: float = 0.02,
+) -> object:
+    """
+    Drop low-density Poisson vertices (floaters / inflated blobs).
+
+    ``quantile`` in (0, 1) removes that lowest fraction of density values.
+    ``quantile <= 0`` leaves the mesh unchanged.
+    """
+    o3d = _require_open3d()
+    q = float(quantile)
+    if q <= 0.0:
+        return mesh
+    dens = np.asarray(densities, dtype=float)
+    if dens.size == 0 or dens.size != len(mesh.vertices):
+        print("Warning: Poisson densities unavailable — skipping density trim")
+        return mesh
+    q = min(q, 0.45)
+    thresh = float(np.quantile(dens, q))
+    remove_mask = dens < thresh
+    n_remove = int(remove_mask.sum())
+    if n_remove == 0:
+        return mesh
+    mesh = mesh.remove_vertices_by_mask(remove_mask)
+    print(
+        f"Poisson density trim: removed {n_remove} / {len(dens)} vertices "
+        f"(quantile={q:.3f}, thresh={thresh:.4g})"
+    )
+    if not isinstance(mesh, o3d.geometry.TriangleMesh):
+        return mesh
+    mesh.remove_degenerate_triangles()
+    mesh.remove_duplicated_triangles()
+    mesh.remove_duplicated_vertices()
+    mesh.remove_non_manifold_edges()
+    return mesh
 
 
 def center_geometry_at_origin(geometry) -> None:
@@ -344,12 +400,12 @@ def interactive_head_rotation_viewer(mesh) -> bool:
 def reconstruct_from_ply(
     ply_path: Path,
     out_stl: Path,
-    out_obj: Path,
     *,
     align_head: bool = True,
     poisson_depth: int = 12,
     scale_to_mm: float = 1000.0,
-) -> tuple[Path, Path]:
+    poisson_density_quantile: float = 0.02,
+) -> Path:
     o3d = _require_open3d()
     ply_path = Path(ply_path)
     if not ply_path.is_file():
@@ -379,9 +435,13 @@ def reconstruct_from_ply(
     should_flip = interactive_normal_flip_viewer(cl)
 
     with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Warning):
-        mesh, _densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
             cl, depth=poisson_depth
         )
+
+    mesh = trim_poisson_by_density(
+        mesh, densities, quantile=poisson_density_quantile
+    )
 
     mesh.compute_triangle_normals()
     mesh.compute_vertex_normals()
@@ -400,27 +460,19 @@ def reconstruct_from_ply(
         filled_legacy.compute_triangle_normals()
         filled_legacy.compute_vertex_normals()
 
-    transfer_colors_to_mesh(filled_legacy, cl)
     center_geometry_at_origin(filled_legacy)
 
     if align_head:
         interactive_head_rotation_viewer(filled_legacy)
 
     out_stl = Path(out_stl)
-    out_obj = Path(out_obj)
     out_stl.parent.mkdir(parents=True, exist_ok=True)
-    out_obj.parent.mkdir(parents=True, exist_ok=True)
 
     if not o3d.io.write_triangle_mesh(str(out_stl), filled_legacy):
         raise RuntimeError(f"Failed to write STL: {out_stl}")
 
-    from app.preprocess.mesh_io import write_vtk_compatible_obj
-
-    write_vtk_compatible_obj(filled_legacy, out_obj)
-
     print(f"Wrote STL → {out_stl}")
-    print(f"Wrote OBJ → {out_obj}")
-    return out_stl, out_obj
+    return out_stl
 
 
 def run_reconstruct(
@@ -429,8 +481,18 @@ def run_reconstruct(
     ply_path: Path | None = None,
     align_head: bool = True,
     poisson_depth: int = 12,
+    poisson_density_quantile: float | None = None,
 ) -> int:
     setup_runtime()
+    from app.config_loader import preprocess_defaults
+
+    prep = preprocess_defaults()
+    dens_q = (
+        float(poisson_density_quantile)
+        if poisson_density_quantile is not None
+        else float(prep.get("poisson_density_quantile", 0.02))
+    )
+
     ply = Path(ply_path) if ply_path else paths.raw_point_cloud(subject_id)
     if not ply.is_file():
         raw_dir = paths.DATA_DIR / "raw"
@@ -443,17 +505,16 @@ def run_reconstruct(
             hint += f"\n  PLY files found in data/raw/: {', '.join(available)}"
         raise FileNotFoundError(f"Missing input PLY: {ply}\n{hint}")
     out_stl = paths.raw_scan(subject_id, ext="stl")
-    out_obj = paths.raw_scan(subject_id, ext="obj")
     reconstruct_from_ply(
         ply,
         out_stl,
-        out_obj,
         align_head=align_head,
         poisson_depth=poisson_depth,
+        poisson_density_quantile=dens_q,
     )
     print(
-        "Next: clear-islands (STL) → fiducials (OBJ). "
-        "Both meshes share the same geometry."
+        "Next: clear-islands (STL) → align-obj (import textured OBJ → STL frame) "
+        "→ fiducials (pick on synced OBJ)."
     )
     return 0
 

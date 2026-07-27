@@ -62,8 +62,9 @@ python -m app run --target 2 --no-polish --from synthesize
 
 | Stage | Interactive? | Confirm keys | Output / effect |
 |-------|--------------|--------------|-----------------|
-| `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl`, `{id}.obj` |
+| `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl` |
 | `clear-islands` | no | — | `data/cleaned_scans/{id}.stl` |
+| `align-obj` | **yes** | Space/Enter/S = accept overlay · Q/Esc = reject | synced `data/raw/{id}.obj` |
 | `fiducials` | **yes** | Space/Enter = confirm pick · S/close = save · Q = discard | `data/json/fiducials_{id}.json` |
 | `cz` | no | — | `data/json/Cz_{id}.json` |
 | `electrodes` | **yes** | Space/Enter/S/close = save · Q = discard | `data/json/electrode_positions_{id}.json` |
@@ -84,6 +85,9 @@ python -m app run --target 2 --no-polish --from synthesize
 |----------|---------|-------------|
 | `--target` | — | Subject id (required) |
 | `--ply` | `data/raw/{target}.ply` | Input point cloud |
+| `--obj` | `data/raw/{target}.obj` | Imported textured OBJ for align-obj |
+| `--no-scale` | off | align-obj: skip isotropic scale match before ICP |
+| `--no-preview` | off | align-obj: skip overlay confirmation |
 | `--from` | `reconstruct` | First stage |
 | `--to` | `gcode` | Last stage (`simulate` opens viewer) |
 | `--no-polish` | off | Skip polish between synthesize and smooth |
@@ -166,6 +170,9 @@ python -m app preprocess --subject 2 --step fiducials
 | `--subject` | — | Subject id (required) |
 | `--step` | — | Step name (required); see table below |
 | `--ply` | — | Input `.ply` for `reconstruct` |
+| `--obj` | — | Imported textured OBJ for `align-obj` (default `data/raw/{id}.obj`) |
+| `--no-scale` | off | `align-obj`: skip isotropic scale matching before ICP |
+| `--no-preview` | off | `align-obj`: skip overlay confirmation |
 | `--no-align-head` | off | Skip head rotation UI in reconstruct |
 | `--depth` | `12` | Poisson octree depth (`reconstruct`) |
 | `--spacing` | `4.5` | Electrode spacing (`electrodes`) |
@@ -175,9 +182,10 @@ python -m app preprocess --subject 2 --step fiducials
 
 | Step | Purpose |
 |------|---------|
-| `reconstruct` | PLY point cloud → `data/raw/{id}.stl` + textured OBJ |
+| `reconstruct` | PLY point cloud → `data/raw/{id}.stl` (geometry only) |
 | `clear-islands` | Remove mesh islands → `data/cleaned_scans/{id}.stl` |
-| `fiducials` | Pick anatomical points, terminals, calibration landmarks (OBJ UI) |
+| `align-obj` | Import textured OBJ → ICP sync to STL → `data/raw/{id}.obj` |
+| `fiducials` | Pick anatomical points, terminals, calibration landmarks (synced OBJ UI) |
 | `cz` | Place Cz electrode |
 | `electrodes` | Place 10–20 electrode positions |
 | `assignments` | Initial LEFT/RIGHT terminal assignments |
