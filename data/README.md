@@ -6,7 +6,7 @@ All pipeline I/O lives under `data/`. Paths are defined in `app/paths.py` — do
 
 ```text
 data/
-├── raw/                    # {id}.ply (input), {id}.stl + {id}.obj (reconstruct output)
+├── raw/                    # {id}.ply (scan), {id}.stl (reconstruct), {id}.obj (import → align-obj sync)
 ├── cleaned_scans/          # After island removal — {id}.stl for pipeline
 ├── json/                   # Per-subject prep artifacts (fiducials, electrodes, …)
 ├── presets/                # Terminal assignment maps only

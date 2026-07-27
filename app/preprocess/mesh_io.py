@@ -39,8 +39,16 @@ def transfer_vertex_colors_from_points(
     mesh,
     source_points: np.ndarray,
     source_colors: np.ndarray,
+    *,
+    knn: int = 8,
+    max_distance_mm: float | None = 8.0,
 ) -> None:
-    """Nearest-neighbor color transfer (same logic as reconstruct)."""
+    """
+    Transfer colors onto mesh vertices via inverse-distance-weighted k-NN.
+
+    ``knn=1`` recovers classic nearest-neighbor. Neighbors farther than
+    ``max_distance_mm`` are ignored when closer samples exist (nearest always kept).
+    """
     import scipy.spatial
 
     o3d = _require_open3d()
@@ -49,9 +57,40 @@ def transfer_vertex_colors_from_points(
     source_colors = np.asarray(source_colors, dtype=float)
     if len(source_points) == 0 or len(source_colors) == 0:
         raise ValueError("Source point cloud has no points/colors")
+    if len(source_points) != len(source_colors):
+        raise ValueError(
+            f"Source points/colors length mismatch: "
+            f"{len(source_points)} vs {len(source_colors)}"
+        )
+
+    k = max(1, min(int(knn), len(source_points)))
     tree = scipy.spatial.cKDTree(source_points)
-    _, indices = tree.query(mesh_vertices, k=1)
-    mesh.vertex_colors = o3d.utility.Vector3dVector(source_colors[indices])
+    dists, indices = tree.query(mesh_vertices, k=k)
+    if k == 1:
+        mesh.vertex_colors = o3d.utility.Vector3dVector(
+            np.clip(source_colors[np.asarray(indices, dtype=np.int64)], 0.0, 1.0)
+        )
+        return
+
+    dists = np.asarray(dists, dtype=float)
+    indices = np.asarray(indices, dtype=np.int64)
+    eps = 1e-9
+    dists = np.maximum(dists, eps)
+
+    mask = np.ones_like(dists, dtype=bool)
+    if max_distance_mm is not None:
+        max_d = float(max_distance_mm)
+        mask = dists <= max_d
+        # Always keep the nearest neighbor so every vertex gets a color.
+        nearest = np.argmin(dists, axis=1)
+        mask[np.arange(mask.shape[0]), nearest] = True
+
+    weights = np.where(mask, 1.0 / dists, 0.0)
+    weight_sum = weights.sum(axis=1, keepdims=True)
+    weights = weights / np.maximum(weight_sum, eps)
+    gathered = source_colors[indices]  # (N, k, 3)
+    colors = (gathered * weights[..., None]).sum(axis=1)
+    mesh.vertex_colors = o3d.utility.Vector3dVector(np.clip(colors, 0.0, 1.0))
 
 
 def transfer_vertex_colors_from_color_ref(mesh, ref_path: Path) -> bool:
@@ -126,8 +165,8 @@ def attach_vertex_colors(mesh, obj_path: Path) -> bool:
 
     print(
         f"Could not load vertex colors for {obj_path.name}. "
-        f"Re-run reconstruct to regenerate OBJ colors:\n"
-        f"  python -m app preprocess --subject {obj_path.stem} --step reconstruct"
+        f"Re-run align-obj after placing a textured import:\n"
+        f"  python -m app preprocess --subject {obj_path.stem} --step align-obj"
     )
     return False
 

@@ -43,10 +43,11 @@ For a new subject, the usual input is a **PLY point cloud**. Use a single comman
 
 ```powershell
 # 1. Place scan: data/raw/2.ply
+#    and textured OBJ: data/raw/2.obj (or pass --obj)
 # 2. One-time: assignment map (or use default subject1_best_v4 in config)
 python -m app build-assignments --reference 1 --id s1_assignments
 
-# 3. Full pipeline (interactive fiducials + electrodes in the middle)
+# 3. Full pipeline (interactive align-obj preview + fiducials + electrodes)
 python -m app run --target 2
 ```
 
@@ -54,9 +55,10 @@ python -m app run --target 2
 
 | Stage | Type | What it does |
 |-------|------|----------------|
-| `reconstruct` | **interactive** | PLY → STL/OBJ (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
+| `reconstruct` | **interactive** | PLY → STL only (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
 | `clear-islands` | automated | Remove islands → `data/cleaned_scans/{id}.stl` |
-| `fiducials` | **interactive** | Pick anatomy/terminals/landmarks (Space/Enter confirm pick · S/close save · Q discard) |
+| `align-obj` | **interactive** | Import textured OBJ → ICP sync to STL (Space accept · Q reject) |
+| `fiducials` | **interactive** | Pick anatomy/terminals/landmarks on synced OBJ (Space/Enter confirm · S/close save · Q discard) |
 | `cz` | automated | Compute Cz → `data/json/Cz_{id}.json` |
 | `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
 | `synthesize` | automated + view | Generate layout → PNG + 3D (`--no-visualize` to skip) |
@@ -106,6 +108,7 @@ python -m app run --target 2 --to electrodes
 |--------|---------|-------------|
 | `--target` | *(required)* | Subject id (used for all paths: `data/raw/{id}.ply`, `synth_s{id}.json`, etc.) |
 | `--ply` | `data/raw/{target}.ply` | Input point cloud for reconstruct |
+| `--obj` | `data/raw/{target}.obj` | Imported textured OBJ for align-obj |
 
 #### Stage range
 
@@ -118,14 +121,17 @@ python -m app run --target 2 --to electrodes
 
 Valid `--from` / `--to` values (in order):
 
-`reconstruct` → `clear-islands` → `fiducials` → `cz` → `electrodes` → `synthesize` → `polish` → `smooth` → `bundle` → `print-config` → `record-pm` → `gcode` → `simulate`
+`reconstruct` → `clear-islands` → `align-obj` → `fiducials` → `cz` → `electrodes` → `synthesize` → `polish` → `smooth` → `bundle` → `print-config` → `record-pm` → `gcode` → `simulate`
 
-#### Preprocess (reconstruct)
+#### Preprocess (reconstruct / align-obj)
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--no-align-head` | off | Skip head rotation UI during Poisson reconstruct |
 | `--depth` | `12` (config) | Poisson octree depth; override `preprocess.poisson_depth` in `config/defaults.yaml` |
+| `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for ICP sync |
+| `--no-scale` | off | align-obj: skip isotropic scale match before ICP |
+| `--no-preview` | off | align-obj: skip overlay confirmation |
 
 #### Synthesize (passed through to layout generation)
 
@@ -188,9 +194,17 @@ Pipeline defaults live in **`config/defaults.yaml`**. Change these once instead 
 preprocess:
   terminal_assignment_strategy: balanced   # balanced | shortest
   poisson_depth: 12                      # reconstruct (--depth overrides)
+  poisson_density_quantile: 0.02         # trim low-density Poisson floaters (0 = off)
   align_head: true                       # head rotation UI (--no-align-head disables)
   electrode_spacing: 4.5
   full_circle: false
+  align_obj:                             # import textured OBJ → ICP to cleaned STL
+    match_scale: true
+    preview: true
+    n_samples: 50000
+    max_correspondence_mm: 15.0
+    fitness_min: 0.3
+    mean_dist_max_mm: 3.0
 
 synthesize:
   assignments: subject1_best_v4            # data/presets/{name}.json — LEFT/RIGHT map
@@ -263,8 +277,9 @@ python -m app paths --subject 2      # print canonical paths + default preset
 ### Stage A — `preprocess`
 
 ```powershell
-python -m app preprocess --subject 2 --step reconstruct       # PLY → STL + OBJ
+python -m app preprocess --subject 2 --step reconstruct       # PLY → STL
 python -m app preprocess --subject 2 --step clear-islands
+python -m app preprocess --subject 2 --step align-obj --obj data/raw/2.obj
 python -m app preprocess --subject 2 --step fiducials           # interactive
 python -m app preprocess --subject 2 --step cz
 python -m app preprocess --subject 2 --step electrodes          # interactive
@@ -277,6 +292,9 @@ python -m app preprocess --subject 2 --step entry-capacity
 | `--subject` | required | Subject id |
 | `--step` | required | Step name (see table in [docs/CLI.md](docs/CLI.md)) |
 | `--ply` | `data/raw/{id}.ply` | Input for `reconstruct` |
+| `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for `align-obj` |
+| `--no-scale` | off | `align-obj`: skip scale match before ICP |
+| `--no-preview` | off | `align-obj`: skip overlay confirmation |
 | `--no-align-head` | off | Skip rotation UI |
 | `--depth` | `12` | Poisson depth |
 | `--spacing` | `4.5` | Electrode spacing (`entry-capacity`) |

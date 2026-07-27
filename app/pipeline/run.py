@@ -17,6 +17,7 @@ from app.config_loader import (
 STAGES: tuple[str, ...] = (
     "reconstruct",
     "clear-islands",
+    "align-obj",
     "fiducials",
     "cz",
     "electrodes",
@@ -137,9 +138,35 @@ def _require_textured_obj(pp: PipelinePaths, stage: str) -> None:
         paths.textured_head_obj(pp.target)
     except FileNotFoundError as exc:
         raise FileNotFoundError(
-            f"Cannot start pipeline at {stage}: missing textured OBJ for subject {pp.target}\n"
-            f"Run reconstruct first."
+            f"Cannot start pipeline at {stage}: missing synced textured OBJ "
+            f"for subject {pp.target}\n"
+            f"Run align-obj first (import OBJ → ICP to cleaned STL)."
         ) from exc
+
+
+def _require_align_obj_inputs(pp: PipelinePaths, args: argparse.Namespace) -> None:
+    cleaned = pp.cleaned
+    raw_stl = paths.raw_scan(pp.target, ext="stl")
+    if not cleaned.is_file() and not raw_stl.is_file():
+        raise FileNotFoundError(
+            f"Cannot start pipeline at align-obj: missing STL for subject {pp.target}\n"
+            f"Run reconstruct (+ clear-islands)."
+        )
+    obj_arg = getattr(args, "obj", None)
+    if obj_arg is not None:
+        p = Path(obj_arg)
+        src = p if p.is_absolute() else paths.REPO_ROOT / p
+        if not src.is_file():
+            raise FileNotFoundError(
+                f"Cannot start pipeline at align-obj: missing --obj {src}"
+            )
+        return
+    default = paths.imported_textured_obj(pp.target)
+    if not default.is_file():
+        raise FileNotFoundError(
+            f"Cannot start pipeline at align-obj: missing imported OBJ\n"
+            f"  Place {default.name} under data/raw/ or pass --obj PATH"
+        )
 
 
 def _layout_input(pp: PipelinePaths, stages: Sequence[str], *, polish: bool) -> Path:
@@ -180,6 +207,9 @@ def _validate_inputs(
         return
     if first == "clear-islands":
         _require_file(paths.raw_scan(pp.target), first)
+        return
+    if first == "align-obj":
+        _require_align_obj_inputs(pp, args)
         return
     if first == "fiducials":
         _require_textured_obj(pp, first)
@@ -244,6 +274,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     handlers: dict[str, Callable[[], int]] = {
         "reconstruct": lambda: _run_reconstruct(args, pp),
         "clear-islands": lambda: _run_clear_islands(pp),
+        "align-obj": lambda: _run_align_obj(args, pp),
         "fiducials": lambda: _run_fiducials(pp),
         "cz": lambda: _run_cz(pp),
         "electrodes": lambda: _run_electrodes(pp),
@@ -283,7 +314,7 @@ def _run_reconstruct(args: argparse.Namespace, pp: PipelinePaths) -> int:
     ply = _input_ply(args, pp)
     _print_step(
         "reconstruct",
-        f"{ply} → STL/OBJ for subject {pp.target}\n"
+        f"{ply} → STL for subject {pp.target}\n"
         "  Keys: Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm",
     )
     try:
@@ -309,12 +340,34 @@ def _run_clear_islands(pp: PipelinePaths) -> int:
         return 1
 
 
+def _run_align_obj(args: argparse.Namespace, pp: PipelinePaths) -> int:
+    from app.preprocess.run import run_align_obj
+
+    obj = getattr(args, "obj", None)
+    _print_step(
+        "align-obj",
+        f"Import textured OBJ → ICP sync to STL (subject {pp.target})\n"
+        f"  source: {obj or paths.imported_textured_obj(pp.target)}\n"
+        "  Space/Enter/S = accept overlay · Q/Esc = reject",
+    )
+    try:
+        return run_align_obj(
+            pp.target,
+            obj_path=Path(obj) if obj is not None else None,
+            match_scale=not getattr(args, "no_scale", False),
+            preview=not getattr(args, "no_preview", False),
+        )
+    except (FileNotFoundError, ValueError, ImportError, RuntimeError) as exc:
+        print(exc)
+        return 1
+
+
 def _run_fiducials(pp: PipelinePaths) -> int:
     from app.preprocess.run import run_step
 
     _print_step(
         "fiducials",
-        "Interactive pick on OBJ\n"
+        "Interactive pick on synced OBJ (same frame as cleaned STL)\n"
         "  Space/Enter = confirm pick · S/close = save · Q = discard",
     )
     try:
@@ -601,6 +654,22 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
         type=int,
         default=None,
         help="Poisson octree depth (default: preprocess.poisson_depth in config)",
+    )
+    run.add_argument(
+        "--obj",
+        type=Path,
+        default=None,
+        help="Imported textured OBJ for align-obj (default: data/raw/{id}.obj)",
+    )
+    run.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="align-obj: skip isotropic scale matching before ICP",
+    )
+    run.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="align-obj: skip interactive overlay confirmation",
     )
     run.add_argument(
         "--from",

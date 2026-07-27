@@ -3,9 +3,19 @@
 preprocess:
   terminal_assignment_strategy: balanced  # balanced | shortest
   poisson_depth: 12
+  # Drop lowest-density Poisson vertices (floaters). 0 = disable.
+  poisson_density_quantile: 0.02
   align_head: true
   electrode_spacing: 4.5
   full_circle: false
+  # Import textured OBJ and ICP-align to cleaned STL (align-obj step)
+  align_obj:
+    match_scale: true
+    preview: true
+    n_samples: 50000
+    max_correspondence_mm: 15.0
+    fitness_min: 0.3
+    mean_dist_max_mm: 3.0
 
 synthesize:
   assignments: subject1_best_v4  # data/presets/{name}.json — terminal LEFT/RIGHT map

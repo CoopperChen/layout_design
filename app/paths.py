@@ -38,6 +38,16 @@ def raw_point_cloud(subject_id: int | str) -> Path:
     return DATA_DIR / "raw" / f"{_subject_stem(subject_id)}.ply"
 
 
+def imported_textured_obj(subject_id: int | str) -> Path:
+    """
+    Textured OBJ for subject ``{id}``: ``data/raw/{id}.obj``.
+
+    Place the imported textured mesh here before ``align-obj``. After alignment
+    the same path is overwritten with the STL-synced mesh used by fiducials.
+    """
+    return raw_scan(subject_id, ext="obj")
+
+
 def cleaned_scan(subject_id: int | str, ext: str = "stl") -> Path:
     return DATA_DIR / "cleaned_scans" / f"{_subject_stem(subject_id)}.{ext}"
 
@@ -46,8 +56,8 @@ def textured_head_obj(subject_id: int | str) -> Path:
     """
     Textured OBJ for interactive fiducial picking only.
 
-    Same geometry as ``cleaned_scan(subject_id)`` (.stl); layout, geodesics,
-    smooth, and MATLAB mesh export all use the STL.
+    Must be in the same coordinate frame as ``cleaned_scan(subject_id)`` (.stl).
+    Produced by ``align-obj`` (import + ICP to STL), not by reconstruct.
     """
     sid = _subject_stem(subject_id)
     candidates = [
@@ -59,9 +69,10 @@ def textured_head_obj(subject_id: int | str) -> Path:
             return path
     stl = cleaned_scan(sid)
     raise FileNotFoundError(
-        f"No textured OBJ for subject {sid}. Place {sid}.obj in data/raw/ "
-        f"(or data/cleaned_scans/) alongside {stl.name} — same geometry, "
-        f"OBJ for fiducial picking, STL for all other steps."
+        f"No synced textured OBJ for subject {sid}.\n"
+        f"  Place {sid}.obj under data/raw/, then run align-obj:\n"
+        f"    python -m app preprocess --subject {sid} --step align-obj\n"
+        f"  Output {sid}.obj must share the STL frame ({stl.name})."
     )
 
 

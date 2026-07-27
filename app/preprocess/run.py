@@ -14,6 +14,7 @@ from app.runtime import setup_runtime
 _PREP_SCRIPTS = {
     "reconstruct": None,
     "clear-islands": "PYTHON/0_PREP/0_clearIslands.py",
+    "align-obj": None,
     "fiducials": "PYTHON/0_PREP/1_selectFiducials.py",
     "cz": "PYTHON/0_PREP/2_showCz.py",
     "electrodes": "PYTHON/0_PREP/3_placeElectrodes.py",
@@ -21,6 +22,7 @@ _PREP_SCRIPTS = {
 
 _EXPECTED_OUTPUTS: dict[str, Callable[[int], Path]] = {
     "clear-islands": paths.cleaned_scan,
+    "align-obj": lambda sid: paths.raw_scan(sid, ext="obj"),
     "fiducials": paths.fiducials_json,
     "cz": paths.cz_json,
     "electrodes": paths.electrode_positions_json,
@@ -66,8 +68,30 @@ def run_reconstruct(
     )
 
 
+def run_align_obj(
+    subject_id: int,
+    *,
+    obj_path: Path | None = None,
+    match_scale: bool = True,
+    preview: bool = True,
+    n_samples: int | None = None,
+    max_correspondence_mm: float | None = None,
+) -> int:
+    from app.preprocess.align_obj import run_align_obj as _run
+
+    return _run(
+        subject_id,
+        obj_path=obj_path,
+        match_scale=match_scale,
+        preview=preview,
+        n_samples=n_samples,
+        max_correspondence_mm=max_correspondence_mm,
+    )
+
+
 _EXPECTED_HINTS: dict[str, str] = {
     "clear-islands": "Expected automated write of cleaned STL failed.",
+    "align-obj": "Pass --obj PATH or place data/raw/{id}.obj; Space accepts preview.",
     "fiducials": "S or close window to save picks (Q discards).",
     "cz": "Expected automated write of Cz JSON failed.",
     "electrodes": "Space/Enter/S or close to save (Q discards).",
@@ -79,7 +103,22 @@ def run_step(step: str, subject_id: int) -> int:
         raise ValueError(f"Unknown step {step!r}. Choose from: {', '.join(_PREP_SCRIPTS)}")
     script = _PREP_SCRIPTS[step]
     if script is None:
-        return run_reconstruct(subject_id)
+        if step == "reconstruct":
+            return run_reconstruct(subject_id)
+        if step == "align-obj":
+            rc = run_align_obj(subject_id)
+            if rc != 0:
+                return rc
+            out = _EXPECTED_OUTPUTS["align-obj"](subject_id)
+            if not Path(out).is_file():
+                print(
+                    f"Stage align-obj finished without writing {out}.\n"
+                    f"  {_EXPECTED_HINTS['align-obj']}",
+                    file=sys.stderr,
+                )
+                return 1
+            return 0
+        raise ValueError(f"Step {step!r} has no runner")
     rc = _run_script(script, subject_id)
     if rc != 0:
         return rc
@@ -137,6 +176,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ply", type=Path, default=None, help="Input .ply (reconstruct step)")
     p.add_argument("--no-align-head", action="store_true", help="Skip head rotation (reconstruct)")
     p.add_argument("--depth", type=int, default=12, help="Poisson depth (reconstruct)")
+    p.add_argument(
+        "--obj",
+        type=Path,
+        default=None,
+        help="Imported textured OBJ (align-obj; default data/raw/{id}.obj)",
+    )
+    p.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="align-obj: skip isotropic scale matching before ICP",
+    )
+    p.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="align-obj: skip interactive overlay confirmation",
+    )
     return p
 
 
@@ -153,6 +208,13 @@ def main(argv: list[str] | None = None) -> int:
                 ply_path=args.ply,
                 align_head=not args.no_align_head,
                 poisson_depth=args.depth,
+            )
+        if args.step == "align-obj":
+            return run_align_obj(
+                args.subject,
+                obj_path=args.obj,
+                match_scale=not args.no_scale,
+                preview=not args.no_preview,
             )
         return run_step(args.step, args.subject)
     except FileNotFoundError as e:

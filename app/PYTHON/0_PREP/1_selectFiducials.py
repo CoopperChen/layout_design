@@ -50,7 +50,7 @@ def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
     else:
         print(
             "Warning: head mesh has no vertex colors — showing gray surface. "
-            "Re-run reconstruct or ensure data/raw/{id}.ply exists beside the OBJ."
+            "Re-run align-obj with a textured import OBJ."
         )
         plotter.add_mesh(mesh, color="lightgray", opacity=0.85, name="head")
 
@@ -82,7 +82,7 @@ def _draw_confirmed(
 def main() -> int:
     mesh_path = paths.textured_head_obj(SUBJECT_ID)
     stl_path = paths.cleaned_scan(SUBJECT_ID)
-    print("Mesh pairing (same geometry):")
+    print("Mesh pairing (same coordinate frame after align-obj):")
     print(f"  OBJ (this step — textured picking): {mesh_path}")
     if stl_path.is_file():
         print(f"  STL (all other pipeline steps):     {stl_path}")

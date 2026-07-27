@@ -42,12 +42,12 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print("A — Preprocess")
     print("  raw PLY:       ", paths.raw_point_cloud(sid))
     print("  raw STL:       ", paths.raw_scan(sid))
-    obj = paths.DATA_DIR / "raw" / f"{sid}.obj"
-    try:
-        obj = paths.textured_head_obj(sid)
-    except FileNotFoundError:
-        pass
-    print("  raw OBJ:       ", obj, "" if obj.is_file() else "(not found — fiducials only)")
+    obj = paths.raw_scan(sid, ext="obj")
+    print(
+        "  raw OBJ:       ",
+        obj,
+        "" if obj.is_file() else "(place before align-obj; overwritten after sync)",
+    )
     print("  cleaned STL:   ", paths.cleaned_scan(sid))
     print("  fiducials:     ", paths.fiducials_json(sid))
     print("  electrodes:    ", paths.electrode_positions_json(sid))
@@ -78,6 +78,12 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
         extra.append("--no-align-head")
     if getattr(args, "depth", 12) != 12:
         extra.extend(["--depth", str(args.depth)])
+    if getattr(args, "obj", None):
+        extra.extend(["--obj", str(args.obj)])
+    if getattr(args, "no_scale", False):
+        extra.append("--no-scale")
+    if getattr(args, "no_preview", False):
+        extra.append("--no-preview")
     return preprocess_run.main(
         ["--subject", str(args.subject), "--step", args.step, *extra]
     )
@@ -365,6 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[
             "reconstruct",
             "clear-islands",
+            "align-obj",
             "fiducials",
             "cz",
             "electrodes",
@@ -375,6 +382,22 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--ply", type=Path, default=None, help="Input .ply for reconstruct step")
     pr.add_argument("--no-align-head", action="store_true", help="Skip head rotation UI")
     pr.add_argument("--depth", type=int, default=12, help="Poisson octree depth")
+    pr.add_argument(
+        "--obj",
+        type=Path,
+        default=None,
+        help="Imported textured OBJ for align-obj (default: data/raw/{id}.obj)",
+    )
+    pr.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="align-obj: skip isotropic scale matching before ICP",
+    )
+    pr.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="align-obj: skip interactive overlay confirmation",
+    )
     pr.add_argument("--spacing", type=float, default=4.5)
     pr.add_argument("--full-circle", action="store_true")
     pr.set_defaults(func=cmd_preprocess)
