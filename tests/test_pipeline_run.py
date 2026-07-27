@@ -44,9 +44,10 @@ def test_active_stages_without_polish():
 
 def test_active_stages_full_from_ply():
     stages = _active_stages(from_stage="reconstruct", to_stage="gcode", polish=True)
-    assert stages[:5] == [
+    assert stages[:6] == [
         "reconstruct",
         "clear-islands",
+        "align-obj",
         "fiducials",
         "cz",
         "electrodes",
@@ -129,7 +130,9 @@ def test_layout_input_prefers_repaired_when_polished_exists(tmp_path):
 
 def test_stage_order_starts_with_preprocess():
     assert STAGES[0] == "reconstruct"
-    assert STAGES[4] == "electrodes"
+    assert STAGES[1] == "clear-islands"
+    assert STAGES[2] == "align-obj"
+    assert STAGES[5] == "electrodes"
     assert "synthesize" in STAGES
     assert STAGES.index("record-pm") == STAGES.index("print-config") + 1
     assert STAGES.index("gcode") == STAGES.index("record-pm") + 1

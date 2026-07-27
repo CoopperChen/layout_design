@@ -37,7 +37,7 @@ def _colored_sphere(*, radius: float = 50.0, translate=None, scale: float = 1.0)
 
 
 def test_rough_similarity_align_centers_and_scales():
-    o3d = _require_open3d()
+    _require_open3d()
     target = _colored_sphere(radius=50.0)
     source = _colored_sphere(radius=50.0, scale=2.0, translate=[100.0, -40.0, 25.0])
     T = rough_similarity_align(source, target)
