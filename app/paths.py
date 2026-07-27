@@ -40,12 +40,24 @@ def raw_point_cloud(subject_id: int | str) -> Path:
 
 def imported_textured_obj(subject_id: int | str) -> Path:
     """
-    Textured OBJ for subject ``{id}``: ``data/raw/{id}.obj``.
+    Imported textured package OBJ: ``data/raw/{id}.obj``.
 
-    Place the imported textured mesh here before ``align-obj``. After alignment
-    the same path is overwritten with the STL-synced mesh used by fiducials.
+    Place the scanner ``.obj`` (+ ``.mtl`` / ``.jpg``) here. ``align-obj`` reads
+    this file and does **not** overwrite it — synced output goes to
+    :func:`aligned_textured_obj`.
     """
     return raw_scan(subject_id, ext="obj")
+
+
+def aligned_textured_obj(subject_id: int | str) -> Path:
+    """
+    STL-synced textured OBJ written by ``align-obj``:
+    ``data/cleaned_scans/{id}.obj``.
+
+    Same coordinate frame as ``cleaned_scan`` STL. Used by fiducials and any
+    later step that needs the textured head.
+    """
+    return cleaned_scan(subject_id, ext="obj")
 
 
 def cleaned_scan(subject_id: int | str, ext: str = "stl") -> Path:
@@ -54,25 +66,23 @@ def cleaned_scan(subject_id: int | str, ext: str = "stl") -> Path:
 
 def textured_head_obj(subject_id: int | str) -> Path:
     """
-    Textured OBJ for interactive fiducial picking only.
+    Textured OBJ for interactive fiducial picking.
 
-    Must be in the same coordinate frame as ``cleaned_scan(subject_id)`` (.stl).
-    Produced by ``align-obj`` (import + ICP to STL), not by reconstruct.
+    Resolves to :func:`aligned_textured_obj` (must exist). Run ``align-obj``
+    after placing :func:`imported_textured_obj`.
     """
     sid = _subject_stem(subject_id)
-    candidates = [
-        DATA_DIR / "raw" / f"{sid}.obj",
-        DATA_DIR / "cleaned_scans" / f"{sid}.obj",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path
+    aligned = aligned_textured_obj(sid)
+    if aligned.is_file():
+        return aligned
+    imported = imported_textured_obj(sid)
     stl = cleaned_scan(sid)
     raise FileNotFoundError(
-        f"No synced textured OBJ for subject {sid}.\n"
-        f"  Place {sid}.obj under data/raw/, then run align-obj:\n"
+        f"No aligned textured OBJ for subject {sid}.\n"
+        f"  Expected: {aligned}\n"
+        f"  Import package at {imported} (left unchanged), then:\n"
         f"    python -m app preprocess --subject {sid} --step align-obj\n"
-        f"  Output {sid}.obj must share the STL frame ({stl.name})."
+        f"  Aligned OBJ must share the STL frame ({stl.name})."
     )
 
 

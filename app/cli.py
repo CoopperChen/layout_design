@@ -42,11 +42,17 @@ def cmd_paths(args: argparse.Namespace) -> int:
     print("A — Preprocess")
     print("  raw PLY:       ", paths.raw_point_cloud(sid))
     print("  raw STL:       ", paths.raw_scan(sid))
-    obj = paths.raw_scan(sid, ext="obj")
+    imported = paths.imported_textured_obj(sid)
+    aligned = paths.aligned_textured_obj(sid)
     print(
-        "  raw OBJ:       ",
-        obj,
-        "" if obj.is_file() else "(place before align-obj; overwritten after sync)",
+        "  import OBJ:    ",
+        imported,
+        "" if imported.is_file() else "(place before align-obj; never overwritten)",
+    )
+    print(
+        "  aligned OBJ:   ",
+        aligned,
+        "" if aligned.is_file() else "(written by align-obj; used by fiducials)",
     )
     print("  cleaned STL:   ", paths.cleaned_scan(sid))
     print("  fiducials:     ", paths.fiducials_json(sid))
@@ -84,6 +90,8 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
         extra.append("--no-scale")
     if getattr(args, "no_preview", False):
         extra.append("--no-preview")
+    if getattr(args, "no_rotate_head", False):
+        extra.append("--no-rotate-head")
     return preprocess_run.main(
         ["--subject", str(args.subject), "--step", args.step, *extra]
     )
@@ -397,6 +405,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-preview",
         action="store_true",
         help="align-obj: skip interactive overlay confirmation",
+    )
+    pr.add_argument(
+        "--no-rotate-head",
+        action="store_true",
+        help="align-obj: skip textured OBJ head-rotation UI",
     )
     pr.add_argument("--spacing", type=float, default=4.5)
     pr.add_argument("--full-circle", action="store_true")

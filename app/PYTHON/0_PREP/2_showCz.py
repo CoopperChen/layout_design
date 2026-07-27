@@ -33,15 +33,25 @@ def main(SUBJECT_ID: int) -> int:
     if not fid_path.is_file():
         raise FileNotFoundError(f"Missing fiducials: {fid_path}")
 
-    mesh = pv.read(str(cleaned))
     with fid_path.open(encoding="utf-8") as f:
         fid = json.load(f)
-
     for key in ("nasion", "lpa", "rpa", "inion"):
         if key not in fid:
             raise ValueError(f"Fiducials missing {key!r} in {fid_path}")
 
-    pts = mesh.points
+    mesh = pv.read(str(cleaned))
+    if isinstance(mesh, pv.MultiBlock):
+        mesh = mesh.combine()
+    pts = np.asarray(mesh.points, dtype=float) if mesh.n_points else np.empty((0, 3))
+    if pts.shape[0] == 0:
+        size = cleaned.stat().st_size if cleaned.is_file() else 0
+        raise ValueError(
+            f"Cleaned mesh has no points: {cleaned} (file size={size} bytes).\n"
+            f"This usually means the STL was wiped (e.g. a failed Open3D STL "
+            f"rewrite during head-rotation sync).\n"
+            f"Fix: re-run reconstruct → clear-islands for subject {SUBJECT_ID}, "
+            f"then align-obj again if needed."
+        )
     crown_idx = int(np.argmax(pts[:, 2]))
     crown = pts[crown_idx]
     print("Auto-detected crown at", crown.tolist())

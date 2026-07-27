@@ -3,7 +3,8 @@
 -- Install: copy into Mach4Profiles/<profile>/Macros or paste into PLC script.
 --
 -- Requires LuaSocket in Mach4 (socket.dll + socket/core.dll in Mach4 api/lua folder).
--- Edit TARGET_IP / TARGET_PORT to match the PC running record-pm (often 127.0.0.1).
+-- Edit TARGET_IP / TARGET_PORT to match the PC running record-pm.
+-- Default TARGET_IP is the Orbbec / record-pm host on the shop LAN.
 
 local TARGET_IP = "192.168.208.10"
 local TARGET_PORT = 62100

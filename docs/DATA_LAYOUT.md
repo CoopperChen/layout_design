@@ -14,14 +14,19 @@ Poisson mesh from reconstruct (geometry only). Input to **clear-islands**.
 
 ### `data/raw/{id}.obj`
 
-Imported textured OBJ (same subject basename as the PLY/STL). Place it under
-`data/raw/` before **align-obj**. That step ICP-aligns it to the cleaned STL and
-**overwrites** the same path with the synced mesh used by `select_fiducials`.
+Imported textured OBJ package (same subject basename as the PLY/STL), plus
+companion `.mtl` / `.jpg`. Place under `data/raw/` before **align-obj**.
+This file is **not** overwritten by preprocess.
 
-Vertex colors live in `{id}_vertex_colors.npy` / `{id}_color_ref.ply`; transform
-audit in `{id}_obj_to_stl.npy`.
+### `data/cleaned_scans/{id}.obj`
 
-OBJ may also live under `data/cleaned_scans/{id}.obj`; pipeline steps never read it.
+STL-synced textured OBJ written by **align-obj** (ICP + optional head rotation).
+Fiducial picking and any later textured-head step read this path. Materials /
+textures are copied next to it. Transform audit: `{id}_obj_to_stl.npy` in the
+same folder.
+
+Vertex-color sidecars (geometry-only fallback) may appear as
+`{id}_vertex_colors.npy` / `{id}_color_ref.ply` beside the aligned OBJ.
 
 ### `data/cleaned_scans/{id}.stl`
 

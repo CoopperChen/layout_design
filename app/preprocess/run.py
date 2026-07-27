@@ -22,7 +22,7 @@ _PREP_SCRIPTS = {
 
 _EXPECTED_OUTPUTS: dict[str, Callable[[int], Path]] = {
     "clear-islands": paths.cleaned_scan,
-    "align-obj": lambda sid: paths.raw_scan(sid, ext="obj"),
+    "align-obj": paths.aligned_textured_obj,
     "fiducials": paths.fiducials_json,
     "cz": paths.cz_json,
     "electrodes": paths.electrode_positions_json,
@@ -74,6 +74,7 @@ def run_align_obj(
     obj_path: Path | None = None,
     match_scale: bool = True,
     preview: bool = True,
+    rotate_head: bool | None = None,
     n_samples: int | None = None,
     max_correspondence_mm: float | None = None,
 ) -> int:
@@ -84,6 +85,7 @@ def run_align_obj(
         obj_path=obj_path,
         match_scale=match_scale,
         preview=preview,
+        rotate_head=rotate_head,
         n_samples=n_samples,
         max_correspondence_mm=max_correspondence_mm,
     )
@@ -91,7 +93,7 @@ def run_align_obj(
 
 _EXPECTED_HINTS: dict[str, str] = {
     "clear-islands": "Expected automated write of cleaned STL failed.",
-    "align-obj": "Pass --obj PATH or place data/raw/{id}.obj; Space accepts preview.",
+    "align-obj": "Pass --obj PATH or place data/raw/{id}.obj; writes data/cleaned_scans/{id}.obj.",
     "fiducials": "S or close window to save picks (Q discards).",
     "cz": "Expected automated write of Cz JSON failed.",
     "electrodes": "Space/Enter/S or close to save (Q discards).",
@@ -192,6 +194,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="align-obj: skip interactive overlay confirmation",
     )
+    p.add_argument(
+        "--no-rotate-head",
+        action="store_true",
+        help="align-obj: skip textured OBJ head-rotation UI",
+    )
     return p
 
 
@@ -215,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                 obj_path=args.obj,
                 match_scale=not args.no_scale,
                 preview=not args.no_preview,
+                rotate_head=not args.no_rotate_head,
             )
         return run_step(args.step, args.subject)
     except FileNotFoundError as e:

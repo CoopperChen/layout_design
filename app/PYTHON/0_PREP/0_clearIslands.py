@@ -54,7 +54,19 @@ def main(SUBJECT_ID: int) -> int:
     print(f"Loading mesh from: {file_path}")
     if not Path(file_path).is_file():
         raise FileNotFoundError(file_path)
+    if Path(file_path).stat().st_size <= 0:
+        raise ValueError(
+            f"Raw STL is empty (0 bytes): {file_path}\n"
+            f"Re-run reconstruct for subject {SUBJECT_ID}."
+        )
     original_mesh = pv.read(file_path)
+    if isinstance(original_mesh, pv.MultiBlock):
+        original_mesh = original_mesh.combine()
+    if original_mesh.n_points == 0 or original_mesh.n_cells == 0:
+        raise ValueError(
+            f"Raw STL has no geometry: {file_path}\n"
+            f"Re-run reconstruct for subject {SUBJECT_ID}."
+        )
     n_before = int(original_mesh.n_cells)
 
     cleaned_mesh = remove_islands(

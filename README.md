@@ -57,7 +57,7 @@ python -m app run --target 2
 |-------|------|----------------|
 | `reconstruct` | **interactive** | PLY → STL only (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
 | `clear-islands` | automated | Remove islands → `data/cleaned_scans/{id}.stl` |
-| `align-obj` | **interactive** | Import textured OBJ → ICP sync to STL (Space accept · Q reject) |
+| `align-obj` | **interactive** | Import `data/raw/{id}.obj` → ICP + head-rotate → write `data/cleaned_scans/{id}.obj` (STL same transform) |
 | `fiducials` | **interactive** | Pick anatomy/terminals/landmarks on synced OBJ (Space/Enter confirm · S/close save · Q discard) |
 | `cz` | automated | Compute Cz → `data/json/Cz_{id}.json` |
 | `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
@@ -132,6 +132,7 @@ Valid `--from` / `--to` values (in order):
 | `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for ICP sync |
 | `--no-scale` | off | align-obj: skip isotropic scale match before ICP |
 | `--no-preview` | off | align-obj: skip overlay confirmation |
+| `--no-rotate-head` | off | align-obj: skip textured OBJ head-rotation UI |
 
 #### Synthesize (passed through to layout generation)
 
@@ -195,12 +196,13 @@ preprocess:
   terminal_assignment_strategy: balanced   # balanced | shortest
   poisson_depth: 12                      # reconstruct (--depth overrides)
   poisson_density_quantile: 0.02         # trim low-density Poisson floaters (0 = off)
-  align_head: true                       # head rotation UI (--no-align-head disables)
+  align_head: false                      # legacy reconstruct rotation; prefer align-obj
   electrode_spacing: 4.5
   full_circle: false
   align_obj:                             # import textured OBJ → ICP to cleaned STL
     match_scale: true
     preview: true
+    rotate_head: true                    # UV+JPG OBJ rotation; STL gets same transform
     n_samples: 50000
     max_correspondence_mm: 15.0
     fitness_min: 0.3
@@ -295,6 +297,7 @@ python -m app preprocess --subject 2 --step entry-capacity
 | `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for `align-obj` |
 | `--no-scale` | off | `align-obj`: skip scale match before ICP |
 | `--no-preview` | off | `align-obj`: skip overlay confirmation |
+| `--no-rotate-head` | off | `align-obj`: skip textured OBJ head-rotation UI |
 | `--no-align-head` | off | Skip rotation UI |
 | `--depth` | `12` | Poisson depth |
 | `--spacing` | `4.5` | Electrode spacing (`entry-capacity`) |

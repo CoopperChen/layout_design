@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 
+import numpy as np
 import pyvista as pv
 import vtk
 
@@ -29,7 +30,7 @@ def _first_missing_index(picked: dict) -> int:
 
 def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
     texture = getattr(mesh, "texture", None)
-    if texture is not None:
+    if texture is not None and mesh.active_texture_coordinates is not None:
         plotter.add_mesh(
             mesh,
             texture=texture,
@@ -37,6 +38,7 @@ def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
             smooth_shading=True,
             name="head",
         )
+        print("Fiducials display: real OBJ texture (UV + JPG)")
     elif "RGB" in mesh.array_names:
         plotter.add_mesh(
             mesh,
@@ -47,16 +49,36 @@ def _add_head_mesh(plotter: pv.Plotter, mesh: pv.DataSet) -> None:
             lighting=False,
             name="head",
         )
+        print("Fiducials display: vertex RGB fallback (vague) — prefer textured OBJ")
     else:
         print(
-            "Warning: head mesh has no vertex colors — showing gray surface. "
-            "Re-run align-obj with a textured import OBJ."
+            "Warning: head mesh has no texture — showing gray surface. "
+            "Place {id}.obj + .mtl + .jpg and run align-obj."
         )
         plotter.add_mesh(mesh, color="lightgray", opacity=0.85, name="head")
 
 
 def _sphere_radius(mesh: pv.DataSet) -> float:
-    return float(mesh.length) * 0.005
+    """
+    Marker size from the *surface* extent, not ``mesh.length``.
+
+    Textured OBJs often keep many unused ``v`` rows; those inflate the
+    bounding-box diagonal and make pick spheres huge.
+    """
+    pts = np.asarray(mesh.points, dtype=float)
+    if pts.size == 0:
+        return 1.0
+    extent = float(mesh.length)
+    if getattr(mesh, "n_cells", 0) > 0:
+        try:
+            if bool(getattr(mesh, "is_all_triangles", False)):
+                faces = np.asarray(mesh.faces, dtype=np.int64).reshape(-1, 4)[:, 1:4]
+                used = pts[np.unique(faces.ravel())]
+                if len(used) >= 2:
+                    extent = float(np.linalg.norm(used.max(axis=0) - used.min(axis=0)))
+        except Exception:  # noqa: BLE001
+            pass
+    return max(extent * 0.0025, 0.4)
 
 
 def _draw_confirmed(
@@ -83,12 +105,13 @@ def main() -> int:
     mesh_path = paths.textured_head_obj(SUBJECT_ID)
     stl_path = paths.cleaned_scan(SUBJECT_ID)
     print("Mesh pairing (same coordinate frame after align-obj):")
-    print(f"  OBJ (this step — textured picking): {mesh_path}")
+    print(f"  aligned OBJ (this step — textured picking): {mesh_path}")
+    print(f"  import OBJ (unchanged source):              {paths.imported_textured_obj(SUBJECT_ID)}")
     if stl_path.is_file():
-        print(f"  STL (all other pipeline steps):     {stl_path}")
+        print(f"  STL (all other pipeline steps):             {stl_path}")
     else:
         print(
-            f"  STL (all other pipeline steps):     {stl_path}  "
+            f"  STL (all other pipeline steps):             {stl_path}  "
             "[missing — run clear-islands or copy STL before synthesize]"
         )
     mesh = load_head_mesh(mesh_path)

@@ -92,6 +92,7 @@ def test_align_obj_to_stl_writes_synced_obj(tmp_path: Path):
         n_samples=8000,
         max_correspondence_mm=25.0,
         preview=False,
+        rotate_head=False,
         fitness_min=0.2,
         mean_dist_max_mm=5.0,
     )

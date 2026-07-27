@@ -211,17 +211,29 @@ def trim_poisson_by_density(
     n_remove = int(remove_mask.sum())
     if n_remove == 0:
         return mesh
-    mesh = mesh.remove_vertices_by_mask(remove_mask)
+
+    # Open3D may mutate in place and return None, or return a new mesh.
+    trimmed = mesh.remove_vertices_by_mask(remove_mask)
+    if trimmed is not None:
+        mesh = trimmed
     print(
         f"Poisson density trim: removed {n_remove} / {len(dens)} vertices "
         f"(quantile={q:.3f}, thresh={thresh:.4g})"
     )
     if not isinstance(mesh, o3d.geometry.TriangleMesh):
-        return mesh
+        raise RuntimeError(
+            "Poisson density trim left no TriangleMesh "
+            f"(got {type(mesh)!r}). Try poisson_density_quantile: 0."
+        )
     mesh.remove_degenerate_triangles()
     mesh.remove_duplicated_triangles()
     mesh.remove_duplicated_vertices()
     mesh.remove_non_manifold_edges()
+    if mesh.is_empty():
+        raise RuntimeError(
+            "Poisson density trim removed the entire mesh. "
+            "Lower preprocess.poisson_density_quantile (or set 0)."
+        )
     return mesh
 
 
@@ -358,7 +370,9 @@ def interactive_head_rotation_viewer(mesh) -> bool:
         return False
 
     print("\n" + "=" * 72)
-    print("HEAD ROTATION VIEWER")
+    print("HEAD ROTATION VIEWER (Poisson STL — optional / legacy)")
+    print("  Preferred: rotate the textured OBJ in align-obj (JPG atlas).")
+    print("  Set preprocess.align_head: false to skip this during reconstruct.")
     print("  Mouse: drag rotate | scroll zoom")
     print("  Arrows: roll/pitch ±2.5° | A/D: yaw ±2.5°")
     print("  1 top (XY) | 2 side (YZ) | 3 front (XZ)")
@@ -442,6 +456,8 @@ def reconstruct_from_ply(
     mesh = trim_poisson_by_density(
         mesh, densities, quantile=poisson_density_quantile
     )
+    if mesh is None or not isinstance(mesh, o3d.geometry.TriangleMesh) or mesh.is_empty():
+        raise RuntimeError("Poisson mesh is empty after density trim")
 
     mesh.compute_triangle_normals()
     mesh.compute_vertex_normals()
@@ -452,7 +468,14 @@ def reconstruct_from_ply(
 
     tmesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
     filled = tmesh.fill_holes()
-    filled_legacy = filled.to_legacy()
+    if filled is None:
+        print("Warning: fill_holes returned None — keeping unfilled mesh")
+        filled_legacy = mesh
+    else:
+        filled_legacy = filled.to_legacy()
+        if filled_legacy is None or filled_legacy.is_empty():
+            print("Warning: fill_holes produced an empty mesh — keeping unfilled mesh")
+            filled_legacy = mesh
     filled_legacy.compute_triangle_normals()
     filled_legacy.compute_vertex_normals()
     if should_flip:
