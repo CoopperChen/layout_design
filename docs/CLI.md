@@ -108,7 +108,7 @@ python -m app run --target 2 --no-polish --from synthesize
 | `--quiet` | off | Quiet bundle export |
 | `--force-print-config` | off | Overwrite existing pm YAML scaffold |
 | `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
-| `--pm-port` | `62100` | Mach4 work-pose UDP port (`record-pm`) |
+| `--pm-port` | `62101` | Mach4 work-pose UDP port (`record-pm`; Orbbec uses `62100`) |
 | `--pm-bind-ip` | `0.0.0.0` | UDP bind for `record-pm` |
 | `--pm-stale-ms` | `500` | Stale pose threshold for `record-pm` |
 | `--config` / `--pm-file` | auto | pm YAML for G-code |
@@ -366,18 +366,18 @@ Prefer **`record-pm`** to fill values from the live CNC. Manual edit of `physica
 
 Capture `physical_landmarks_mm` from the live CNC **work** DRO (UDP) with keyboard confirmation.
 
-**Prerequisites:** Mach4 publishing JSON work pose via [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua) (default port `62100`).
+**Prerequisites:** Mach4 publishing JSON work pose via [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua) (dual ports: Orbbec `62100`, record-pm `62101`).
 
 ```bash
 python -m app record-pm --subject 2
 python -m app record-pm --subject 2 --force
-python -m app record-pm --subject 2 --port 62100 --bind-ip 0.0.0.0
+python -m app record-pm --subject 2 --port 62101 --bind-ip 0.0.0.0
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--subject` | — | Subject id (required) |
-| `--port` | `62100` | UDP listen port |
+| `--port` | `62101` | UDP listen port |
 | `--bind-ip` | `0.0.0.0` | Bind address |
 | `--stale-ms` | `500` | Ignore packets older than this many ms |
 | `--output` | auto | Override YAML path |

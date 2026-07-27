@@ -599,8 +599,8 @@ def build_parser() -> argparse.ArgumentParser:
     rpm.add_argument(
         "--port",
         type=int,
-        default=62100,
-        help="Mach4 work-pose UDP port (default: 62100)",
+        default=62101,
+        help="Mach4 work-pose UDP port (default: 62101; Orbbec uses 62100)",
     )
     rpm.add_argument(
         "--bind-ip",

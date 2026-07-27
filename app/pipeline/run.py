@@ -553,7 +553,7 @@ def _run_record_pm(args: argparse.Namespace, pp: PipelinePaths) -> int:
         out = record_physical_landmarks(
             pp.target,
             bind_ip=getattr(args, "pm_bind_ip", "0.0.0.0"),
-            port=int(getattr(args, "pm_port", 62100)),
+            port=int(getattr(args, "pm_port", 62101)),
             stale_sec=float(getattr(args, "pm_stale_ms", 500)) / 1000.0,
             force=True,
             output=pp.print_config,
@@ -745,8 +745,8 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
     run.add_argument(
         "--pm-port",
         type=int,
-        default=62100,
-        help="UDP port for Mach4 work-pose publisher (record-pm)",
+        default=62101,
+        help="UDP port for Mach4 work-pose (record-pm; Orbbec uses 62100)",
     )
     run.add_argument(
         "--pm-bind-ip",

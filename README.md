@@ -160,7 +160,7 @@ Valid `--from` / `--to` values (in order):
 |--------|---------|-------------|
 | `--force-print-config` | off | Overwrite existing empty pm YAML scaffold |
 | `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
-| `--pm-port` | `62100` | Mach4 work-pose UDP port for `record-pm` |
+| `--pm-port` | `62101` | Mach4 work-pose UDP port for `record-pm` (Orbbec uses `62100`) |
 | `--pm-bind-ip` | `0.0.0.0` | UDP bind address for `record-pm` |
 | `--pm-stale-ms` | `500` | Ignore CNC pose older than this (ms) |
 | `--config` / `--pm-file` | auto | Physical landmarks YAML for registration |
@@ -366,7 +366,7 @@ Digital calibration picks in `fiducials_{id}.json` are **scan-frame**. At print 
 
 ### Automated capture (CNC DRO + keyboard)
 
-1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (set `TARGET_IP` / port `62100`).
+1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (publishes to `62100` Orbbec + `62101` record-pm).
 2. Mount the end-effector; jog the tip to each marker.
 3. Capture:
 

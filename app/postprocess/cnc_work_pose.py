@@ -44,7 +44,7 @@ class WorkPoseUdpClient:
         self,
         *,
         bind_ip: str = "0.0.0.0",
-        port: int = 62100,
+        port: int = 62101,
         stale_sec: float = 0.5,
     ) -> None:
         if port < 0 or port > 65535:
@@ -112,7 +112,7 @@ class WorkPoseUdpClient:
                     return "work pose: waiting"
                 return "work pose: stale"
         age_ms = (time.monotonic() if now is None else now) - sample.received_at
-        return f"work pose: live ({age_ms * 1000.0:.0f} ms)"
+        return f"work pose: live ({age_ms * 1000.0:4.0f} ms)"
 
     def _latest_sample(self, *, now: float | None = None) -> WorkPoseSample | None:
         clock = time.monotonic() if now is None else now
