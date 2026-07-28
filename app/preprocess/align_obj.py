@@ -31,12 +31,15 @@ def _mesh_to_pcd(mesh, *, n_samples: int, estimate_normals: bool = True):
     n = max(1000, int(n_samples))
     pcd = mesh.sample_points_uniformly(number_of_points=n)
     if estimate_normals:
-        if mesh.has_triangle_normals():
-            # Prefer mesh normals via another sample with normals when available.
-            pass
         pcd.estimate_normals(
             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=10.0, max_nn=30)
         )
+        # Point-to-plane ICP is sensitive to normal direction; aim normals outward
+        # from the mesh centroid so source/target agree when shapes match.
+        center = np.asarray(mesh.get_center(), dtype=float)
+        pcd.orient_normals_towards_camera_location(center)
+        # towards_camera points inward if camera=centroid; flip to outward.
+        np.asarray(pcd.normals)[:] *= -1.0
     return pcd
 
 
@@ -65,6 +68,50 @@ def rough_similarity_align(source, target) -> np.ndarray:
     T[:3, :3] = np.eye(3) * scale
     T[:3, 3] = c_tgt - scale * c_src
     return T
+
+
+def _rotation_about_point(R: np.ndarray, center: np.ndarray) -> np.ndarray:
+    """4×4: ``x' = R @ (x - c) + c``."""
+    R = np.asarray(R, dtype=float)
+    c = np.asarray(center, dtype=float).reshape(3)
+    T = np.eye(4, dtype=float)
+    T[:3, :3] = R
+    T[:3, 3] = c - R @ c
+    return T
+
+
+def orientation_init_candidates(center: np.ndarray) -> list[tuple[str, np.ndarray]]:
+    """
+    Initial rigid (and mirror) poses for ICP multi-start.
+
+    Same-head OBJ/STL often differ by a 180° flip or a left/right mirror;
+    identity-only ICP then locks into a flipped local minimum.
+    """
+    o3d = _require_open3d()
+    c = np.asarray(center, dtype=float).reshape(3)
+    out: list[tuple[str, np.ndarray]] = [("identity", np.eye(4))]
+
+    # 180° about principal axes (common scanner / export flips).
+    for axis, label in (
+        ((np.pi, 0.0, 0.0), "rot180_x"),
+        ((0.0, np.pi, 0.0), "rot180_y"),
+        ((0.0, 0.0, np.pi), "rot180_z"),
+    ):
+        R = o3d.geometry.get_rotation_matrix_from_xyz(axis)
+        out.append((label, _rotation_about_point(R, c)))
+
+    # 90° steps about Z (yaw) — heads often differ only in yaw.
+    for deg, label in ((90.0, "rot90_z"), (270.0, "rot270_z")):
+        R = o3d.geometry.get_rotation_matrix_from_xyz((0.0, 0.0, np.deg2rad(deg)))
+        out.append((label, _rotation_about_point(R, c)))
+
+    # Axis mirrors (det=-1). Needed when OBJ and STL are reflected copies.
+    for i, label in enumerate(("mirror_x", "mirror_y", "mirror_z")):
+        S = np.eye(3)
+        S[i, i] = -1.0
+        out.append((label, _rotation_about_point(S, c)))
+
+    return out
 
 
 def run_icp(
@@ -101,6 +148,49 @@ def run_icp(
         transform = np.asarray(last.transformation, dtype=float)
     assert last is not None
     return transform, float(last.fitness)
+
+
+def run_icp_multistart(
+    source_mesh,
+    target_mesh,
+    *,
+    n_samples: int = 50000,
+    max_correspondence_mm: float = 15.0,
+    max_iteration: int = 80,
+) -> tuple[np.ndarray, float, str, float]:
+    """
+    Try several initial orientations; pick lowest mean surface distance.
+
+    Returns ``(transform, fitness, init_label, mean_dist_mm)``.
+    """
+    o3d = _require_open3d()
+    center = np.asarray(source_mesh.get_center(), dtype=float)
+    best: tuple[np.ndarray, float, str, float] | None = None
+
+    for label, init in orientation_init_candidates(center):
+        trial = o3d.geometry.TriangleMesh(source_mesh)
+        T_icp, fitness = run_icp(
+            trial,
+            target_mesh,
+            init=init,
+            n_samples=n_samples,
+            max_correspondence_mm=max_correspondence_mm,
+            max_iteration=max_iteration,
+        )
+        trial.transform(T_icp)
+        mean_d = mean_surface_distance_mm(trial, target_mesh, n_samples=min(8000, n_samples))
+        print(
+            f"  ICP init={label:10s}  fitness={fitness:.3f}  "
+            f"mean_dist={mean_d:.3f} mm"
+        )
+        if best is None or mean_d < best[3] - 1e-6 or (
+            abs(mean_d - best[3]) <= 1e-6 and fitness > best[1]
+        ):
+            best = (T_icp, fitness, label, mean_d)
+
+    assert best is not None
+    print(f"Selected ICP init={best[2]} (mean_dist={best[3]:.3f} mm)")
+    return best
 
 
 def bake_texture_to_vertex_colors(mesh) -> bool:
@@ -288,10 +378,10 @@ def align_obj_to_stl(
             f"(scale≈{float(np.linalg.norm(T[:3, 0])):.4g})"
         )
 
-    icp_T, fitness = run_icp(
+    print("ICP multi-start (identity / 180° / yaw / mirrors)…")
+    icp_T, fitness, init_label, mean_d = run_icp_multistart(
         source,
         target,
-        init=np.eye(4),
         n_samples=n_samples,
         max_correspondence_mm=max_correspondence_mm,
         max_iteration=max_iteration,
@@ -299,8 +389,10 @@ def align_obj_to_stl(
     source.transform(icp_T)
     T = icp_T @ T
 
-    mean_d = mean_surface_distance_mm(source, target)
-    print(f"ICP fitness={fitness:.3f}, mean surface distance={mean_d:.3f} mm")
+    print(
+        f"ICP fitness={fitness:.3f}, mean surface distance={mean_d:.3f} mm "
+        f"(init={init_label})"
+    )
     if fitness < fitness_min or mean_d > mean_dist_max_mm:
         print(
             "Warning: alignment quality looks poor. "

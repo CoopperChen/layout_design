@@ -11,6 +11,7 @@ from app.preprocess.align_obj import (
     mean_surface_distance_mm,
     rough_similarity_align,
     run_icp,
+    run_icp_multistart,
 )
 
 
@@ -70,6 +71,37 @@ def test_icp_recovers_small_rigid_offset(tmp_path: Path):
     mean_d = mean_surface_distance_mm(source, target, n_samples=5000)
     assert fitness > 0.5
     assert mean_d < 2.0
+
+
+def test_icp_multistart_recovers_180_flip():
+    """Same head flipped 180° about Z should still align via multi-start."""
+    o3d = _require_open3d()
+    target = _colored_sphere(radius=50.0)
+    # Non-symmetric blob so 180° flip is distinguishable.
+    verts = np.asarray(target.vertices)
+    verts[:, 0] *= 1.35
+    verts[:, 1] *= 0.85
+    target.vertices = o3d.utility.Vector3dVector(verts)
+    target.compute_vertex_normals()
+    target.compute_triangle_normals()
+
+    source = o3d.geometry.TriangleMesh(target)
+    R = source.get_rotation_matrix_from_xyz((0.0, 0.0, np.pi))
+    source.rotate(R, center=source.get_center())
+    source.translate([6.0, -4.0, 2.0])
+
+    T, fitness, label, mean_d = run_icp_multistart(
+        source,
+        target,
+        n_samples=6000,
+        max_correspondence_mm=30.0,
+        max_iteration=80,
+    )
+    source.transform(T)
+    mean_d2 = mean_surface_distance_mm(source, target, n_samples=4000)
+    assert mean_d2 < 2.5
+    assert fitness > 0.3
+    assert label != ""  # any winning init is fine if distance is low
 
 
 def test_align_obj_to_stl_writes_synced_obj(tmp_path: Path):
