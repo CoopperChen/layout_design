@@ -44,8 +44,14 @@ def convert_to_gcode(
         mesh_faces=bundle.mesh_faces,
     )
 
+    # MATLAB: Zsafe = round(max(HeadMeshPointsR(:,3)) + margin) on scan2phys
+    # (registration / pm) mesh — then written into machine-frame G-code rows.
     mesh_z_max = float(np.max(mesh_registered[:, 2]))
     zsafe = round(mesh_z_max + machine.zsafe_margin_mm)
+    print(
+        f"Zsafe={zsafe} mm "
+        f"(registration mesh Zmax={mesh_z_max:.2f} + margin={machine.zsafe_margin_mm:g})"
+    )
     trace_order_cfg = load_trace_order_config()
     plan = plan_trace_order(
         gcode_list,

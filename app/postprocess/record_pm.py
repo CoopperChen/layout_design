@@ -18,6 +18,10 @@ LANDMARK_ORDER = (
     "landmark_back",
 )
 
+# Fixed-width status row so \r redraw does not leave leftovers or wrap/scroll.
+_STATUS_WIDTH = 110
+_STATUS_HZ = 10.0
+
 
 def pm_from_raw_touches(raw_xyz: np.ndarray) -> np.ndarray:
     """
@@ -51,20 +55,58 @@ def _read_key() -> str | None:
 
 
 def _format_pose(pose: WorkPose | None, status: str) -> str:
+    # Fixed-width fields keep the status row length stable under \r redraw.
+    status_f = f"{status:<28}"
     if pose is None:
-        return f"{status} | XYZ ---  B/C ---"
+        return f"{status_f} | XYZ -------- -------- --------  B/C ------ ------"
     return (
-        f"{status} | "
-        f"X={pose.x:8.3f} Y={pose.y:8.3f} Z={pose.z:8.3f}  "
-        f"B={pose.b_deg:7.2f} C={pose.c_deg:7.2f}"
+        f"{status_f} | "
+        f"X={pose.x:8.2f} Y={pose.y:8.2f} Z={pose.z:8.2f}  "
+        f"B={pose.b_deg:6.1f} C={pose.c_deg:6.1f}"
     )
+
+
+def _write_status_line(text: str) -> None:
+    """Overwrite one terminal row in place (no scroll)."""
+    clipped = text.replace("\n", " ").replace("\r", " ")
+    if len(clipped) > _STATUS_WIDTH:
+        clipped = clipped[: _STATUS_WIDTH - 1] + "…"
+    else:
+        clipped = clipped.ljust(_STATUS_WIDTH)
+    # ESC[2K clears the whole line; \r returns to column 0 (VT-capable consoles).
+    sys.stdout.write(f"\033[2K\r{clipped}")
+    sys.stdout.flush()
+
+
+def _write_event(message: str) -> None:
+    """Print a one-shot message below the status row, then leave room for status."""
+    sys.stdout.write(f"\033[2K\r{message.rstrip()}\n")
+    sys.stdout.flush()
+
+
+def _enable_windows_vt() -> None:
+    """Enable ANSI clear-line sequences in Windows consoles when possible."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)) == 0:
+            return
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def record_physical_landmarks(
     subject_id: int | str,
     *,
     bind_ip: str = "0.0.0.0",
-    port: int = 62100,
+    port: int = 62101,
     stale_sec: float = 0.5,
     force: bool = False,
     output: Path | str | None = None,
@@ -81,6 +123,8 @@ def record_physical_landmarks(
         raise FileExistsError(
             f"Print config already exists: {out} (use --force to overwrite)"
         )
+
+    _enable_windows_vt()
 
     raw = [None, None, None]  # type: list[np.ndarray | None]
     poses_at_capture: list[WorkPose | None] = [None, None, None]
@@ -104,7 +148,7 @@ def record_physical_landmarks(
     def _try_save() -> Path | None:
         if any(p is None for p in raw):
             missing = [LANDMARK_ORDER[i] for i, p in enumerate(raw) if p is None]
-            sys.stdout.write(f"\nStill missing: {', '.join(missing)}\n")
+            _write_event(f"Still missing: {', '.join(missing)}")
             return None
         pm = pm_from_raw_touches(np.vstack(raw))
         meta = {
@@ -119,26 +163,27 @@ def record_physical_landmarks(
             "udp_port": port,
         }
         save_physical_landmarks(out, pm, subject_id=subject_id, capture_meta=meta)
-        sys.stdout.write(f"\nWrote {out}\n{pm}\n")
+        _write_event(f"Wrote {out}\n{pm}")
         return out
 
+    def _status_text(pose: WorkPose | None, status: str) -> str:
+        marks = []
+        for i, name in enumerate(LANDMARK_ORDER):
+            flag = "✓" if raw[i] is not None else "·"
+            cursor = ">" if i == idx else " "
+            marks.append(f"{cursor}{flag}{i + 1}:{name.replace('landmark_', '')}")
+        return f"{'  '.join(marks)}  |  {_format_pose(pose, status)}"
+
     with WorkPoseUdpClient(bind_ip=bind_ip, port=port, stale_sec=stale_sec) as client:
-        last_line = ""
+        last_draw = 0.0
+        min_period = 1.0 / _STATUS_HZ
         while True:
-            pose = client.latest()
-            status = client.status_label()
-            marks = []
-            for i, name in enumerate(LANDMARK_ORDER):
-                flag = "✓" if raw[i] is not None else "·"
-                cursor = ">" if i == idx else " "
-                marks.append(f"{cursor}{flag}{i + 1}:{name.replace('landmark_', '')}")
-            line = (
-                f"\r{'  '.join(marks)}  |  {_format_pose(pose, status)}    "
-            )
-            if line != last_line:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                last_line = line
+            now = time.monotonic()
+            if now - last_draw >= min_period:
+                pose = client.latest()
+                status = client.status_label()
+                _write_status_line(_status_text(pose, status))
+                last_draw = now
 
             key = _read_key()
             if key is None and sys.platform != "win32":
@@ -161,10 +206,10 @@ def record_physical_landmarks(
                     else:
                         key = "\r"
                 else:
-                    time.sleep(0.05)
+                    time.sleep(0.02)
                     continue
             elif key is None:
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
 
             key_l = key.lower()
@@ -173,28 +218,26 @@ def record_physical_landmarks(
                     saved = _try_save()
                     if saved is not None:
                         return saved
-                    last_line = ""
                     continue
+                pose = client.latest()
                 if pose is None:
-                    sys.stdout.write(
-                        "\nNo live work pose — start Mach4 UDP publisher "
-                        "(see config/postprocessor/README.md).\n"
+                    _write_event(
+                        "No live work pose — start Mach4 UDP publisher "
+                        "(see config/postprocessor/README.md)."
                     )
-                    last_line = ""
                     continue
                 raw[idx] = np.asarray(pose.xyz, dtype=float)
                 poses_at_capture[idx] = pose
-                sys.stdout.write(
-                    f"\nCaptured {LANDMARK_ORDER[idx]}: "
+                _write_event(
+                    f"Captured {LANDMARK_ORDER[idx]}: "
                     f"[{pose.x:.3f}, {pose.y:.3f}, {pose.z:.3f}] "
-                    f"(B={pose.b_deg:.2f}, C={pose.c_deg:.2f})\n"
+                    f"(B={pose.b_deg:.2f}, C={pose.c_deg:.2f})"
                 )
-                last_line = ""
                 if idx < 2:
                     idx += 1
                 else:
-                    sys.stdout.write(
-                        "All three captured — Space/Enter/S to save, Q to quit.\n"
+                    _write_event(
+                        "All three captured — Space/Enter/S to save, Q to quit."
                     )
             elif key_l == "n":
                 idx = min(2, idx + 1)
@@ -206,9 +249,8 @@ def record_physical_landmarks(
                 saved = _try_save()
                 if saved is not None:
                     return saved
-                last_line = ""
             elif key_l == "q" or key == "\x1b":
-                sys.stdout.write("\nAborted — nothing written.\n")
+                _write_event("Aborted — nothing written.")
                 raise SystemExit(1)
 
     raise RuntimeError("unreachable")

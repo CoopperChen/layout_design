@@ -5,13 +5,14 @@ preprocess:
   poisson_depth: 12
   # Drop lowest-density Poisson vertices (floaters). 0 = disable.
   poisson_density_quantile: 0.02
-  align_head: true
+  align_head: false  # head rotation is on textured OBJ during align-obj
   electrode_spacing: 4.5
   full_circle: false
   # Import textured OBJ and ICP-align to cleaned STL (align-obj step)
   align_obj:
     match_scale: true
     preview: true
+    rotate_head: true  # interactive rotation on textured OBJ; STL gets same transform
     n_samples: 50000
     max_correspondence_mm: 15.0
     fitness_min: 0.3

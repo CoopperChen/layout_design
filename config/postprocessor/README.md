@@ -35,11 +35,12 @@ Reads the live CNC **work** DRO over UDP (same Mach4 publisher used by Orbbec CN
 ### 1. Mach4 work-pose publisher
 
 1. Copy [`scripts/mach4_work_pose_publisher.lua`](../../scripts/mach4_work_pose_publisher.lua) into your Mach4 profile macros folder, or paste it into the profile **PLC** script.
-2. Edit at the top of the Lua file:
-   - `TARGET_IP` — PC running `record-pm` (use `127.0.0.1` if Mach4 and this repo are on the same machine)
-   - `TARGET_PORT` — default `62100`
-3. Ensure **LuaSocket** is available to Mach4 (`socket.dll` under Mach4’s Lua API tree).
-4. Call `PublishWorkPoseUdp()` every PLC cycle (or from a timer). The script uses `mc.mcAxisGetPos()` — **active work coordinates** (G54/G55… DRO), not machine coordinates.
+2. Confirm `TARGETS` in the Lua script (default: dual publish to the tracking PC):
+   - `192.168.208.10:62100` — Orbbec head tracking / `orbbec-head-stream-cnc`
+   - `192.168.208.10:62101` — this repo’s `record-pm`
+3. Both apps can run at once because Mach4 sends the same JSON to **two ports** (one unicast port cannot be shared).
+4. Ensure **LuaSocket** is available to Mach4 (`socket.dll` under Mach4’s Lua API tree).
+5. Call `PublishWorkPoseUdp()` every PLC cycle (or from a timer). The script uses `mc.mcAxisGetPos()` — **active work coordinates** (G54/G55… DRO), not machine coordinates.
 
 **Packet format** (JSON over UDP):
 
@@ -70,7 +71,7 @@ python -m app record-pm --subject 4 --force
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--subject` | *(required)* | Subject id → `subject_{id}.yaml` |
-| `--port` | `62100` | UDP listen port |
+| `--port` | `62101` | UDP listen port (`62100` is reserved for Orbbec) |
 | `--bind-ip` | `0.0.0.0` | Bind address |
 | `--stale-ms` | `500` | Ignore packets older than this |
 | `--output` | auto | Override output path |
@@ -105,7 +106,7 @@ physical_landmarks_mm:
 capture:                # audit only — not used by convert-gcode
   raw_work_xyz_mm: ...
   work_bc_deg: ...
-  udp_port: 62100
+  udp_port: 62101
 ```
 
 **Math:** if the DRO at the three touches is \(p_0, p_1, p_2\), then
@@ -122,7 +123,7 @@ You do **not** need to zero work coordinates at central. Relative storage keeps 
 
 | Symptom | Check |
 |---------|--------|
-| `work pose: waiting` | Mach4 Lua running? `TARGET_IP` / port match? Firewall blocking UDP? |
+| `work pose: waiting` | Mach4 Lua running? `TARGETS` include this PC:`62101`? Firewall blocking UDP? |
 | `work pose: stale` | Publisher stopped or PLC not calling `PublishWorkPoseUdp` often enough |
 | Capture refused | Need a **live** packet; wait until status shows `live` |
 | Wrong registration later | Same tip / same B/C habit as print; digital picks must be the same three markers; use matching `--rot0y`/`--rot0z` on convert and simulate |

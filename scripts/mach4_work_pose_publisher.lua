@@ -1,16 +1,23 @@
--- Mach4: publish active work coordinates (current G54/G55... DRO) over UDP.
--- Used by: layout_design `python -m app record-pm` and Orbbec CNC stream.
+-- Mach4: publish active work coordinates (current G54/G55... DRO) to UDP listeners.
+-- Used by: Orbbec CNC stream (62100) and layout_design `record-pm` (62101).
 -- Install: copy into Mach4Profiles/<profile>/Macros or paste into PLC script.
 --
 -- Requires LuaSocket in Mach4 (socket.dll + socket/core.dll in Mach4 api/lua folder).
--- Edit TARGET_IP / TARGET_PORT to match the PC running record-pm (often 127.0.0.1).
+-- Tracking PC must run:
+--   orbbec-head-stream-cnc --work-pose-udp-port 62100 ...
+--   layout_design: python -m app record-pm --port 62101 ...
+--
+-- Edit TARGETS to match each consumer on the LAN (one UDP socket per target).
+-- Keep this file in sync with Orbbec CV `scripts/mach4_work_pose_publisher.lua`.
 
-local TARGET_IP = "192.168.208.10"
-local TARGET_PORT = 62100
+local TARGETS = {
+  { ip = "192.168.208.10", port = 62100 }, -- Orbbec head tracking / orbbec-head-stream-cnc
+  { ip = "192.168.208.10", port = 62101 }, -- layout_design record-pm
+}
 local PUBLISH_PERIOD_SEC = 0.05
 
 local inst = mc.mcGetInstance()
-local udp = nil
+local udp_sockets = {}
 local lastPublish = 0.0
 
 local function axis_pos(axisConst)
@@ -19,7 +26,7 @@ local function axis_pos(axisConst)
 end
 
 local function ensure_udp()
-  if udp ~= nil then
+  if next(udp_sockets) ~= nil then
     return true
   end
   local ok, socket = pcall(require, "socket")
@@ -27,8 +34,11 @@ local function ensure_udp()
     mc.mcCntlSetLastError(inst, "work pose UDP: LuaSocket not available")
     return false
   end
-  udp = socket.udp()
-  udp:setpeername(TARGET_IP, TARGET_PORT)
+  for i, target in ipairs(TARGETS) do
+    local udp = socket.udp()
+    udp:setpeername(target.ip, target.port)
+    udp_sockets[i] = udp
+  end
   return true
 end
 
@@ -52,7 +62,9 @@ function PublishWorkPoseUdp()
     '{"coord":"work","units":"mm","x":%.4f,"y":%.4f,"z":%.4f,"b":%.4f,"c":%.4f}',
     x, y, z, b, c
   )
-  udp:send(payload)
+  for _, udp in ipairs(udp_sockets) do
+    udp:send(payload)
+  end
 end
 
 -- Call PublishWorkPoseUdp() from the profile PLC script each cycle.

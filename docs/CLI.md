@@ -64,7 +64,7 @@ python -m app run --target 2 --no-polish --from synthesize
 |-------|--------------|--------------|-----------------|
 | `reconstruct` | align / normals | Space/Enter/S = confirm · Esc/Q = skip/cancel · close = confirm | `data/raw/{id}.stl` |
 | `clear-islands` | no | — | `data/cleaned_scans/{id}.stl` |
-| `align-obj` | **yes** | Space/Enter/S = accept overlay · Q/Esc = reject | synced `data/raw/{id}.obj` |
+| `align-obj` | **yes** | Overlay accept · then head-rotate UV+JPG OBJ (STL same transform) | `data/cleaned_scans/{id}.obj` |
 | `fiducials` | **yes** | Space/Enter = confirm pick · S/close = save · Q = discard | `data/json/fiducials_{id}.json` |
 | `cz` | no | — | `data/json/Cz_{id}.json` |
 | `electrodes` | **yes** | Space/Enter/S/close = save · Q = discard | `data/json/electrode_positions_{id}.json` |
@@ -88,11 +88,12 @@ python -m app run --target 2 --no-polish --from synthesize
 | `--obj` | `data/raw/{target}.obj` | Imported textured OBJ for align-obj |
 | `--no-scale` | off | align-obj: skip isotropic scale match before ICP |
 | `--no-preview` | off | align-obj: skip overlay confirmation |
+| `--no-rotate-head` | off | align-obj: skip textured OBJ head-rotation UI |
 | `--from` | `reconstruct` | First stage |
 | `--to` | `gcode` | Last stage (`simulate` opens viewer) |
 | `--no-polish` | off | Skip polish between synthesize and smooth |
 | `--polish-mode` | `gentle` | `gentle`, `repair`, `refine`, `ga-short` |
-| `--no-align-head` | off | Skip head rotation UI in reconstruct |
+| `--no-align-head` | off | Skip legacy reconstruct head-rotation UI |
 | `--depth` | config (`12`) | Poisson octree depth |
 | `--preserve-entry-order` | off | Synthesize: keep reference entry order |
 | `--inherit-preset-terminals` | off | Synthesize: legacy rigid hub map |
@@ -107,7 +108,7 @@ python -m app run --target 2 --no-polish --from synthesize
 | `--quiet` | off | Quiet bundle export |
 | `--force-print-config` | off | Overwrite existing pm YAML scaffold |
 | `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
-| `--pm-port` | `62100` | Mach4 work-pose UDP port (`record-pm`) |
+| `--pm-port` | `62101` | Mach4 work-pose UDP port (`record-pm`; Orbbec uses `62100`) |
 | `--pm-bind-ip` | `0.0.0.0` | UDP bind for `record-pm` |
 | `--pm-stale-ms` | `500` | Stale pose threshold for `record-pm` |
 | `--config` / `--pm-file` | auto | pm YAML for G-code |
@@ -173,7 +174,8 @@ python -m app preprocess --subject 2 --step fiducials
 | `--obj` | — | Imported textured OBJ for `align-obj` (default `data/raw/{id}.obj`) |
 | `--no-scale` | off | `align-obj`: skip isotropic scale matching before ICP |
 | `--no-preview` | off | `align-obj`: skip overlay confirmation |
-| `--no-align-head` | off | Skip head rotation UI in reconstruct |
+| `--no-rotate-head` | off | `align-obj`: skip textured OBJ head-rotation UI |
+| `--no-align-head` | off | Skip legacy reconstruct head-rotation UI |
 | `--depth` | `12` | Poisson octree depth (`reconstruct`) |
 | `--spacing` | `4.5` | Electrode spacing (`electrodes`) |
 | `--full-circle` | off | Full 10–20 circle (`electrodes`) |
@@ -184,7 +186,7 @@ python -m app preprocess --subject 2 --step fiducials
 |------|---------|
 | `reconstruct` | PLY point cloud → `data/raw/{id}.stl` (geometry only) |
 | `clear-islands` | Remove mesh islands → `data/cleaned_scans/{id}.stl` |
-| `align-obj` | Import textured OBJ → ICP sync to STL → `data/raw/{id}.obj` |
+| `align-obj` | Import textured OBJ → ICP sync to STL → optional head rotation → `data/cleaned_scans/{id}.obj` (import `data/raw/{id}.obj` left unchanged) |
 | `fiducials` | Pick anatomical points, terminals, calibration landmarks (synced OBJ UI) |
 | `cz` | Place Cz electrode |
 | `electrodes` | Place 10–20 electrode positions |
@@ -364,18 +366,18 @@ Prefer **`record-pm`** to fill values from the live CNC. Manual edit of `physica
 
 Capture `physical_landmarks_mm` from the live CNC **work** DRO (UDP) with keyboard confirmation.
 
-**Prerequisites:** Mach4 publishing JSON work pose via [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua) (default port `62100`).
+**Prerequisites:** Mach4 publishing JSON work pose via [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua) (dual ports: Orbbec `62100`, record-pm `62101`).
 
 ```bash
 python -m app record-pm --subject 2
 python -m app record-pm --subject 2 --force
-python -m app record-pm --subject 2 --port 62100 --bind-ip 0.0.0.0
+python -m app record-pm --subject 2 --port 62101 --bind-ip 0.0.0.0
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--subject` | — | Subject id (required) |
-| `--port` | `62100` | UDP listen port |
+| `--port` | `62101` | UDP listen port |
 | `--bind-ip` | `0.0.0.0` | Bind address |
 | `--stale-ms` | `500` | Ignore packets older than this many ms |
 | `--output` | auto | Override YAML path |

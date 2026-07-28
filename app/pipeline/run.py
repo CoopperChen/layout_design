@@ -131,16 +131,17 @@ def _require_file(path: Path, stage: str) -> None:
 
 
 def _require_textured_obj(pp: PipelinePaths, stage: str) -> None:
-    obj = paths.raw_scan(pp.target, ext="obj")
-    if obj.is_file():
+    aligned = paths.aligned_textured_obj(pp.target)
+    if aligned.is_file():
         return
     try:
         paths.textured_head_obj(pp.target)
     except FileNotFoundError as exc:
         raise FileNotFoundError(
-            f"Cannot start pipeline at {stage}: missing synced textured OBJ "
+            f"Cannot start pipeline at {stage}: missing aligned textured OBJ "
             f"for subject {pp.target}\n"
-            f"Run align-obj first (import OBJ → ICP to cleaned STL)."
+            f"Expected {aligned}\n"
+            f"Run align-obj first (import data/raw/{{id}}.obj → write synced OBJ)."
         ) from exc
 
 
@@ -348,6 +349,7 @@ def _run_align_obj(args: argparse.Namespace, pp: PipelinePaths) -> int:
         "align-obj",
         f"Import textured OBJ → ICP sync to STL (subject {pp.target})\n"
         f"  source: {obj or paths.imported_textured_obj(pp.target)}\n"
+        f"  output: {paths.aligned_textured_obj(pp.target)}\n"
         "  Space/Enter/S = accept overlay · Q/Esc = reject",
     )
     try:
@@ -356,6 +358,7 @@ def _run_align_obj(args: argparse.Namespace, pp: PipelinePaths) -> int:
             obj_path=Path(obj) if obj is not None else None,
             match_scale=not getattr(args, "no_scale", False),
             preview=not getattr(args, "no_preview", False),
+            rotate_head=not getattr(args, "no_rotate_head", False),
         )
     except (FileNotFoundError, ValueError, ImportError, RuntimeError) as exc:
         print(exc)
@@ -550,7 +553,7 @@ def _run_record_pm(args: argparse.Namespace, pp: PipelinePaths) -> int:
         out = record_physical_landmarks(
             pp.target,
             bind_ip=getattr(args, "pm_bind_ip", "0.0.0.0"),
-            port=int(getattr(args, "pm_port", 62100)),
+            port=int(getattr(args, "pm_port", 62101)),
             stale_sec=float(getattr(args, "pm_stale_ms", 500)) / 1000.0,
             force=True,
             output=pp.print_config,
@@ -672,6 +675,11 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
         help="align-obj: skip interactive overlay confirmation",
     )
     run.add_argument(
+        "--no-rotate-head",
+        action="store_true",
+        help="align-obj: skip textured OBJ head-rotation UI",
+    )
+    run.add_argument(
         "--from",
         dest="from_stage",
         default="reconstruct",
@@ -737,8 +745,8 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
     run.add_argument(
         "--pm-port",
         type=int,
-        default=62100,
-        help="UDP port for Mach4 work-pose publisher (record-pm)",
+        default=62101,
+        help="UDP port for Mach4 work-pose (record-pm; Orbbec uses 62100)",
     )
     run.add_argument(
         "--pm-bind-ip",

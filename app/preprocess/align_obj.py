@@ -109,75 +109,16 @@ def bake_texture_to_vertex_colors(mesh) -> bool:
 
     Returns True if the mesh ends with vertex colors.
     """
-    o3d = _require_open3d()
-    if mesh.has_vertex_colors():
-        return True
+    from app.preprocess.mesh_io import bake_texture_to_vertex_colors as _bake
 
-    textures = list(getattr(mesh, "textures", []) or [])
-    if not textures or not mesh.has_triangle_uvs():
-        return False
-
-    uvs = np.asarray(mesh.triangle_uvs, dtype=float).reshape(-1, 3, 2)
-    tris = np.asarray(mesh.triangles, dtype=np.int64)
-    n_verts = len(mesh.vertices)
-    if len(uvs) != len(tris):
-        return False
-
-    # Use first texture image (typical single-material head scan).
-    img = np.asarray(textures[0])
-    if img.ndim == 2:
-        img = np.stack([img, img, img], axis=-1)
-    if img.shape[-1] > 3:
-        img = img[..., :3]
-    if img.dtype != np.uint8:
-        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
-    h, w = img.shape[:2]
-
-    accum = np.zeros((n_verts, 3), dtype=float)
-    counts = np.zeros(n_verts, dtype=float)
-    for ti, tri in enumerate(tris):
-        for k in range(3):
-            u, v = uvs[ti, k]
-            # OBJ / Open3D: v often bottom-up; image rows top-down.
-            x = int(np.clip(u, 0.0, 1.0) * (w - 1))
-            y = int(np.clip(1.0 - v, 0.0, 1.0) * (h - 1))
-            accum[tri[k]] += img[y, x] / 255.0
-            counts[tri[k]] += 1.0
-
-    missing = counts < 1.0
-    counts[missing] = 1.0
-    colors = accum / counts[:, None]
-    colors[missing] = 0.7
-    mesh.vertex_colors = o3d.utility.Vector3dVector(np.clip(colors, 0.0, 1.0))
-    return True
+    return _bake(mesh)
 
 
 def load_textured_source(obj_path: Path):
-    """Load imported OBJ; bake UV texture → vertex colors when needed."""
-    o3d = _require_open3d()
-    obj_path = Path(obj_path)
-    if not obj_path.is_file():
-        raise FileNotFoundError(f"Imported OBJ not found: {obj_path}")
+    """Load imported OBJ (+ MTL/JPG); bake UV texture → vertex colors when needed."""
+    from app.preprocess.mesh_io import load_textured_obj_mesh
 
-    mesh = o3d.io.read_triangle_mesh(str(obj_path), enable_post_processing=True)
-    if mesh.is_empty():
-        raise ValueError(f"Empty mesh: {obj_path}")
-    mesh.compute_vertex_normals()
-    mesh.compute_triangle_normals()
-
-    had_vertex_colors = mesh.has_vertex_colors()
-    baked = bake_texture_to_vertex_colors(mesh)
-    if had_vertex_colors:
-        print(f"Source colors: vertex colors ({len(mesh.vertices)} vertices)")
-    elif baked and mesh.has_vertex_colors():
-        print(f"Source colors: texture baked → {len(mesh.vertices)} vertices")
-    else:
-        print(
-            "Warning: imported OBJ has no vertex colors or bakeable texture — "
-            "fiducial picking will show a gray surface."
-        )
-        mesh.paint_uniform_color([0.75, 0.75, 0.75])
-    return mesh
+    return load_textured_obj_mesh(Path(obj_path))
 
 
 def load_target_stl(stl_path: Path):
@@ -205,47 +146,79 @@ def mean_surface_distance_mm(source, target, *, n_samples: int = 20000) -> float
     return float(np.mean(dists))
 
 
-def interactive_alignment_preview(source, target) -> bool:
+def interactive_alignment_preview(source_obj: Path, target_stl: Path) -> bool:
     """
-    Overlay aligned OBJ (colored) on STL (gray). Space/Enter/S = accept, Q/Esc = reject.
-    Closing the window accepts.
+    Overlay textured OBJ (real JPG) on gray STL. Space/Enter/S = accept, Q/Esc = reject.
     """
-    o3d = _require_open3d()
-    state = {"accepted": True, "done": False}
+    import pyvista as pv
 
-    src = o3d.geometry.TriangleMesh(source)
-    tgt = o3d.geometry.TriangleMesh(target)
-    tgt.paint_uniform_color([0.55, 0.55, 0.55])
+    from app.preprocess.mesh_io import load_head_mesh, obj_has_texcoords
+    from app.preprocess.obj_texture import load_pyvista_textured_obj
 
-    vis = o3d.visualization.VisualizerWithKeyCallback()
-    vis.create_window(window_name="align-obj preview (Space=accept, Q=reject)", width=1280, height=900)
-    vis.add_geometry(tgt)
-    vis.add_geometry(src)
-    opt = vis.get_render_option()
-    opt.mesh_show_back_face = True
-    opt.light_on = True
+    state = {"accepted": True}
 
-    def _accept(_vis):
+    stl = pv.read(str(target_stl))
+    if isinstance(stl, pv.MultiBlock):
+        stl = stl.combine()
+
+    plotter = pv.Plotter(window_size=(1400, 1000))
+    plotter.set_background("white")
+    plotter.add_mesh(
+        stl,
+        color="lightgray",
+        opacity=0.35,
+        smooth_shading=True,
+        name="stl",
+    )
+    if obj_has_texcoords(source_obj):
+        obj_mesh, tex = load_pyvista_textured_obj(source_obj)
+        plotter.add_mesh(
+            obj_mesh,
+            texture=tex,
+            smooth_shading=True,
+            show_edges=False,
+            name="obj",
+        )
+    else:
+        obj_mesh = load_head_mesh(source_obj)
+        if "RGB" in obj_mesh.array_names:
+            plotter.add_mesh(
+                obj_mesh,
+                scalars="RGB",
+                rgb=True,
+                smooth_shading=True,
+                lighting=False,
+                show_edges=False,
+                name="obj",
+            )
+        else:
+            plotter.add_mesh(
+                obj_mesh,
+                color="tomato",
+                opacity=0.7,
+                smooth_shading=True,
+                name="obj",
+            )
+    plotter.add_axes()
+
+    def _accept() -> None:
         state["accepted"] = True
-        state["done"] = True
-        _vis.close()
-        return False
+        plotter.close()
 
-    def _reject(_vis):
+    def _reject() -> None:
         state["accepted"] = False
-        state["done"] = True
-        _vis.close()
-        return False
+        plotter.close()
 
-    # GLFW: Space=32, Enter=257, S=83/115, Q=81/113, Esc=256
-    for key in (32, 257, 83, 115):
-        vis.register_key_callback(key, _accept)
-    for key in (81, 113, 256):
-        vis.register_key_callback(key, _reject)
+    plotter.add_key_event("space", _accept)
+    plotter.add_key_event("Return", _accept)
+    plotter.add_key_event("s", _accept)
+    plotter.add_key_event("S", _accept)
+    plotter.add_key_event("q", _reject)
+    plotter.add_key_event("Q", _reject)
+    plotter.add_key_event("Escape", _reject)
 
-    print("Preview: colored OBJ over gray STL. Space/Enter/S = accept · Q/Esc = reject")
-    vis.run()
-    vis.destroy_window()
+    print("Preview: textured OBJ over gray STL. Space/Enter/S = accept · Q/Esc = reject")
+    plotter.show()
     return bool(state["accepted"])
 
 
@@ -254,19 +227,55 @@ def align_obj_to_stl(
     target_stl: Path,
     out_obj: Path,
     *,
+    subject_id: int | None = None,
     match_scale: bool = True,
     n_samples: int = 50000,
     max_correspondence_mm: float = 15.0,
     max_iteration: int = 80,
     preview: bool = True,
+    rotate_head: bool = True,
     fitness_min: float = 0.3,
     mean_dist_max_mm: float = 3.0,
 ) -> Path:
     """
-    Rigid(+optional scale) align imported OBJ → STL frame; write ``data/raw/{id}.obj``.
+    ICP-align textured OBJ → STL frame, optional head rotation on the OBJ,
+    keep STL synced with the same transforms.
     """
-    from app.preprocess.mesh_io import write_vtk_compatible_obj
+    from app.preprocess.mesh_io import (
+        obj_has_texcoords,
+        write_transformed_wavefront_obj,
+        write_vtk_compatible_obj,
+    )
+    from app.preprocess.obj_texture import (
+        interactive_textured_head_rotation,
+        sync_stl_files_with_transform,
+    )
 
+    source_obj = Path(source_obj)
+    from app.preprocess.mesh_io import backup_textured_obj_if_needed
+
+    # Only snapshot the source when align would overwrite it in place.
+    if Path(out_obj).resolve() == Path(source_obj).resolve():
+        backup_textured_obj_if_needed(source_obj)
+    source_text_path = source_obj
+    preserve_materials = obj_has_texcoords(source_obj)
+    if not preserve_materials:
+        companions = []
+        try:
+            from app.preprocess.mesh_io import discover_obj_texture_images
+
+            companions = discover_obj_texture_images(source_obj)
+        except Exception:  # noqa: BLE001
+            pass
+        if companions:
+            raise ValueError(
+                f"Cannot align {source_obj.name}: it has no UVs, but "
+                f"{', '.join(p.name for p in companions)} is present.\n"
+                f"Replace the OBJ with the textured one from your "
+                f".obj/.mtl/.jpg package (must contain 'vt' lines)."
+            )
+
+    # Open3D mesh is geometry-only for ICP (not for display).
     source = load_textured_source(source_obj)
     target = load_target_stl(target_stl)
 
@@ -299,18 +308,36 @@ def align_obj_to_stl(
             "or retry with --no-scale / larger --max-correspondence."
         )
 
+    out_obj = Path(out_obj)
+    # Write ICP-aligned textured OBJ first (needed for textured preview / rotation).
+    if preserve_materials:
+        write_transformed_wavefront_obj(source_text_path, T, out_obj)
+    else:
+        write_vtk_compatible_obj(source, out_obj)
+
     if preview:
-        if not interactive_alignment_preview(source, target):
+        if not interactive_alignment_preview(out_obj, target_stl):
             raise RuntimeError("align-obj rejected in preview — nothing written")
 
-    out_obj = Path(out_obj)
-    write_vtk_compatible_obj(source, out_obj)
-    # Persist the 4x4 for audit / re-apply
+    # Head rotation on the *textured* OBJ; same transform applied to STL.
+    if rotate_head and preserve_materials:
+        T_rot = interactive_textured_head_rotation(out_obj)
+        if T_rot is not None and not np.allclose(T_rot, np.eye(4)):
+            write_transformed_wavefront_obj(out_obj, T_rot, out_obj)
+            T = T_rot @ T
+            if subject_id is not None:
+                sync_stl_files_with_transform(T_rot, subject_id=subject_id)
+            else:
+                sync_stl_files_with_transform(T_rot, stl_paths=[Path(target_stl)])
+
     xform_path = out_obj.with_name(f"{out_obj.stem}_obj_to_stl.npy")
     np.save(xform_path, T)
     print(f"Wrote synced OBJ → {out_obj}")
     print(f"Wrote transform  → {xform_path}")
-    print("Next: fiducials (pick on OBJ; coordinates valid on cleaned STL).")
+    print(
+        "Next: fiducials (pick on aligned OBJ in cleaned_scans/; "
+        "import raw OBJ was left unchanged)."
+    )
     return out_obj
 
 
@@ -348,6 +375,7 @@ def run_align_obj(
     obj_path: Path | None = None,
     match_scale: bool = True,
     preview: bool = True,
+    rotate_head: bool | None = None,
     n_samples: int | None = None,
     max_correspondence_mm: float | None = None,
 ) -> int:
@@ -370,23 +398,30 @@ def run_align_obj(
     mean_dist_max = float(align_cfg.get("mean_dist_max_mm", 3.0))
     do_preview = preview if preview is not None else bool(align_cfg.get("preview", True))
     do_scale = match_scale if match_scale is not None else bool(align_cfg.get("match_scale", True))
+    do_rotate = (
+        bool(rotate_head)
+        if rotate_head is not None
+        else bool(align_cfg.get("rotate_head", True))
+    )
 
     source = resolve_source_obj(subject_id, obj_path)
     target = resolve_target_stl(subject_id)
-    out = paths.raw_scan(subject_id, ext="obj")
+    out = paths.aligned_textured_obj(subject_id)
     print(f"align-obj subject {subject_id}")
-    print(f"  source OBJ: {source}")
+    print(f"  source OBJ (unchanged): {source}")
     print(f"  target STL: {target}")
-    print(f"  output OBJ: {out}")
+    print(f"  output OBJ (synced):    {out}")
 
     align_obj_to_stl(
         source,
         target,
         out,
+        subject_id=subject_id,
         match_scale=do_scale,
         n_samples=n_samp,
         max_correspondence_mm=max_corr,
         preview=do_preview,
+        rotate_head=do_rotate,
         fitness_min=fitness_min,
         mean_dist_max_mm=mean_dist_max,
     )
@@ -414,6 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip interactive overlay confirmation",
     )
+    p.add_argument(
+        "--no-rotate-head",
+        action="store_true",
+        help="Skip textured OBJ head-rotation UI (STL stays as-is after ICP)",
+    )
     p.add_argument("--n-samples", type=int, default=None)
     p.add_argument("--max-correspondence", type=float, default=None)
     return p
@@ -427,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
             obj_path=args.obj,
             match_scale=not args.no_scale,
             preview=not args.no_preview,
+            rotate_head=not args.no_rotate_head,
             n_samples=args.n_samples,
             max_correspondence_mm=args.max_correspondence,
         )
