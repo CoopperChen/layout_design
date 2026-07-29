@@ -80,7 +80,7 @@ def process_trace(
         en = smooth_normals_along_path(
             en, alpha=smooth_alpha, passes=smooth_passes
         )
-    nxy_min = float(pp.get("c_pole_nxy_min", 0.08))
+    nxy_min = float(pp.get("c_pole_nxy_min", 0.2))
     if nxy_min > 0.0:
         en = stabilize_normals_near_pole(en, nxy_min=nxy_min)
 
