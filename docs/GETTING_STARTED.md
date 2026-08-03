@@ -2,11 +2,13 @@
 
 ## 1. Environment (venv + pyproject.toml)
 
-Python **3.10+**. From the repository root:
+Python **3.12** — and only 3.12. `pyproject.toml` sets `requires-python = "==3.12.*"`, so `pip` refuses to install on 3.11 or 3.13. Check with `python --version` before creating the venv.
+
+From the repository root:
 
 ```powershell
 cd D:\Research\layout_design   # or your clone path
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
@@ -15,13 +17,19 @@ python -m pip install -e ".[dev]"
 Linux / macOS:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
-Runtime deps are declared in `pyproject.toml` (`numpy`, `scipy`, `open3d`, `pyvista`, `shapely`, `matplotlib`, `mne`, `pyyaml`). `[dev]` adds `pytest` and `ruff`. `.venv/` is gitignored.
+Runtime deps are declared in `pyproject.toml` (`numpy`, `scipy`, `shapely`, `open3d`, `pyvista`, `vtk`, `matplotlib`, `mne`, `pyyaml`, `tqdm`). `[dev]` adds `pytest` and `ruff`. `.venv/` is gitignored.
+
+If you prefer requirements files over the editable install, `requirements.txt` (runtime) and `requirements-dev.txt` (runtime + `pytest`/`ruff`) mirror the same lists:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
 
 Re-activate in later shells: `.\.venv\Scripts\Activate.ps1` (or `source .venv/bin/activate`).
 

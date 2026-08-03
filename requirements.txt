@@ -1,0 +1,31 @@
+# Runtime dependencies for layout_design.
+# Requires Python 3.12 (see pyproject.toml `requires-python = "==3.12.*"`).
+#
+# Mirrors [project.dependencies] in pyproject.toml. Installing the package
+# (`pip install -e .`) already pulls these in; this file is for plain
+# `pip install -r requirements.txt` environments.
+
+# Numerics / geometry
+numpy>=2.2.6
+scipy>=1.15.3
+shapely>=2.1.2
+
+# Mesh IO, reconstruction, ICP alignment (preprocess stage)
+# 0.19.0 is the first release shipping cp312 wheels.
+open3d>=0.19.0
+
+# 3D rendering: layout viewer, simulator, interactive 0_PREP pickers
+pyvista>=0.48.4
+vtk>=9.6.2
+
+# 2D polar layout plots and figures
+matplotlib>=3.10.9
+
+# Electrode montages / channel handling
+mne>=1.12.1
+
+# Config loading (config/*.yaml)
+pyyaml>=6.0.3
+
+# Progress bars in GA polish
+tqdm>=4.67.3

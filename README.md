@@ -10,17 +10,17 @@
 
 ### Install (first-time clone)
 
-Python **3.10+**. Create a project venv and install from `pyproject.toml`:
+Python **3.12** (exactly — `pip` rejects other versions). Create a project venv and install from `pyproject.toml`:
 
 ```powershell
 cd layout_design
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e ".[dev]"   # runtime + pytest/ruff; omit [dev] for runtime only
 ```
 
-Dependencies come from `pyproject.toml`: `numpy`, `scipy`, `open3d`, `pyvista`, `shapely`, `matplotlib`, `mne`, `pyyaml` (plus `pytest` / `ruff` with `[dev]`). The `.venv/` folder is gitignored — recreate it on each machine.
+Dependencies come from `pyproject.toml`: `numpy`, `scipy`, `shapely`, `open3d`, `pyvista`, `vtk`, `matplotlib`, `mne`, `pyyaml`, `tqdm` (plus `pytest` / `ruff` with `[dev]`). The same lists are mirrored in `requirements.txt` / `requirements-dev.txt` for `pip install -r` workflows. The `.venv/` folder is gitignored — recreate it on each machine.
 
 Activate later sessions with `.\.venv\Scripts\Activate.ps1` (Linux/macOS: `source .venv/bin/activate`).
 
