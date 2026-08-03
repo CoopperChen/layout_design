@@ -25,6 +25,40 @@ with _fid_path.open(encoding="utf-8") as _f:
 with _cz_path.open(encoding="utf-8") as _f:
     Cz = np.array(json.load(_f)["Cz"])
 
+_mesh_center = np.asarray(mesh.center, dtype=float)
+_point_normals = np.asarray(
+    mesh.compute_normals(cell_normals=False, point_normals=True, inplace=False).point_data[
+        "Normals"
+    ],
+    dtype=float,
+)
+
+
+def _outward_normal(point) -> np.ndarray:
+    """Unit outward normal at the mesh vertex nearest ``point``."""
+    p = np.asarray(point, dtype=float)
+    radial = p - _mesh_center
+    n = _point_normals[mesh.find_closest_point(p)]
+    length = float(np.linalg.norm(n))
+    if length < 1e-9:
+        n, length = radial, float(np.linalg.norm(radial))
+        if length < 1e-9:
+            return np.array([0.0, 0.0, 1.0])
+    n = n / length
+    # Scan STLs often carry inconsistently oriented normals; force outward so
+    # markers are never pushed into the head.
+    return -n if float(np.dot(n, radial)) < 0.0 else n
+
+
+def _lift(point, radius: float) -> np.ndarray:
+    """Seat a marker tangent to the scalp instead of straddling it.
+
+    Electrode coordinates are snapped onto mesh vertices, so a sphere centred
+    there is bisected by the surface and z-fights with it. Only the drawn
+    position moves; saved coordinates stay on the mesh.
+    """
+    return np.asarray(point, dtype=float) + _outward_normal(point) * radius
+
 channel_pairs = [
     ["Fp1", "Fp2"],
     ["F7", "F8"],
@@ -42,6 +76,14 @@ montage = mne.channels.make_standard_montage("standard_1020")
 ch_pos = montage.get_positions()["ch_pos"]
 
 pl = pv.Plotter(window_size=(1800, 1800))
+# Order-independent transparency: without it the translucent head composites
+# opaque markers inconsistently depending on which side of the surface faces
+# the camera. Unsupported on some GPUs/software GL, so failure is non-fatal.
+try:
+    if not pl.enable_depth_peeling(number_of_peels=8, occlusion_ratio=0.0):
+        print("Depth peeling unavailable — markers may wash out through the head.")
+except Exception as _exc:  # pragma: no cover - driver dependent
+    print(f"Depth peeling unavailable ({_exc}) — markers may wash out through the head.")
 
 nasion = np.asarray(fid["nasion"], dtype=float)
 lpa = np.asarray(fid["lpa"], dtype=float)
@@ -157,7 +199,7 @@ def _draw_electrodes():
         if ch not in electrode_positions:
             continue
         pl.add_mesh(
-            pv.Sphere(center=electrode_positions[ch], radius=radius),
+            pv.Sphere(center=_lift(electrode_positions[ch], radius), radius=radius),
             color=COLOR_MAP[ch],
             name=ch,
         )
@@ -227,22 +269,27 @@ def save_electrode_positions(SUBJECT_ID: int):
 
 
 pl.add_mesh(mesh, color="white", opacity=0.88)
+_marker_radius = mesh.length * 0.01
 for nm, col in zip(["nasion", "lpa", "rpa", "inion"], ["red", "green", "blue", "purple"]):
     pl.add_mesh(
-        pv.Sphere(center=np.asarray(fid[nm], dtype=float), radius=mesh.length * 0.01),
+        pv.Sphere(center=_lift(fid[nm], _marker_radius), radius=_marker_radius),
         color=col,
         name=nm,
     )
-pl.add_mesh(pv.Sphere(center=Cz, radius=mesh.length * 0.01), color="yellow", name="Cz_marker")
+pl.add_mesh(
+    pv.Sphere(center=_lift(Cz, _marker_radius), radius=_marker_radius),
+    color="yellow",
+    name="Cz_marker",
+)
 
 if "TERMINAL_LEFT" in fid and "TERMINAL_RIGHT" in fid:
     pl.add_mesh(
-        pv.Sphere(center=np.asarray(fid["TERMINAL_LEFT"], dtype=float), radius=mesh.length * 0.01),
+        pv.Sphere(center=_lift(fid["TERMINAL_LEFT"], _marker_radius), radius=_marker_radius),
         color="gray",
         name="terminal_left",
     )
     pl.add_mesh(
-        pv.Sphere(center=np.asarray(fid["TERMINAL_RIGHT"], dtype=float), radius=mesh.length * 0.01),
+        pv.Sphere(center=_lift(fid["TERMINAL_RIGHT"], _marker_radius), radius=_marker_radius),
         color="black",
         name="terminal_right",
     )
