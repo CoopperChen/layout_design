@@ -18,7 +18,7 @@ def _machine() -> MachineConfig:
         d_mm=57.59,
         speed_mm_min=750.0,
         max_speed_mm_min=1500.0,
-        transition_speed_mm_min=2000.0,
+        transition_speed_mm_min=1500.0,
     )
 
 

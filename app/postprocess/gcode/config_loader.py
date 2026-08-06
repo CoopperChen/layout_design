@@ -45,7 +45,7 @@ def load_machine_config(
         transition_speed_mm_min=float(
             machine_section.get(
                 "transition_speed_mm_min",
-                machine_section.get("transition_speed", 1000),
+                machine_section.get("transition_speed", 1500),
             )
         ),
         jet_freq_hz=float(
