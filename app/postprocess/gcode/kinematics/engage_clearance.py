@@ -393,19 +393,20 @@ def build_engage_offset_rows(
     target = np.asarray(engage_row[:6], dtype=float).reshape(6).copy()
     x, y, z = target[0], target[1], target[2]
     dx, dy = off
-    feed = float(machine.transition_speed_mm_min)
+    travel = float(machine.transition_speed_mm_min)
+    plunge = float(machine.retract_speed_mm_min)
 
     safe = target.copy()
     safe[0], safe[1] = x + dx, y + dy
     safe[2] = float(zsafe)
-    safe[5] = feed
+    safe[5] = travel
 
     descend = safe.copy()
     descend[2] = z
-    descend[5] = feed
+    descend[5] = plunge
 
     slide = target.copy()
-    slide[5] = feed
+    slide[5] = travel
 
     rows6 = np.vstack([safe, descend, slide])
     markers = np.zeros((rows6.shape[0], 1), dtype=float)

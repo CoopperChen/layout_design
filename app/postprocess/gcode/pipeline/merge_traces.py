@@ -18,12 +18,12 @@ from ..models import MachineConfig
 
 
 def _transition_feed(machine: MachineConfig) -> float:
-    """XY/B/C travel and Z plunge (engage), with or without clearance offset."""
+    """XY/B/C travel at Z_safe (and engage/disengage XY slides)."""
     return float(machine.transition_speed_mm_min)
 
 
 def _retract_feed(machine: MachineConfig) -> float:
-    """Z lift to Z_safe (disengage), with or without clearance offset."""
+    """Z lift and Z plunge (same rate), with or without clearance offset."""
     return float(machine.retract_speed_mm_min)
 
 
@@ -101,7 +101,7 @@ def _append_engage_approach(
         {0: float(x), 1: float(y), 5: _transition_feed(machine)},
     )
     if abs(float(trace[-1, 2]) - float(z)) > 0.5:
-        trace = _append_row(trace, {2: float(z), 5: _transition_feed(machine)})
+        trace = _append_row(trace, {2: float(z), 5: _retract_feed(machine)})
     return trace
 
 
@@ -181,7 +181,7 @@ def _apply_first_trace_approach(
     row_zsafe[0, 5] = _transition_feed(machine)
     row_print = trace[0:1].copy()
     if abs(float(row_zsafe[0, 2]) - float(row_print[0, 2])) > 0.5:
-        row_print[0, 5] = _transition_feed(machine)
+        row_print[0, 5] = _retract_feed(machine)
     return np.vstack([row_zsafe, row_print, jet_on, trace[1:]])
 
 

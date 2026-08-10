@@ -143,7 +143,7 @@ def test_build_engage_offset_rows_three_leg_path():
     assert out[2, 0] == pytest.approx(10.0)
     assert out[2, 1] == pytest.approx(-20.0)
     assert out[0, 5] == pytest.approx(machine.transition_speed_mm_min)
-    assert out[1, 5] == pytest.approx(machine.transition_speed_mm_min)
+    assert out[1, 5] == pytest.approx(machine.retract_speed_mm_min)
     assert out[2, 5] == pytest.approx(machine.transition_speed_mm_min)
 
 
