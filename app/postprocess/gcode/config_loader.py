@@ -40,12 +40,18 @@ def load_machine_config(
             machine_section.get("speed_mm_min", machine_section.get("speed", 500))
         ),
         max_speed_mm_min=float(
-            machine_section.get("max_speed_mm_min", machine_section.get("max_speed", 1500))
+            machine_section.get("max_speed_mm_min", machine_section.get("max_speed", 750))
         ),
         transition_speed_mm_min=float(
             machine_section.get(
                 "transition_speed_mm_min",
                 machine_section.get("transition_speed", 1500),
+            )
+        ),
+        retract_speed_mm_min=float(
+            machine_section.get(
+                "retract_speed_mm_min",
+                machine_section.get("retract_speed", 750),
             )
         ),
         jet_freq_hz=float(

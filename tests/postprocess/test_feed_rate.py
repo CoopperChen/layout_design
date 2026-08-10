@@ -17,8 +17,9 @@ def _machine() -> MachineConfig:
         a_mm=180.7,
         d_mm=57.59,
         speed_mm_min=750.0,
-        max_speed_mm_min=1500.0,
+        max_speed_mm_min=750.0,
         transition_speed_mm_min=1500.0,
+        retract_speed_mm_min=750.0,
     )
 
 
@@ -45,7 +46,7 @@ def test_feed_scales_with_c_pivot_over_tip_ratio():
     pivots = np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]])
     tips = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
     feeds = compute_feed_rates(pivots, tips, machine)
-    # F = 750 * 20/5 = 3000 → clamped to max 1500
+    # F = 750 * 20/5 = 3000 → clamped to max 750
     assert feeds[1] == machine.max_speed_mm_min
 
 

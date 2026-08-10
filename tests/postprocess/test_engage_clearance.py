@@ -142,9 +142,9 @@ def test_build_engage_offset_rows_three_leg_path():
     assert out[1, 2] == pytest.approx(-180.0)
     assert out[2, 0] == pytest.approx(10.0)
     assert out[2, 1] == pytest.approx(-20.0)
-    assert out[0, 5] == pytest.approx(0.5 * machine.transition_speed_mm_min)
-    assert out[1, 5] == pytest.approx(0.5 * machine.transition_speed_mm_min)
-    assert out[2, 5] == pytest.approx(0.5 * machine.transition_speed_mm_min)
+    assert out[0, 5] == pytest.approx(machine.transition_speed_mm_min)
+    assert out[1, 5] == pytest.approx(machine.transition_speed_mm_min)
+    assert out[2, 5] == pytest.approx(machine.transition_speed_mm_min)
 
 
 def test_build_disengage_offset_rows_empty_when_no_offset():
@@ -165,8 +165,8 @@ def test_build_disengage_offset_rows_two_leg_path():
     assert out[1, 0] == pytest.approx(10.0)
     assert out[1, 1] == pytest.approx(0.0)
     assert out[1, 2] == pytest.approx(50.0)
-    assert out[0, 5] == pytest.approx(0.5 * machine.transition_speed_mm_min)
-    assert out[1, 5] == pytest.approx(0.5 * machine.transition_speed_mm_min)
+    assert out[0, 5] == pytest.approx(machine.transition_speed_mm_min)
+    assert out[1, 5] == pytest.approx(machine.retract_speed_mm_min)
 
 
 def test_compute_disengage_xy_offset_zero_when_z_ascent_already_clear():
@@ -453,14 +453,14 @@ def test_handoff_feeds_and_offset_leg_clearance():
         mesh_faces=bundle.mesh_faces,
     )
     trans = machine.transition_speed_mm_min
-    half = 0.5 * trans
+    retract = machine.retract_speed_mm_min
 
     for i in range(1, len(merged)):
         prev, cur = merged[i - 1], merged[i]
         if np.linalg.norm(cur[:3] - prev[:3]) < 0.5:
             continue
         if prev[6] == 11 or cur[6] == 10:
-            assert cur[5] in (trans, half)
+            assert cur[5] in (trans, retract)
 
     for i in range(len(merged)):
         if merged[i, 6] != 10:

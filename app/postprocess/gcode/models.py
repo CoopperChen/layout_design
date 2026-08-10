@@ -28,8 +28,9 @@ class MachineConfig:
     c0_deg: float = 90.0
     b0_deg: float = 0.0
     speed_mm_min: float = 500.0
-    max_speed_mm_min: float = 1500.0
+    max_speed_mm_min: float = 750.0
     transition_speed_mm_min: float = 1500.0
+    retract_speed_mm_min: float = 750.0
     jet_freq_hz: float = 12.0
     zsafe_margin_mm: float = 25.0
 

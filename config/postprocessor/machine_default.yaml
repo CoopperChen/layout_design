@@ -8,7 +8,8 @@ machine:
   c0_deg: 90
   b0_deg: 0
   speed_mm_min: 750
-  max_speed_mm_min: 1500
+  max_speed_mm_min: 750
   transition_speed_mm_min: 1500
+  retract_speed_mm_min: 750
   jet_freq_hz: 12
   zsafe_margin_mm: 10

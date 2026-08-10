@@ -18,11 +18,13 @@ from ..models import MachineConfig
 
 
 def _transition_feed(machine: MachineConfig) -> float:
+    """XY/B/C travel and Z plunge (engage), with or without clearance offset."""
     return float(machine.transition_speed_mm_min)
 
 
-def _offset_feed(machine: MachineConfig) -> float:
-    return 0.5 * float(machine.transition_speed_mm_min)
+def _retract_feed(machine: MachineConfig) -> float:
+    """Z lift to Z_safe (disengage), with or without clearance offset."""
+    return float(machine.retract_speed_mm_min)
 
 
 def _ensure7(trace: np.ndarray) -> np.ndarray:
@@ -99,7 +101,7 @@ def _append_engage_approach(
         {0: float(x), 1: float(y), 5: _transition_feed(machine)},
     )
     if abs(float(trace[-1, 2]) - float(z)) > 0.5:
-        trace = _append_row(trace, {2: float(z), 5: _offset_feed(machine)})
+        trace = _append_row(trace, {2: float(z), 5: _transition_feed(machine)})
     return trace
 
 
@@ -113,7 +115,7 @@ def _append_disengage_offset_retract(
     suffix = build_disengage_offset_rows(exit_row[:6], zsafe, offset_xy, machine)
     if suffix.shape[0] == 0:
         return _append_row(
-            trace, {5: _transition_feed(machine), 2: zsafe}
+            trace, {5: _retract_feed(machine), 2: zsafe}
         )
     return np.vstack([trace, suffix])
 
@@ -179,7 +181,7 @@ def _apply_first_trace_approach(
     row_zsafe[0, 5] = _transition_feed(machine)
     row_print = trace[0:1].copy()
     if abs(float(row_zsafe[0, 2]) - float(row_print[0, 2])) > 0.5:
-        row_print[0, 5] = _offset_feed(machine)
+        row_print[0, 5] = _transition_feed(machine)
     return np.vstack([row_zsafe, row_print, jet_on, trace[1:]])
 
 
