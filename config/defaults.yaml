@@ -26,6 +26,8 @@ synthesize:
   uv_resolution: 100
   terminal_stop_mm: 30.0  # shorten each wire before strip entry (0 = off)
   terminal_min_points: 4
+  # Polar-2D gap between truncated ends on the same hub (null = 0.85× min strip-slot gap).
+  truncated_end_min_separation_2d: null
   visualize: true  # 2D PNG + 3D view after synthesize (CLI: --no-visualize)
 
 polish:

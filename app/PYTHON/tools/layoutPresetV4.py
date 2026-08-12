@@ -1258,6 +1258,127 @@ def _wire_ends_from_paths(
     }
 
 
+def _align_end_to_strip_ray(
+    end_2d: np.ndarray,
+    strip_2d: np.ndarray,
+    hub_2d: np.ndarray,
+) -> np.ndarray:
+    """Place ``end`` on the hub→strip ray, keeping its radius from the hub."""
+    hub = np.asarray(hub_2d, dtype=float).reshape(2)
+    strip = np.asarray(strip_2d, dtype=float).reshape(2)
+    end = np.asarray(end_2d, dtype=float).reshape(2)
+    v = strip - hub
+    vn = float(np.linalg.norm(v))
+    if vn < 1e-9:
+        return end.copy()
+    u = v / vn
+    r = float(np.linalg.norm(end - hub))
+    r = min(max(r, 0.0), vn * 0.999)
+    return hub + r * u
+
+
+def _min_strip_entry_gap(
+    strip_entries: dict[str, np.ndarray],
+    path_electrodes: list[str],
+    path_terminals: list[str],
+) -> float:
+    """Smallest consecutive strip-entry spacing on either hub (polar 2D)."""
+    by_term: dict[str, list[np.ndarray]] = {}
+    for name, term in zip(path_electrodes, path_terminals):
+        if name not in strip_entries:
+            continue
+        by_term.setdefault(term, []).append(np.asarray(strip_entries[name], dtype=float))
+    gaps: list[float] = []
+    for pts in by_term.values():
+        if len(pts) < 2:
+            continue
+        # Order by angle around mean point for stable consecutive gaps.
+        c = np.mean(np.stack(pts, axis=0), axis=0)
+        pts = sorted(pts, key=lambda p: float(np.arctan2(p[1] - c[1], p[0] - c[0])))
+        for a, b in zip(pts, pts[1:]):
+            gaps.append(float(np.linalg.norm(b - a)))
+    if not gaps:
+        return float(SYNTH_MIN_SLOT_GAP)
+    return max(float(SYNTH_MIN_SLOT_GAP), float(min(gaps)))
+
+
+def _spread_truncated_wire_ends(
+    paths: list[np.ndarray],
+    path_electrodes: list[str],
+    path_terminals: list[str],
+    strip_entries: dict[str, np.ndarray],
+    terminals_2d: dict[str, np.ndarray],
+    electrodes_2d: dict[str, np.ndarray],
+    *,
+    min_separation: float,
+    max_rounds: int = 40,
+) -> list[np.ndarray]:
+    """
+    Keep truncated wire ends fanned like strip slots.
+
+    1) Snap each end onto its hub→strip ray (preserves slot angular spacing).
+    2) Push same-terminal neighbors apart along that fan until ``min_separation``.
+    """
+    paths = [np.asarray(p, dtype=float).copy() for p in paths]
+    min_sep = float(min_separation)
+    if min_sep <= 0.0:
+        return paths
+
+    for i, name in enumerate(path_electrodes):
+        hub = terminals_2d[path_terminals[i]]
+        strip = strip_entries[name]
+        end = _align_end_to_strip_ray(paths[i][-1], strip, hub)
+        paths[i] = new2d.pin_path_endpoints_2d(paths[i], electrodes_2d[name], end)
+
+    for _ in range(int(max_rounds)):
+        moved = False
+        by_term: dict[str, list[int]] = {}
+        for i, term in enumerate(path_terminals):
+            by_term.setdefault(term, []).append(i)
+
+        for term, idxs in by_term.items():
+            if len(idxs) < 2:
+                continue
+            hub = np.asarray(terminals_2d[term], dtype=float).reshape(2)
+
+            def _strip_angle(i: int) -> float:
+                s = np.asarray(strip_entries[path_electrodes[i]], dtype=float) - hub
+                return float(np.arctan2(s[1], s[0]))
+
+            ordered = sorted(idxs, key=_strip_angle)
+            for a, b in zip(ordered, ordered[1:]):
+                name_a = path_electrodes[a]
+                name_b = path_electrodes[b]
+                ea = np.asarray(paths[a][-1], dtype=float)
+                eb = np.asarray(paths[b][-1], dtype=float)
+                delta = eb - ea
+                dist = float(np.linalg.norm(delta))
+                if dist >= min_sep - 1e-9:
+                    continue
+                if dist < 1e-9:
+                    sa = np.asarray(strip_entries[name_a], dtype=float)
+                    sb = np.asarray(strip_entries[name_b], dtype=float)
+                    delta = sb - sa
+                    dist = float(np.linalg.norm(delta))
+                    if dist < 1e-9:
+                        delta = np.array([1.0, 0.0], dtype=float)
+                        dist = 1.0
+                u = delta / dist
+                need = 0.5 * (min_sep - dist)
+                ea2 = _align_end_to_strip_ray(ea - need * u, strip_entries[name_a], hub)
+                eb2 = _align_end_to_strip_ray(eb + need * u, strip_entries[name_b], hub)
+                paths[a] = new2d.pin_path_endpoints_2d(
+                    paths[a], electrodes_2d[name_a], ea2
+                )
+                paths[b] = new2d.pin_path_endpoints_2d(
+                    paths[b], electrodes_2d[name_b], eb2
+                )
+                moved = True
+        if not moved:
+            break
+    return paths
+
+
 def _uncross_by_tail_swap(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1748,7 +1869,22 @@ def apply_layout_preset_v4_synthesize(
             min_points=int(terminal_min_points),
         )
         wire_end_2d = new2d.polar_projection(np.array([wire_end_3d]), cz_pos)[0]
+        # Keep truncated end on the hub→strip ray so neighbors inherit slot fan spacing.
+        wire_end_2d = _align_end_to_strip_ray(
+            wire_end_2d, strip_2d, terminals_2d[terminal]
+        )
         return new2d.pin_path_endpoints_2d(path_2d_trunc, e2d, wire_end_2d)
+
+    from app.config_loader import load_defaults as _load_defaults
+
+    synth_cfg = _load_defaults().get("synthesize", {})
+    end_sep_cfg = synth_cfg.get("truncated_end_min_separation_2d")
+    if end_sep_cfg is None:
+        truncated_end_min_sep = 0.85 * _min_strip_entry_gap(
+            strip_entries_2d, path_electrodes, path_terminals
+        )
+    else:
+        truncated_end_min_sep = float(end_sep_cfg)
 
     # 1) Synthesize chords to strip slots
     # 2) Truncate before any entry-order decisions
@@ -1758,6 +1894,15 @@ def apply_layout_preset_v4_synthesize(
     paths_2d = [
         _replan_truncated(i, strip_entries_2d) for i in range(len(path_electrodes))
     ]
+    paths_2d = _spread_truncated_wire_ends(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        strip_entries_2d,
+        terminals_2d,
+        electrodes_2d,
+        min_separation=truncated_end_min_sep,
+    )
 
     # 3) Entry-order swap on truncated geometry (strip slots swapped; paths re-truncated)
     paths_2d, strip_entries_2d, slot_index_live = _uncross_by_entry_order_swap(
@@ -1788,6 +1933,20 @@ def apply_layout_preset_v4_synthesize(
                 electrodes_2d[electrode],
                 wire_ends[electrode],
             )
+
+    paths_2d = _spread_truncated_wire_ends(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        strip_entries_2d,
+        terminals_2d,
+        electrodes_2d,
+        min_separation=truncated_end_min_sep,
+    )
+    print(
+        f"  Truncated-end spacing: min_sep_2d={truncated_end_min_sep:.3f} "
+        "(strip-ray align + same-terminal push-apart)"
+    )
 
     output_paths: list[dict] = []
     for electrode, path_2d in zip(path_electrodes, paths_2d):
@@ -2141,11 +2300,16 @@ def uncross_applied_layout(
     applied_path: str,
     output_path: str | None = None,
     uv_resolution: int = 100,
-    max_rounds: int = 40,
+    max_rounds: int = 24,
+    *,
+    random_trials: int = 12,
 ) -> dict[str, Any]:
     """
     Target remaining crossings by rerouting one trace at a time when global
     crossing count drops (works on near-straight paths like F7 that greedy locks).
+
+    Only accepts moves that reduce crossings. Separation-only gains are left to
+    repair/phase-2 so this loop cannot grind for max_rounds without progress.
     """
     from PYTHON.tools.layoutPreset import (
         _child_from_applied_data,
@@ -2234,7 +2398,7 @@ def uncross_applied_layout(
                 candidates = []
                 if spacing_trial is not None:
                     candidates.append(spacing_trial)
-                for _ in range(32):
+                for _ in range(int(random_trials)):
                     candidates.append(
                         new2d.randomly_modify_path(
                             paths[path_idx].copy(),
@@ -2262,10 +2426,9 @@ def uncross_applied_layout(
                     )
                     cross = int(trial_analysis["crossing_count"])
                     sep = float(trial_analysis.get("min_trace_separation") or 0.0)
-                    better = cross < before_cross or (
-                        cross == before_cross and sep > before_sep + 0.05
-                    )
-                    if better:
+                    # Crossing reduction only — sep-only accepts made refine look stuck
+                    # across all max_rounds (and twice with refine_passes).
+                    if cross < before_cross:
                         paths = trial_paths
                         analysis = trial_analysis
                         improved = True
@@ -2280,7 +2443,10 @@ def uncross_applied_layout(
             if improved:
                 break
         if not improved:
-            print(f"Uncross stopped (no improvement at round {round_idx + 1})")
+            print(
+                f"Uncross stopped (no crossing reduction at round {round_idx + 1}; "
+                f"crossings={before_cross})"
+            )
             break
 
     for conn, path in zip(child["paths"], paths):
@@ -2344,5 +2510,6 @@ def refine_applied_v4(
         interim,
         output_path=output_path,
         uv_resolution=uv_resolution,
-        max_rounds=80,
+        max_rounds=24,
+        random_trials=12,
     )
