@@ -61,7 +61,17 @@ def run_refine(applied: str | Path, output: str | Path | None = None) -> dict:
     if output is None:
         stem = applied_path.stem.replace("_refined", "").replace("_repaired", "")
         output = applied_path.parent / f"{stem}_refined.json"
-    return refine_applied_v4(str(applied_path), output_path=str(output))
+    output_path = Path(output)
+
+    cfg = load_defaults().get("polish", {})
+    passes = max(1, int(cfg.get("refine_passes", 2)))
+    current = applied_path
+    result: dict = {}
+    for i in range(passes):
+        print(f"Refine pass {i + 1}/{passes}: {current} → {output_path}")
+        result = refine_applied_v4(str(current), output_path=str(output_path))
+        current = output_path
+    return result
 
 
 def run_ga_short(

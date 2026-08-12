@@ -31,6 +31,7 @@ synthesize:
 polish:
   enabled: true  # run polish in `python -m app run` (override with --no-polish)
   mode: refine  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
+  refine_passes: 2  # run refine (repair + uncross) this many times
   focus: separation
   phase2_max_rounds: 20
   aggressive_pass: false

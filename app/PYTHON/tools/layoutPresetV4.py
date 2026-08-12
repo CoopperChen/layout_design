@@ -1582,8 +1582,8 @@ def apply_layout_preset_v4_synthesize(
     Target layout: free hub angle + preset strip offsets + straight/detour 2D paths.
     No GA, no source chord-shape replay.
 
-    Order: synthesize chords -> truncate -> entry-order swap -> repair ->
-    repair again (optimization). Polish refine may still run after.
+    Order: synthesize chords -> truncate -> entry-order swap.
+    Detour/separation polish (refine) runs afterward in the polish stage.
 
     use_target_terminals: TERMINAL_LEFT/RIGHT from target fiducials_{id}.json;
       preset supplies terminal_assignments only (no rigid hub map from reference).
@@ -1644,8 +1644,7 @@ def apply_layout_preset_v4_synthesize(
     if terminal_2d_mode == TERMINAL_2D_FIDUCIAL:
         hub_msg = f"{hub_msg} (fiducial strip zones)"
     print(
-        f"v4 synthesize: {entry_mode} → {hub_msg} → "
-        "truncate → entry-order swap → repair → repair again"
+        f"v4 synthesize: {entry_mode} → {hub_msg} → truncate → entry-order swap"
     )
 
     if optimize_terminals:
@@ -1789,29 +1788,6 @@ def apply_layout_preset_v4_synthesize(
                 electrodes_2d[electrode],
                 wire_ends[electrode],
             )
-
-    def _repair_detours(label: str) -> None:
-        nonlocal paths_2d
-        print(f"  {label}")
-        ends = _wire_ends_from_paths(paths_2d, path_electrodes)
-        paths_2d = _uncross_paths_with_detours(
-            paths_2d,
-            path_electrodes,
-            electrodes_2d,
-            ends,
-            electrode_zones,
-        )
-        for i, electrode in enumerate(path_electrodes):
-            paths_2d[i] = new2d.pin_path_endpoints_2d(
-                paths_2d[i],
-                electrodes_2d[electrode],
-                np.asarray(paths_2d[i][-1], dtype=float),
-            )
-
-    # 4) Repair on truncated wire ends
-    _repair_detours("Repair (detour uncross)")
-    # 5) Optimization = run repair again
-    _repair_detours("Optimization (repair again)")
 
     output_paths: list[dict] = []
     for electrode, path_2d in zip(path_electrodes, paths_2d):
