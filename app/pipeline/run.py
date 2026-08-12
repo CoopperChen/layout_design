@@ -700,7 +700,7 @@ def add_run_parser(sub: argparse._SubParsersAction) -> None:
     )
     run.add_argument(
         "--polish-mode",
-        default="gentle",
+        default=str(load_defaults().get("polish", {}).get("mode", "refine")),
         choices=["gentle", "repair", "refine", "ga-short"],
     )
     run.add_argument(

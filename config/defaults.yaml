@@ -24,13 +24,13 @@ synthesize:
   optimize_terminals: false
   preserve_entry_order: false
   uv_resolution: 100
-  terminal_stop_mm: 20.0  # shorten each wire before strip entry (0 = off)
+  terminal_stop_mm: 30.0  # shorten each wire before strip entry (0 = off)
   terminal_min_points: 4
   visualize: true  # 2D PNG + 3D view after synthesize (CLI: --no-visualize)
 
 polish:
   enabled: true  # run polish in `python -m app run` (override with --no-polish)
-  mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
+  mode: refine  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
   focus: separation
   phase2_max_rounds: 20
   aggressive_pass: false

@@ -8,7 +8,7 @@ from app.config_loader import load_defaults
 
 def default_terminal_stop_mm() -> float:
     cfg = load_defaults().get("synthesize", {})
-    return float(cfg.get("terminal_stop_mm", 10.0))
+    return float(cfg.get("terminal_stop_mm", 30.0))
 
 
 def default_terminal_min_points() -> int:
