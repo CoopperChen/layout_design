@@ -1164,18 +1164,24 @@ def _uncross_by_entry_order_swap(
     slot_index: dict[str, int] | None = None,
     *,
     max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
+    replan_fn=None,
 ) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     """
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Accepts a swap only when total pairwise crossings decrease. Runs before
-    geometric detour uncross so near-hub X patterns resolve by order, not bends.
+    Accepts a swap only when total pairwise crossings decrease.
+
+    ``entry_points`` are strip-slot anchors (swapped). ``replan_fn(idx, entries)``
+    may rebuild a truncated wire (electrode → stop short of strip); default
+    replans a full electrode→strip chord.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
     slots = {k: int(v) for k, v in (slot_index or {}).items()}
 
     def _replan(idx: int) -> np.ndarray:
+        if replan_fn is not None:
+            return np.asarray(replan_fn(idx, entries), dtype=float)
         name = path_electrodes[idx]
         start = electrodes_2d[name]
         end = entries[name]
@@ -1239,6 +1245,17 @@ def _uncross_by_entry_order_swap(
             break
 
     return paths, entries, slots
+
+
+def _wire_ends_from_paths(
+    paths: list[np.ndarray],
+    path_electrodes: list[str],
+) -> dict[str, np.ndarray]:
+    return {
+        name: np.asarray(paths[i][-1], dtype=float).copy()
+        for i, name in enumerate(path_electrodes)
+        if len(paths[i]) > 0
+    }
 
 
 def _uncross_by_tail_swap(
@@ -1563,7 +1580,10 @@ def apply_layout_preset_v4_synthesize(
 ) -> dict[str, Any]:
     """
     Target layout: free hub angle + preset strip offsets + straight/detour 2D paths.
-    No GA, no repair, no source chord-shape replay.
+    No GA, no source chord-shape replay.
+
+    Order: synthesize chords -> truncate -> entry-order swap -> repair ->
+    repair again (optimization). Polish refine may still run after.
 
     use_target_terminals: TERMINAL_LEFT/RIGHT from target fiducials_{id}.json;
       preset supplies terminal_assignments only (no rigid hub map from reference).
@@ -1623,7 +1643,10 @@ def apply_layout_preset_v4_synthesize(
     )
     if terminal_2d_mode == TERMINAL_2D_FIDUCIAL:
         hub_msg = f"{hub_msg} (fiducial strip zones)"
-    print(f"v4 synthesize: {entry_mode} → {hub_msg} → straight/detour + entry-order swap")
+    print(
+        f"v4 synthesize: {entry_mode} → {hub_msg} → "
+        "truncate → entry-order swap → repair → repair again"
+    )
 
     if optimize_terminals:
         terminals_3d, layout_fiducials, electrodes_2d, terminals_2d, cz_pos = (
@@ -1661,7 +1684,7 @@ def apply_layout_preset_v4_synthesize(
             slot_index_preset,
         )
 
-    entry_points_2d, slot_index_live = _resolve_entries_for_synth(
+    strip_entries_2d, slot_index_live = _resolve_entries_for_synth(
         path_electrodes,
         path_terminals,
         electrodes_2d,
@@ -1673,71 +1696,40 @@ def apply_layout_preset_v4_synthesize(
         offset_map=offset_map,
     )
 
-    paths_2d: list[np.ndarray] = []
-    for electrode in path_electrodes:
-        e2d = electrodes_2d[electrode]
-        end2d = entry_points_2d[electrode]
-        paths_2d.append(
-            _path_with_electrode_detour(e2d, end2d, electrode, electrode_zones)
-        )
-    # Same-terminal crossings: swap strip entry order and replan (default path).
-    paths_2d, entry_points_2d, slot_index_live = _uncross_by_entry_order_swap(
-        paths_2d,
-        path_electrodes,
-        path_terminals,
-        electrodes_2d,
-        entry_points_2d,
-        electrode_zones,
-        slot_index=slot_index_live,
-    )
-    if use_tail_swap and preserve_entry_order:
-        paths_2d, entry_points_2d = _uncross_by_tail_swap(
-            paths_2d,
-            path_electrodes,
-            path_terminals,
-            electrodes_2d,
-            entry_points_2d,
-            terminals_2d,
-            terminal_zones,
-            electrode_zones,
-        )
-    paths_2d = _uncross_paths_with_detours(
-        paths_2d,
-        path_electrodes,
-        electrodes_2d,
-        entry_points_2d,
-        electrode_zones,
-    )
-    for i, electrode in enumerate(path_electrodes):
-        paths_2d[i] = new2d.pin_path_endpoints_2d(
-            paths_2d[i],
-            electrodes_2d[electrode],
-            entry_points_2d[electrode],
-        )
-
     if terminal_stop_mm is None:
         from app.layout.terminal_truncate import default_terminal_stop_mm
 
         terminal_stop_mm = default_terminal_stop_mm()
+
+    from app.layout.terminal_truncate import apply_wire_truncation
 
     mesh = _pyvista_read_stl(target_subject_id)
     uv_grid_raw = new2d.create_uv_grid(mesh, cz_pos, resolution=100)
     uv_grid_ctx = uv_grid_for_context(uv_grid_raw)
     uv_context = recon.UVReconstructionContext(uv_grid_ctx, mesh)
 
-    output_paths: list[dict] = []
     terminal_assignments = preset.get("terminal_assignments", {})
     preset_paths = preset.get("paths_chord_3d", {})
-    for electrode, path_2d in zip(path_electrodes, paths_2d):
-        terminal = terminal_assignments.get(electrode) or preset_paths.get(
+
+    def _terminal_for(electrode: str) -> str:
+        return terminal_assignments.get(electrode) or preset_paths.get(
             electrode, {}
         ).get("terminal")
+
+    def _replan_truncated(idx: int, strip_entries: dict[str, np.ndarray]) -> np.ndarray:
+        """Full electrode→strip chord, UV-lift, then truncate; return truncated 2D."""
+        electrode = path_electrodes[idx]
+        terminal = _terminal_for(electrode)
         e2d = electrodes_2d[electrode]
         e3d = np.asarray(electrodes[electrode], dtype=float)
-        end2d = entry_points_2d[electrode]
+        strip_2d = strip_entries[electrode]
         t3d = np.asarray(terminals_3d[terminal], dtype=float)
-        end3d = entry_3d_for_strip(
-            end2d,
+        path_2d = _path_with_electrode_detour(
+            e2d, strip_2d, electrode, electrode_zones
+        )
+        path_2d = new2d.pin_path_endpoints_2d(path_2d, e2d, strip_2d)
+        strip_3d = entry_3d_for_strip(
+            strip_2d,
             uv_context,
             mesh,
             e3d=e3d,
@@ -1747,32 +1739,124 @@ def apply_layout_preset_v4_synthesize(
             terminal_2d_mode=terminal_2d_mode,
             terminal_zone_size=terminal_zone_size,
         )
-
-        path_3d = uv_context.reconstruct(e3d, end3d, np.asarray(path_2d, dtype=float))
+        path_3d = uv_context.reconstruct(e3d, strip_3d, np.asarray(path_2d, dtype=float))
         path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
-        path_3d = pin_path_endpoints_3d(path_3d, e3d, end3d, mesh)
-
-        from app.layout.terminal_truncate import apply_wire_truncation
-
-        path_2d_arr = np.asarray(path_2d, dtype=float)
-        path_2d_trunc, path_3d_trunc, wire_end_3d = apply_wire_truncation(
-            path_2d_arr,
+        path_3d = pin_path_endpoints_3d(path_3d, e3d, strip_3d, mesh)
+        path_2d_trunc, _path_3d_trunc, wire_end_3d = apply_wire_truncation(
+            np.asarray(path_2d, dtype=float),
             path_3d,
             stop_mm=float(terminal_stop_mm),
             min_points=int(terminal_min_points),
         )
         wire_end_2d = new2d.polar_projection(np.array([wire_end_3d]), cz_pos)[0]
-        path_2d_trunc = new2d.pin_path_endpoints_2d(
-            path_2d_trunc, e2d, wire_end_2d
+        return new2d.pin_path_endpoints_2d(path_2d_trunc, e2d, wire_end_2d)
+
+    # 1) Synthesize chords to strip slots
+    # 2) Truncate before any entry-order decisions
+    print(
+        f"  Truncating wires by {float(terminal_stop_mm):.1f} mm before entry-order swap"
+    )
+    paths_2d = [
+        _replan_truncated(i, strip_entries_2d) for i in range(len(path_electrodes))
+    ]
+
+    # 3) Entry-order swap on truncated geometry (strip slots swapped; paths re-truncated)
+    paths_2d, strip_entries_2d, slot_index_live = _uncross_by_entry_order_swap(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        electrodes_2d,
+        strip_entries_2d,
+        electrode_zones,
+        slot_index=slot_index_live,
+        replan_fn=_replan_truncated,
+    )
+    if use_tail_swap and preserve_entry_order:
+        wire_ends = _wire_ends_from_paths(paths_2d, path_electrodes)
+        paths_2d, wire_ends = _uncross_by_tail_swap(
+            paths_2d,
+            path_electrodes,
+            path_terminals,
+            electrodes_2d,
+            wire_ends,
+            terminals_2d,
+            terminal_zones,
+            electrode_zones,
         )
+        for i, electrode in enumerate(path_electrodes):
+            paths_2d[i] = new2d.pin_path_endpoints_2d(
+                paths_2d[i],
+                electrodes_2d[electrode],
+                wire_ends[electrode],
+            )
+
+    def _repair_detours(label: str) -> None:
+        nonlocal paths_2d
+        print(f"  {label}")
+        ends = _wire_ends_from_paths(paths_2d, path_electrodes)
+        paths_2d = _uncross_paths_with_detours(
+            paths_2d,
+            path_electrodes,
+            electrodes_2d,
+            ends,
+            electrode_zones,
+        )
+        for i, electrode in enumerate(path_electrodes):
+            paths_2d[i] = new2d.pin_path_endpoints_2d(
+                paths_2d[i],
+                electrodes_2d[electrode],
+                np.asarray(paths_2d[i][-1], dtype=float),
+            )
+
+    # 4) Repair on truncated wire ends
+    _repair_detours("Repair (detour uncross)")
+    # 5) Optimization = run repair again
+    _repair_detours("Optimization (repair again)")
+
+    output_paths: list[dict] = []
+    for electrode, path_2d in zip(path_electrodes, paths_2d):
+        terminal = _terminal_for(electrode)
+        e2d = electrodes_2d[electrode]
+        e3d = np.asarray(electrodes[electrode], dtype=float)
+        strip_2d = strip_entries_2d[electrode]
+        t3d = np.asarray(terminals_3d[terminal], dtype=float)
+        strip_3d = entry_3d_for_strip(
+            strip_2d,
+            uv_context,
+            mesh,
+            e3d=e3d,
+            terminal_3d=t3d,
+            e2d=e2d,
+            cz_pos=cz_pos,
+            terminal_2d_mode=terminal_2d_mode,
+            terminal_zone_size=terminal_zone_size,
+        )
+        wire_end_2d = np.asarray(path_2d[-1], dtype=float)
+        wire_end_3d = entry_3d_for_strip(
+            wire_end_2d,
+            uv_context,
+            mesh,
+            e3d=e3d,
+            terminal_3d=t3d,
+            e2d=e2d,
+            cz_pos=cz_pos,
+            terminal_2d_mode=terminal_2d_mode,
+            terminal_zone_size=terminal_zone_size,
+        )
+        path_2d = new2d.pin_path_endpoints_2d(path_2d, e2d, wire_end_2d)
+        path_3d = uv_context.reconstruct(
+            e3d, wire_end_3d, np.asarray(path_2d, dtype=float)
+        )
+        path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
+        path_3d = pin_path_endpoints_3d(path_3d, e3d, wire_end_3d, mesh)
 
         out: dict[str, Any] = {
             "electrode": electrode,
             "terminal": terminal,
-            "modified_path_2d": path_2d_trunc.tolist(),
-            "path_points": path_3d_trunc.tolist(),
-            "entry_point_2d": end2d.tolist(),
-            "entry_position_3d": end3d.tolist(),
+            "modified_path_2d": np.asarray(path_2d, dtype=float).tolist(),
+            "path_points": np.asarray(path_3d, dtype=float).tolist(),
+            "entry_point_2d": strip_2d.tolist(),
+            "entry_position_3d": strip_3d.tolist(),
             "path_end_2d": wire_end_2d.tolist(),
             "path_end_3d": wire_end_3d.tolist(),
         }
