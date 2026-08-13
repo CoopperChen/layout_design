@@ -600,24 +600,15 @@ def entry_3d_for_strip(
     cz_pos: np.ndarray,
     terminal_2d_mode: str = TERMINAL_2D_INFLATED,
     terminal_zone_size: float | None = None,
-    blend_toward_hub: bool = True,
 ) -> np.ndarray:
-    """
-    Surface lift for a strip-adjacent 2D point.
-
-    For fiducial hubs, strip entries near the terminal may optionally blend toward
-    the hub mesh point. Truncated wire ends must pass ``blend_toward_hub=False``;
-    otherwise the near-hub blend pulls them back onto the terminal and undoes
-    truncation in the 3D / viz path.
-    """
+    """Surface entry at strip; UV lift when context available, else chord fraction."""
     if uv_context is not None and mesh is not None:
         end3d = entry_3d_from_uv(entry_2d, uv_context, mesh)
     else:
         end3d = entry_3d_from_chord_fraction(e3d, terminal_3d, e2d, entry_2d, cz_pos)
 
     if (
-        blend_toward_hub
-        and new2d.normalize_terminal_2d_mode(terminal_2d_mode) == "fiducial"
+        new2d.normalize_terminal_2d_mode(terminal_2d_mode) == "fiducial"
         and mesh is not None
         and terminal_zone_size is not None
         and terminal_zone_size > 0
@@ -1163,75 +1154,6 @@ def _separate_entry_points(
     )
 
 
-def _uncross_with_fixed_ends(
-    paths: list[np.ndarray],
-    path_electrodes: list[str],
-    electrodes_2d: dict[str, np.ndarray],
-    electrode_zones: dict,
-    end_points: dict[str, np.ndarray],
-    *,
-    idxs: list[int] | None = None,
-    max_rounds: int = 40,
-) -> list[np.ndarray]:
-    """
-    Bend wires to clear crossings while keeping electrode and wire ends fixed.
-
-    ``end_points`` must be the actual path ends (e.g. truncated tips), not strip
-    slots — pinning to strip would reconnect truncated synthesize wires.
-    """
-    from shapely.geometry import LineString
-
-    paths = [np.asarray(p, dtype=float).copy() for p in paths]
-    mutable = set(idxs) if idxs is not None else set(range(len(paths)))
-    for _ in range(int(max_rounds)):
-        cross = _count_pair_crossings(paths)
-        if cross == 0:
-            break
-        lines = [LineString(p) for p in paths]
-        improved = False
-        for i in range(len(paths)):
-            for j in range(i + 1, len(paths)):
-                inter = lines[i].intersection(lines[j])
-                if inter.is_empty or inter.geom_type not in ("Point", "MultiPoint"):
-                    continue
-                for idx in (i, j):
-                    if idx not in mutable:
-                        continue
-                    name = path_electrodes[idx]
-                    if name not in end_points or name not in electrodes_2d:
-                        continue
-                    start = np.asarray(electrodes_2d[name], dtype=float)
-                    end = np.asarray(end_points[name], dtype=float)
-                    for sign in (1.0, -1.0):
-                        for scale in (8.0, 16.0, 28.0, 42.0):
-                            trial = new2d.pin_path_endpoints_2d(
-                                _bent_path_2d(start, end, sign, scale),
-                                start,
-                                end,
-                            )
-                            if _path_foreign_electrode_hits(
-                                trial, name, electrode_zones
-                            ):
-                                continue
-                            trial_list = list(paths)
-                            trial_list[idx] = trial
-                            if _count_pair_crossings(trial_list) < cross:
-                                paths = trial_list
-                                improved = True
-                                break
-                        if improved:
-                            break
-                    if improved:
-                        break
-                if improved:
-                    break
-            if improved:
-                break
-        if not improved:
-            break
-    return paths
-
-
 def _uncross_by_entry_order_swap(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1242,406 +1164,81 @@ def _uncross_by_entry_order_swap(
     slot_index: dict[str, int] | None = None,
     *,
     max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
-    replan_fn=None,
 ) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     """
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Accepts a move only when total pairwise crossings decrease.
-
-    When a straight/detour replan still crosses (correct slots, bad chords),
-    bends residual crossings with fixed wire ends before accept/reject.
-
-    When pairwise swaps plateau, tries two escapes on each hub:
-      1) reassign strip slots by electrode angular order (global uncross for
-         straight/truncated chords),
-      2) 3-cycles among wires that still cross.
-
-    ``entry_points`` are strip-slot anchors. ``replan_fn(idx, entries)`` may
-    rebuild a truncated wire; default replans electrode→strip.
+    Accepts a swap only when total pairwise crossings decrease. Runs before
+    geometric detour uncross so near-hub X patterns resolve by order, not bends.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
     slots = {k: int(v) for k, v in (slot_index or {}).items()}
 
     def _replan(idx: int) -> np.ndarray:
-        if replan_fn is not None:
-            return np.asarray(replan_fn(idx, entries), dtype=float)
         name = path_electrodes[idx]
         start = electrodes_2d[name]
         end = entries[name]
         path = _path_with_electrode_detour(start, end, name, electrode_zones)
         return new2d.pin_path_endpoints_2d(path, start, end)
 
-    def _replan_many(idxs: list[int], base: list[np.ndarray]) -> list[np.ndarray]:
-        trial = list(base)
-        for idx in idxs:
-            trial[idx] = _replan(idx)
-        return trial
-
-    def _ends_from_trial(trial: list[np.ndarray], idxs: list[int]) -> dict[str, np.ndarray]:
-        ends: dict[str, np.ndarray] = {}
-        for idx in idxs:
-            name = path_electrodes[idx]
-            path = np.asarray(trial[idx], dtype=float)
-            if len(path) == 0:
-                continue
-            ends[name] = path[-1].copy()
-        return ends
-
-    def _pair_still_crosses(trial: list[np.ndarray], idxs: list[int]) -> bool:
-        for a in range(len(idxs)):
-            for b in range(a + 1, len(idxs)):
-                i, j = idxs[a], idxs[b]
-                if path_terminals[i] != path_terminals[j]:
-                    continue
-                if _first_crossing_point(trial[i], trial[j]) is not None:
-                    return True
-        return False
-
-    def _evaluate_replan_trial(
-        idxs: list[int], base: list[np.ndarray], cross_total: int
-    ) -> tuple[list[np.ndarray] | None, int]:
-        """
-        Straight/truncate replan, then fixed-end bends if crossings remain.
-
-        Returns (trial, new_cross) when improved, else (None, cross_total).
-        """
-        trial = _replan_many(idxs, base)
-        new_cross = _count_pair_crossings(trial)
-        needs_bend = new_cross >= cross_total or _pair_still_crosses(trial, idxs)
-        if needs_bend:
-            ends = _ends_from_trial(trial, idxs)
-            # Also pin ends for any path that may interact; bend only idxs.
-            for idx in idxs:
-                name = path_electrodes[idx]
-                if name not in ends and len(trial[idx]) > 0:
-                    ends[name] = np.asarray(trial[idx][-1], dtype=float).copy()
-            trial = _uncross_with_fixed_ends(
-                trial,
-                path_electrodes,
-                electrodes_2d,
-                electrode_zones,
-                ends,
-                idxs=idxs,
-            )
-            new_cross = _count_pair_crossings(trial)
-        if new_cross < cross_total:
-            return trial, new_cross
-        return None, cross_total
-
-    def _swap_entries(name_a: str, name_b: str) -> None:
-        entries[name_a], entries[name_b] = (
-            entries[name_b].copy(),
-            entries[name_a].copy(),
-        )
-        if name_a in slots and name_b in slots:
-            slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
-
-    def _apply_entry_assignment(
-        idxs: list[int],
-        new_ends: list[np.ndarray],
-        new_slot_vals: list[int] | None,
-    ) -> None:
-        for k, idx in enumerate(idxs):
-            name = path_electrodes[idx]
-            entries[name] = np.asarray(new_ends[k], dtype=float).copy()
-            if new_slot_vals is not None and name in slots:
-                slots[name] = int(new_slot_vals[k])
-
-    def _try_pairwise(cross_total: int, round_idx: int) -> bool:
-        for i in range(len(paths)):
-            for j in range(i + 1, len(paths)):
-                if path_terminals[i] != path_terminals[j]:
-                    continue
-                if _first_crossing_point(paths[i], paths[j]) is None:
-                    continue
-                name_a = path_electrodes[i]
-                name_b = path_electrodes[j]
-                if name_a not in entries or name_b not in entries:
-                    continue
-                _swap_entries(name_a, name_b)
-                trial, new_cross = _evaluate_replan_trial([i, j], paths, cross_total)
-                if trial is not None:
-                    paths[:] = trial
-                    print(
-                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
-                        f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
-                    )
-                    return True
-                _swap_entries(name_a, name_b)
-        return False
-
-    def _hub_indices(terminal: str) -> list[int]:
-        return [i for i, t in enumerate(path_terminals) if t == terminal]
-
-    def _try_angular_reorder(cross_total: int, round_idx: int) -> bool:
-        """Assign strip slots in electrode angular order (escapes pairwise plateaus)."""
-        terminals = sorted({t for t in path_terminals})
-        for terminal in terminals:
-            idxs = _hub_indices(terminal)
-            if len(idxs) < 3:
-                continue
-            names = [path_electrodes[i] for i in idxs]
-            if any(n not in entries for n in names):
-                continue
-            pts = np.stack([electrodes_2d[n] for n in names], axis=0)
-            cent = np.mean(pts, axis=0)
-
-            def _elec_angle(i: int) -> float:
-                p = np.asarray(electrodes_2d[path_electrodes[i]], dtype=float) - cent
-                return float(np.arctan2(p[1], p[0]))
-
-            order = sorted(idxs, key=_elec_angle)
-            # Keep the multiset of strip ends; redistribute by electrode angle.
-            end_pool = [entries[path_electrodes[i]].copy() for i in idxs]
-            end_cent = np.mean(np.stack(end_pool, axis=0), axis=0)
-
-            def _end_angle(p: np.ndarray) -> float:
-                d = np.asarray(p, dtype=float) - end_cent
-                return float(np.arctan2(d[1], d[0]))
-
-            ends_sorted = sorted(end_pool, key=_end_angle)
-            slot_pool = (
-                [slots[path_electrodes[i]] for i in idxs]
-                if all(path_electrodes[i] in slots for i in idxs)
-                else None
-            )
-            slots_sorted = sorted(slot_pool) if slot_pool is not None else None
-
-            old_ends = [entries[path_electrodes[i]].copy() for i in idxs]
-            old_slots = (
-                [slots[path_electrodes[i]] for i in idxs]
-                if slots_sorted is not None
-                else None
-            )
-            _apply_entry_assignment(order, ends_sorted, slots_sorted)
-            trial, new_cross = _evaluate_replan_trial(idxs, paths, cross_total)
-            if trial is not None:
-                paths[:] = trial
-                print(
-                    f"  Entry-order angular reassign on {terminal}: "
-                    f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
-                )
-                return True
-            _apply_entry_assignment(idxs, old_ends, old_slots)
-        return False
-
-    def _try_triple_cycles(cross_total: int, round_idx: int) -> bool:
-        """Rotate strip slots on crossing triples when 2-swaps stall."""
-        conflict: list[int] = []
-        for i in range(len(paths)):
-            for j in range(i + 1, len(paths)):
-                if path_terminals[i] != path_terminals[j]:
-                    continue
-                if _first_crossing_point(paths[i], paths[j]) is None:
-                    continue
-                if i not in conflict:
-                    conflict.append(i)
-                if j not in conflict:
-                    conflict.append(j)
-        by_term: dict[str, list[int]] = {}
-        for i in conflict:
-            by_term.setdefault(path_terminals[i], []).append(i)
-
-        for terminal, idxs in by_term.items():
-            if len(idxs) < 3:
-                continue
-            for a_i in range(len(idxs)):
-                for b_i in range(a_i + 1, len(idxs)):
-                    for c_i in range(b_i + 1, len(idxs)):
-                        triple = [idxs[a_i], idxs[b_i], idxs[c_i]]
-                        names = [path_electrodes[t] for t in triple]
-                        if any(n not in entries for n in names):
-                            continue
-                        old_ends = [entries[n].copy() for n in names]
-                        old_slots = (
-                            [slots[n] for n in names]
-                            if all(n in slots for n in names)
-                            else None
-                        )
-                        rotations = [
-                            (
-                                [old_ends[2], old_ends[0], old_ends[1]],
-                                (
-                                    [old_slots[2], old_slots[0], old_slots[1]]
-                                    if old_slots is not None
-                                    else None
-                                ),
-                            ),
-                            (
-                                [old_ends[1], old_ends[2], old_ends[0]],
-                                (
-                                    [old_slots[1], old_slots[2], old_slots[0]]
-                                    if old_slots is not None
-                                    else None
-                                ),
-                            ),
-                        ]
-                        for new_ends, new_slots in rotations:
-                            _apply_entry_assignment(triple, new_ends, new_slots)
-                            trial, new_cross = _evaluate_replan_trial(
-                                triple, paths, cross_total
-                            )
-                            if trial is not None:
-                                paths[:] = trial
-                                print(
-                                    f"  Entry-order 3-cycle "
-                                    f"{names[0]}→{names[1]}→{names[2]} on {terminal}: "
-                                    f"crossings {cross_total}->{new_cross} "
-                                    f"(round {round_idx + 1})"
-                                )
-                                return True
-                            _apply_entry_assignment(triple, old_ends, old_slots)
-        return False
-
     for round_idx in range(max_rounds):
         cross_total = _count_pair_crossings(paths)
         if cross_total == 0:
             break
 
-        # Work on the shared `paths` list in place via paths[:] updates above.
-        if _try_pairwise(cross_total, round_idx):
-            continue
-        if _try_angular_reorder(cross_total, round_idx):
-            continue
-        if _try_triple_cycles(cross_total, round_idx):
-            continue
+        improved = False
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _first_crossing_point(paths[i], paths[j]) is None:
+                    continue
 
-        if cross_total > 0:
-            print(
-                f"  Entry-order swap stopped at round {round_idx + 1} "
-                f"(crossings={cross_total}; pairwise/angular/3-cycle plateau)"
-            )
-        break
+                name_a = path_electrodes[i]
+                name_b = path_electrodes[j]
+                if name_a not in entries or name_b not in entries:
+                    continue
+
+                entries[name_a], entries[name_b] = (
+                    entries[name_b].copy(),
+                    entries[name_a].copy(),
+                )
+                if name_a in slots and name_b in slots:
+                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+
+                trial = list(paths)
+                trial[i] = _replan(i)
+                trial[j] = _replan(j)
+                new_cross = _count_pair_crossings(trial)
+                if new_cross < cross_total:
+                    paths = trial
+                    improved = True
+                    print(
+                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
+                        f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
+                    )
+                    break
+
+                # Revert rejected swap
+                entries[name_a], entries[name_b] = (
+                    entries[name_b].copy(),
+                    entries[name_a].copy(),
+                )
+                if name_a in slots and name_b in slots:
+                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+            if improved:
+                break
+
+        if not improved:
+            if cross_total > 0:
+                print(
+                    f"  Entry-order swap stopped at round {round_idx + 1} "
+                    f"(crossings={cross_total})"
+                )
+            break
 
     return paths, entries, slots
-
-
-def _wire_ends_from_paths(
-    paths: list[np.ndarray],
-    path_electrodes: list[str],
-) -> dict[str, np.ndarray]:
-    return {
-        name: np.asarray(paths[i][-1], dtype=float).copy()
-        for i, name in enumerate(path_electrodes)
-        if len(paths[i]) > 0
-    }
-
-
-def _align_end_to_strip_ray(
-    end_2d: np.ndarray,
-    strip_2d: np.ndarray,
-    hub_2d: np.ndarray,
-) -> np.ndarray:
-    """Place ``end`` on the hub→strip ray, keeping its radius from the hub."""
-    hub = np.asarray(hub_2d, dtype=float).reshape(2)
-    strip = np.asarray(strip_2d, dtype=float).reshape(2)
-    end = np.asarray(end_2d, dtype=float).reshape(2)
-    v = strip - hub
-    vn = float(np.linalg.norm(v))
-    if vn < 1e-9:
-        return end.copy()
-    u = v / vn
-    r = float(np.linalg.norm(end - hub))
-    r = min(max(r, 0.0), vn * 0.999)
-    return hub + r * u
-
-
-def _min_strip_entry_gap(
-    strip_entries: dict[str, np.ndarray],
-    path_electrodes: list[str],
-    path_terminals: list[str],
-) -> float:
-    """Smallest consecutive strip-entry spacing on either hub (polar 2D)."""
-    by_term: dict[str, list[np.ndarray]] = {}
-    for name, term in zip(path_electrodes, path_terminals):
-        if name not in strip_entries:
-            continue
-        by_term.setdefault(term, []).append(np.asarray(strip_entries[name], dtype=float))
-    gaps: list[float] = []
-    for pts in by_term.values():
-        if len(pts) < 2:
-            continue
-        # Order by angle around mean point for stable consecutive gaps.
-        c = np.mean(np.stack(pts, axis=0), axis=0)
-        pts = sorted(pts, key=lambda p: float(np.arctan2(p[1] - c[1], p[0] - c[0])))
-        for a, b in zip(pts, pts[1:]):
-            gaps.append(float(np.linalg.norm(b - a)))
-    if not gaps:
-        return float(SYNTH_MIN_SLOT_GAP)
-    return max(float(SYNTH_MIN_SLOT_GAP), float(min(gaps)))
-
-
-def _spread_truncated_wire_ends(
-    paths: list[np.ndarray],
-    path_electrodes: list[str],
-    path_terminals: list[str],
-    strip_entries: dict[str, np.ndarray],
-    terminals_2d: dict[str, np.ndarray],
-    electrodes_2d: dict[str, np.ndarray],
-    *,
-    min_separation: float,
-    max_rounds: int = 40,
-) -> list[np.ndarray]:
-    """
-    Keep truncated wire ends fanned like strip slots with equal neighbor gaps.
-
-    1) Snap each end onto its hub→strip ray (preserves slot angular spacing).
-    2) Equalize radii per hub (median r) so equal slot angles → equal chord gaps,
-       even when that gap is below ``min_separation``.
-
-    ``min_separation`` is kept for call-site compatibility; equal fan spacing wins.
-    """
-    del max_rounds  # equal-radius pass is closed-form
-    _ = float(min_separation)
-    paths = [np.asarray(p, dtype=float).copy() for p in paths]
-
-    for i, name in enumerate(path_electrodes):
-        hub = terminals_2d[path_terminals[i]]
-        strip = strip_entries[name]
-        end = _align_end_to_strip_ray(paths[i][-1], strip, hub)
-        paths[i] = new2d.pin_path_endpoints_2d(paths[i], electrodes_2d[name], end)
-
-    by_term: dict[str, list[int]] = {}
-    for i, term in enumerate(path_terminals):
-        by_term.setdefault(term, []).append(i)
-
-    for term, idxs in by_term.items():
-        if len(idxs) < 2:
-            continue
-        hub = np.asarray(terminals_2d[term], dtype=float).reshape(2)
-        radii = []
-        ray_caps = []
-        for i in idxs:
-            name = path_electrodes[i]
-            strip = np.asarray(strip_entries[name], dtype=float).reshape(2)
-            un = float(np.linalg.norm(strip - hub))
-            if un < 1e-9:
-                continue
-            radii.append(
-                float(np.linalg.norm(np.asarray(paths[i][-1], dtype=float) - hub))
-            )
-            ray_caps.append(0.999 * un)
-        if not radii or not ray_caps:
-            continue
-        # Shared radius must fit every hub→strip ray or gaps stay unequal.
-        r_target = min(
-            float(np.median(np.asarray(radii, dtype=float))),
-            float(min(ray_caps)),
-        )
-        for i in idxs:
-            name = path_electrodes[i]
-            strip = np.asarray(strip_entries[name], dtype=float).reshape(2)
-            u = strip - hub
-            un = float(np.linalg.norm(u))
-            if un < 1e-9:
-                continue
-            end = hub + (r_target / un) * u
-            paths[i] = new2d.pin_path_endpoints_2d(
-                paths[i], electrodes_2d[name], end
-            )
-    return paths
 
 
 def _uncross_by_tail_swap(
@@ -1966,10 +1563,7 @@ def apply_layout_preset_v4_synthesize(
 ) -> dict[str, Any]:
     """
     Target layout: free hub angle + preset strip offsets + straight/detour 2D paths.
-    No GA, no source chord-shape replay.
-
-    Order: synthesize chords -> truncate -> entry-order swap.
-    Detour/separation polish (refine) runs afterward in the polish stage.
+    No GA, no repair, no source chord-shape replay.
 
     use_target_terminals: TERMINAL_LEFT/RIGHT from target fiducials_{id}.json;
       preset supplies terminal_assignments only (no rigid hub map from reference).
@@ -2029,9 +1623,7 @@ def apply_layout_preset_v4_synthesize(
     )
     if terminal_2d_mode == TERMINAL_2D_FIDUCIAL:
         hub_msg = f"{hub_msg} (fiducial strip zones)"
-    print(
-        f"v4 synthesize: {entry_mode} → {hub_msg} → truncate → entry-order swap"
-    )
+    print(f"v4 synthesize: {entry_mode} → {hub_msg} → straight/detour + entry-order swap")
 
     if optimize_terminals:
         terminals_3d, layout_fiducials, electrodes_2d, terminals_2d, cz_pos = (
@@ -2069,7 +1661,7 @@ def apply_layout_preset_v4_synthesize(
             slot_index_preset,
         )
 
-    strip_entries_2d, slot_index_live = _resolve_entries_for_synth(
+    entry_points_2d, slot_index_live = _resolve_entries_for_synth(
         path_electrodes,
         path_terminals,
         electrodes_2d,
@@ -2081,40 +1673,71 @@ def apply_layout_preset_v4_synthesize(
         offset_map=offset_map,
     )
 
+    paths_2d: list[np.ndarray] = []
+    for electrode in path_electrodes:
+        e2d = electrodes_2d[electrode]
+        end2d = entry_points_2d[electrode]
+        paths_2d.append(
+            _path_with_electrode_detour(e2d, end2d, electrode, electrode_zones)
+        )
+    # Same-terminal crossings: swap strip entry order and replan (default path).
+    paths_2d, entry_points_2d, slot_index_live = _uncross_by_entry_order_swap(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        electrodes_2d,
+        entry_points_2d,
+        electrode_zones,
+        slot_index=slot_index_live,
+    )
+    if use_tail_swap and preserve_entry_order:
+        paths_2d, entry_points_2d = _uncross_by_tail_swap(
+            paths_2d,
+            path_electrodes,
+            path_terminals,
+            electrodes_2d,
+            entry_points_2d,
+            terminals_2d,
+            terminal_zones,
+            electrode_zones,
+        )
+    paths_2d = _uncross_paths_with_detours(
+        paths_2d,
+        path_electrodes,
+        electrodes_2d,
+        entry_points_2d,
+        electrode_zones,
+    )
+    for i, electrode in enumerate(path_electrodes):
+        paths_2d[i] = new2d.pin_path_endpoints_2d(
+            paths_2d[i],
+            electrodes_2d[electrode],
+            entry_points_2d[electrode],
+        )
+
     if terminal_stop_mm is None:
         from app.layout.terminal_truncate import default_terminal_stop_mm
 
         terminal_stop_mm = default_terminal_stop_mm()
-
-    from app.layout.terminal_truncate import apply_wire_truncation
 
     mesh = _pyvista_read_stl(target_subject_id)
     uv_grid_raw = new2d.create_uv_grid(mesh, cz_pos, resolution=100)
     uv_grid_ctx = uv_grid_for_context(uv_grid_raw)
     uv_context = recon.UVReconstructionContext(uv_grid_ctx, mesh)
 
+    output_paths: list[dict] = []
     terminal_assignments = preset.get("terminal_assignments", {})
     preset_paths = preset.get("paths_chord_3d", {})
-
-    def _terminal_for(electrode: str) -> str:
-        return terminal_assignments.get(electrode) or preset_paths.get(
+    for electrode, path_2d in zip(path_electrodes, paths_2d):
+        terminal = terminal_assignments.get(electrode) or preset_paths.get(
             electrode, {}
         ).get("terminal")
-
-    def _replan_truncated(idx: int, strip_entries: dict[str, np.ndarray]) -> np.ndarray:
-        """Full electrode→strip chord, UV-lift, then truncate; return truncated 2D."""
-        electrode = path_electrodes[idx]
-        terminal = _terminal_for(electrode)
         e2d = electrodes_2d[electrode]
         e3d = np.asarray(electrodes[electrode], dtype=float)
-        strip_2d = strip_entries[electrode]
+        end2d = entry_points_2d[electrode]
         t3d = np.asarray(terminals_3d[terminal], dtype=float)
-        path_2d = _path_with_electrode_detour(
-            e2d, strip_2d, electrode, electrode_zones
-        )
-        path_2d = new2d.pin_path_endpoints_2d(path_2d, e2d, strip_2d)
-        strip_3d = entry_3d_for_strip(
-            strip_2d,
+        end3d = entry_3d_for_strip(
+            end2d,
             uv_context,
             mesh,
             e3d=e3d,
@@ -2124,141 +1747,32 @@ def apply_layout_preset_v4_synthesize(
             terminal_2d_mode=terminal_2d_mode,
             terminal_zone_size=terminal_zone_size,
         )
-        path_3d = uv_context.reconstruct(e3d, strip_3d, np.asarray(path_2d, dtype=float))
+
+        path_3d = uv_context.reconstruct(e3d, end3d, np.asarray(path_2d, dtype=float))
         path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
-        path_3d = pin_path_endpoints_3d(path_3d, e3d, strip_3d, mesh)
-        path_2d_trunc, _path_3d_trunc, wire_end_3d = apply_wire_truncation(
-            np.asarray(path_2d, dtype=float),
+        path_3d = pin_path_endpoints_3d(path_3d, e3d, end3d, mesh)
+
+        from app.layout.terminal_truncate import apply_wire_truncation
+
+        path_2d_arr = np.asarray(path_2d, dtype=float)
+        path_2d_trunc, path_3d_trunc, wire_end_3d = apply_wire_truncation(
+            path_2d_arr,
             path_3d,
             stop_mm=float(terminal_stop_mm),
             min_points=int(terminal_min_points),
         )
         wire_end_2d = new2d.polar_projection(np.array([wire_end_3d]), cz_pos)[0]
-        # Keep truncated end on the hub→strip ray so neighbors inherit slot fan spacing.
-        wire_end_2d = _align_end_to_strip_ray(
-            wire_end_2d, strip_2d, terminals_2d[terminal]
+        path_2d_trunc = new2d.pin_path_endpoints_2d(
+            path_2d_trunc, e2d, wire_end_2d
         )
-        return new2d.pin_path_endpoints_2d(path_2d_trunc, e2d, wire_end_2d)
-
-    from app.config_loader import load_defaults as _load_defaults
-
-    synth_cfg = _load_defaults().get("synthesize", {})
-    end_sep_cfg = synth_cfg.get("truncated_end_min_separation_2d")
-    if end_sep_cfg is None:
-        truncated_end_min_sep = 0.85 * _min_strip_entry_gap(
-            strip_entries_2d, path_electrodes, path_terminals
-        )
-    else:
-        truncated_end_min_sep = float(end_sep_cfg)
-
-    # 1) Synthesize chords to strip slots
-    # 2) Truncate before any entry-order decisions
-    print(
-        f"  Truncating wires by {float(terminal_stop_mm):.1f} mm before entry-order swap"
-    )
-    paths_2d = [
-        _replan_truncated(i, strip_entries_2d) for i in range(len(path_electrodes))
-    ]
-    paths_2d = _spread_truncated_wire_ends(
-        paths_2d,
-        path_electrodes,
-        path_terminals,
-        strip_entries_2d,
-        terminals_2d,
-        electrodes_2d,
-        min_separation=truncated_end_min_sep,
-    )
-
-    # 3) Entry-order swap on truncated geometry (strip slots swapped; paths re-truncated)
-    paths_2d, strip_entries_2d, slot_index_live = _uncross_by_entry_order_swap(
-        paths_2d,
-        path_electrodes,
-        path_terminals,
-        electrodes_2d,
-        strip_entries_2d,
-        electrode_zones,
-        slot_index=slot_index_live,
-        replan_fn=_replan_truncated,
-    )
-    if use_tail_swap and preserve_entry_order:
-        wire_ends = _wire_ends_from_paths(paths_2d, path_electrodes)
-        paths_2d, wire_ends = _uncross_by_tail_swap(
-            paths_2d,
-            path_electrodes,
-            path_terminals,
-            electrodes_2d,
-            wire_ends,
-            terminals_2d,
-            terminal_zones,
-            electrode_zones,
-        )
-        for i, electrode in enumerate(path_electrodes):
-            paths_2d[i] = new2d.pin_path_endpoints_2d(
-                paths_2d[i],
-                electrodes_2d[electrode],
-                wire_ends[electrode],
-            )
-
-    paths_2d = _spread_truncated_wire_ends(
-        paths_2d,
-        path_electrodes,
-        path_terminals,
-        strip_entries_2d,
-        terminals_2d,
-        electrodes_2d,
-        min_separation=truncated_end_min_sep,
-    )
-    print(
-        f"  Truncated-end spacing: min_sep_2d={truncated_end_min_sep:.3f} "
-        "(strip-ray align + same-terminal push-apart)"
-    )
-
-    output_paths: list[dict] = []
-    for electrode, path_2d in zip(path_electrodes, paths_2d):
-        terminal = _terminal_for(electrode)
-        e2d = electrodes_2d[electrode]
-        e3d = np.asarray(electrodes[electrode], dtype=float)
-        strip_2d = strip_entries_2d[electrode]
-        t3d = np.asarray(terminals_3d[terminal], dtype=float)
-        strip_3d = entry_3d_for_strip(
-            strip_2d,
-            uv_context,
-            mesh,
-            e3d=e3d,
-            terminal_3d=t3d,
-            e2d=e2d,
-            cz_pos=cz_pos,
-            terminal_2d_mode=terminal_2d_mode,
-            terminal_zone_size=terminal_zone_size,
-        )
-        wire_end_2d = np.asarray(path_2d[-1], dtype=float)
-        # Do not hub-blend: truncated ends sit near the terminal by design.
-        wire_end_3d = entry_3d_for_strip(
-            wire_end_2d,
-            uv_context,
-            mesh,
-            e3d=e3d,
-            terminal_3d=t3d,
-            e2d=e2d,
-            cz_pos=cz_pos,
-            terminal_2d_mode=terminal_2d_mode,
-            terminal_zone_size=terminal_zone_size,
-            blend_toward_hub=False,
-        )
-        path_2d = new2d.pin_path_endpoints_2d(path_2d, e2d, wire_end_2d)
-        path_3d = uv_context.reconstruct(
-            e3d, wire_end_3d, np.asarray(path_2d, dtype=float)
-        )
-        path_3d = snap_path_to_mesh(path_3d, mesh, pin_endpoints=True)
-        path_3d = pin_path_endpoints_3d(path_3d, e3d, wire_end_3d, mesh)
 
         out: dict[str, Any] = {
             "electrode": electrode,
             "terminal": terminal,
-            "modified_path_2d": np.asarray(path_2d, dtype=float).tolist(),
-            "path_points": np.asarray(path_3d, dtype=float).tolist(),
-            "entry_point_2d": strip_2d.tolist(),
-            "entry_position_3d": strip_3d.tolist(),
+            "modified_path_2d": path_2d_trunc.tolist(),
+            "path_points": path_3d_trunc.tolist(),
+            "entry_point_2d": end2d.tolist(),
+            "entry_position_3d": end3d.tolist(),
             "path_end_2d": wire_end_2d.tolist(),
             "path_end_3d": wire_end_3d.tolist(),
         }
@@ -2567,16 +2081,11 @@ def uncross_applied_layout(
     applied_path: str,
     output_path: str | None = None,
     uv_resolution: int = 100,
-    max_rounds: int = 24,
-    *,
-    random_trials: int = 12,
+    max_rounds: int = 40,
 ) -> dict[str, Any]:
     """
     Target remaining crossings by rerouting one trace at a time when global
     crossing count drops (works on near-straight paths like F7 that greedy locks).
-
-    Only accepts moves that reduce crossings. Separation-only gains are left to
-    repair/phase-2 so this loop cannot grind for max_rounds without progress.
     """
     from PYTHON.tools.layoutPreset import (
         _child_from_applied_data,
@@ -2665,7 +2174,7 @@ def uncross_applied_layout(
                 candidates = []
                 if spacing_trial is not None:
                     candidates.append(spacing_trial)
-                for _ in range(int(random_trials)):
+                for _ in range(32):
                     candidates.append(
                         new2d.randomly_modify_path(
                             paths[path_idx].copy(),
@@ -2693,9 +2202,10 @@ def uncross_applied_layout(
                     )
                     cross = int(trial_analysis["crossing_count"])
                     sep = float(trial_analysis.get("min_trace_separation") or 0.0)
-                    # Crossing reduction only — sep-only accepts made refine look stuck
-                    # across all max_rounds (and twice with refine_passes).
-                    if cross < before_cross:
+                    better = cross < before_cross or (
+                        cross == before_cross and sep > before_sep + 0.05
+                    )
+                    if better:
                         paths = trial_paths
                         analysis = trial_analysis
                         improved = True
@@ -2710,10 +2220,7 @@ def uncross_applied_layout(
             if improved:
                 break
         if not improved:
-            print(
-                f"Uncross stopped (no crossing reduction at round {round_idx + 1}; "
-                f"crossings={before_cross})"
-            )
+            print(f"Uncross stopped (no improvement at round {round_idx + 1})")
             break
 
     for conn, path in zip(child["paths"], paths):
@@ -2777,6 +2284,5 @@ def refine_applied_v4(
         interim,
         output_path=output_path,
         uv_resolution=uv_resolution,
-        max_rounds=24,
-        random_trials=12,
+        max_rounds=80,
     )

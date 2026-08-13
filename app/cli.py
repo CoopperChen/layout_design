@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from app import paths
-from app.config_loader import default_assignments, load_defaults, resolve_assignments
+from app.config_loader import default_assignments, resolve_assignments
 from app.preprocess import run as preprocess_run
 
 
@@ -502,7 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     po.add_argument("--applied", required=True)
     po.add_argument(
         "--mode",
-        default=str(load_defaults().get("polish", {}).get("mode", "gentle")),
+        default="gentle",
         choices=["gentle", "repair", "refine", "ga-short"],
     )
     po.add_argument("--out")
