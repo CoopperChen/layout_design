@@ -882,25 +882,38 @@ def _path_with_electrode_detour(
     return best_path
 
 
-def _count_pair_crossings(paths: list[np.ndarray]) -> int:
-    from shapely.geometry import LineString
+def _mutual_crossing_count(
+    path_a: np.ndarray,
+    path_b: np.ndarray,
+    *,
+    terminal_a: str | None = None,
+    terminal_b: str | None = None,
+    terminal_zones: dict | None = None,
+    electrode_zones: dict | None = None,
+    use_dense: bool | None = None,
+) -> int:
+    """
+    Number of discrete intersection points between two polylines.
 
-    n_cross = 0
-    for i in range(len(paths)):
-        li = LineString(paths[i])
-        for j in range(i + 1, len(paths)):
-            inter = li.intersection(LineString(paths[j]))
-            if inter.is_empty:
-                continue
-            if inter.geom_type == "Point":
-                n_cross += 1
-            elif inter.geom_type == "MultiPoint" and len(inter.geoms) > 0:
-                n_cross += 1
-    return n_cross
+    When electrode_zones is provided (or use_dense=True), uses the same densified
+    terminal-tail + merge-exclusion count as full layout analysis — sparse LineString
+    intersection can report 1 while full reports 2 on the same pair.
+    """
+    if use_dense is None:
+        use_dense = electrode_zones is not None
+    if use_dense and electrode_zones is not None:
+        return int(
+            new2d._pair_crossing_point_count(
+                path_a,
+                path_b,
+                terminal_a,
+                terminal_b,
+                terminal_zones or {},
+                electrode_zones,
+                use_dense_paths=True,
+            )
+        )
 
-
-def _mutual_crossing_count(path_a: np.ndarray, path_b: np.ndarray) -> int:
-    """Number of discrete intersection points between two polylines."""
     from shapely.geometry import LineString
 
     inter = LineString(path_a).intersection(LineString(path_b))
@@ -916,6 +929,33 @@ def _mutual_crossing_count(path_a: np.ndarray, path_b: np.ndarray) -> int:
     return 1
 
 
+def _count_pair_crossings(
+    paths: list[np.ndarray],
+    *,
+    path_terminals: list[str] | None = None,
+    terminal_zones: dict | None = None,
+    electrode_zones: dict | None = None,
+) -> int:
+    """Total crossing points across all pairs (full densified count when zones given)."""
+    if electrode_zones is not None:
+        return int(
+            new2d._count_layout_crossings(
+                paths,
+                path_terminals,
+                terminal_zones or {},
+                electrode_zones,
+                use_dense_paths=True,
+            )
+        )
+    n_cross = 0
+    for i in range(len(paths)):
+        for j in range(i + 1, len(paths)):
+            n_cross += _mutual_crossing_count(
+                paths[i], paths[j], use_dense=False
+            )
+    return n_cross
+
+
 def _layout_violation_score(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -923,7 +963,12 @@ def _layout_violation_score(
     electrode_zones: dict,
     terminal_zones: dict,
 ) -> tuple[int, int]:
-    cross = _count_pair_crossings(paths)
+    cross = _count_pair_crossings(
+        paths,
+        path_terminals=path_terminals,
+        terminal_zones=terminal_zones,
+        electrode_zones=electrode_zones,
+    )
     ev = new2d.count_electrode_violations(
         paths, electrode_zones, path_electrodes
     )
@@ -1180,6 +1225,7 @@ def _uncross_by_entry_order_swap(
     electrode_zones: dict,
     slot_index: dict[str, int] | None = None,
     *,
+    terminal_zones: dict | None = None,
     max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
 ) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     """
@@ -1189,11 +1235,32 @@ def _uncross_by_entry_order_swap(
     two involved wires have an even mutual crossing count (0, 2, …) so polish
     can clear residual contact. Odd mutual crossings after swap are rejected.
     Each unordered electrode pair is tried at most once.
+
+    Crossing counts match full layout analysis (densified terminal tails).
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
     slots = {k: int(v) for k, v in (slot_index or {}).items()}
     tried_pairs: set[frozenset[str]] = set()
+    tz = terminal_zones or {}
+
+    def _cross_total(plist: list[np.ndarray]) -> int:
+        return _count_pair_crossings(
+            plist,
+            path_terminals=path_terminals,
+            terminal_zones=tz,
+            electrode_zones=electrode_zones,
+        )
+
+    def _pair_mutual(plist: list[np.ndarray], i: int, j: int) -> int:
+        return _mutual_crossing_count(
+            plist[i],
+            plist[j],
+            terminal_a=path_terminals[i],
+            terminal_b=path_terminals[j],
+            terminal_zones=tz,
+            electrode_zones=electrode_zones,
+        )
 
     def _replan(idx: int) -> np.ndarray:
         name = path_electrodes[idx]
@@ -1203,7 +1270,7 @@ def _uncross_by_entry_order_swap(
         return new2d.pin_path_endpoints_2d(path, start, end)
 
     for round_idx in range(max_rounds):
-        cross_total = _count_pair_crossings(paths)
+        cross_total = _cross_total(paths)
         if cross_total == 0:
             break
 
@@ -1212,7 +1279,7 @@ def _uncross_by_entry_order_swap(
             for j in range(i + 1, len(paths)):
                 if path_terminals[i] != path_terminals[j]:
                     continue
-                if _first_crossing_point(paths[i], paths[j]) is None:
+                if _pair_mutual(paths, i, j) == 0:
                     continue
 
                 name_a = path_electrodes[i]
@@ -1233,8 +1300,8 @@ def _uncross_by_entry_order_swap(
                 trial = list(paths)
                 trial[i] = _replan(i)
                 trial[j] = _replan(j)
-                new_cross = _count_pair_crossings(trial)
-                mutual = _mutual_crossing_count(trial[i], trial[j])
+                new_cross = _cross_total(trial)
+                mutual = _pair_mutual(trial, i, j)
                 count_improved = new_cross < cross_total
                 even_mutual = (mutual % 2) == 0
                 accept = count_improved or even_mutual
@@ -1378,29 +1445,53 @@ def _uncross_even_mutual_pairs(
     entry_points: dict[str, np.ndarray],
     electrode_zones: dict,
     *,
+    terminal_zones: dict | None = None,
     max_rounds: int = 40,
 ) -> list[np.ndarray]:
     """
     After entry-order swap: clear even mutual crossings with fixed ends.
 
     Targets same-hub pairs whose mutual crossing count is even and > 0 (topologically
-    uncrossed endpoint pairing). Bends keep electrode + strip ends pinned.
+    uncrossed endpoint pairing), using the same densified count as full analysis.
+    Bends keep electrode + strip ends pinned.
     Accepts a bend only if that pair's mutual count drops and global crossings do not rise.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
+    tz = terminal_zones or {}
+
+    def _cross_total(plist: list[np.ndarray]) -> int:
+        return _count_pair_crossings(
+            plist,
+            path_terminals=path_terminals,
+            terminal_zones=tz,
+            electrode_zones=electrode_zones,
+        )
+
+    def _pair_mutual(plist: list[np.ndarray], i: int, j: int) -> int:
+        return _mutual_crossing_count(
+            plist[i],
+            plist[j],
+            terminal_a=path_terminals[i],
+            terminal_b=path_terminals[j],
+            terminal_zones=tz,
+            electrode_zones=electrode_zones,
+        )
+
     for round_idx in range(int(max_rounds)):
-        global_cross = _count_pair_crossings(paths)
+        global_cross = _cross_total(paths)
         if global_cross == 0:
             break
 
         improved = False
+        even_candidates = 0
         for i in range(len(paths)):
             for j in range(i + 1, len(paths)):
                 if path_terminals[i] != path_terminals[j]:
                     continue
-                mutual = _mutual_crossing_count(paths[i], paths[j])
+                mutual = _pair_mutual(paths, i, j)
                 if mutual == 0 or (mutual % 2) != 0:
                     continue
+                even_candidates += 1
 
                 for idx in (i, j):
                     name = path_electrodes[idx]
@@ -1421,8 +1512,8 @@ def _uncross_even_mutual_pairs(
                                 continue
                             trial = list(paths)
                             trial[idx] = trial_path
-                            new_mutual = _mutual_crossing_count(trial[i], trial[j])
-                            new_global = _count_pair_crossings(trial)
+                            new_mutual = _pair_mutual(trial, i, j)
+                            new_global = _cross_total(trial)
                             if new_mutual < mutual and new_global <= global_cross:
                                 paths = trial
                                 improved = True
@@ -1443,9 +1534,14 @@ def _uncross_even_mutual_pairs(
             if improved:
                 break
         if not improved:
+            why = (
+                "no even-mutual pairs"
+                if even_candidates == 0
+                else f"{even_candidates} even-mutual pair(s), no improving bend"
+            )
             print(
                 f"  Even-mutual uncross stopped at round {round_idx + 1} "
-                f"(crossings={global_cross})"
+                f"(crossings={global_cross}; {why})"
             )
             break
     return paths
@@ -1807,6 +1903,7 @@ def apply_layout_preset_v4_synthesize(
         entry_points_2d,
         electrode_zones,
         slot_index=slot_index_live,
+        terminal_zones=terminal_zones,
     )
     if use_tail_swap and preserve_entry_order:
         paths_2d, entry_points_2d = _uncross_by_tail_swap(
@@ -1828,6 +1925,7 @@ def apply_layout_preset_v4_synthesize(
         electrodes_2d,
         entry_points_2d,
         electrode_zones,
+        terminal_zones=terminal_zones,
     )
     paths_2d = _uncross_paths_with_detours(
         paths_2d,

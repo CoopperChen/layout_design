@@ -139,8 +139,10 @@ def test_uncross_even_mutual_clears_double_weave():
         _bent_path_2d(electrodes_2d["A"], entry_points["A"], perp_sign=1.0, scale=30.0),
         _bent_path_2d(electrodes_2d["B"], entry_points["B"], perp_sign=-1.0, scale=30.0),
     ]
-    mutual0 = _mutual_crossing_count(paths[0], paths[1])
+    mutual0 = _mutual_crossing_count(paths[0], paths[1], use_dense=False)
     assert mutual0 >= 2 and mutual0 % 2 == 0
+    # Sparse global count must count both points (not MultiPoint-as-1).
+    assert _count_pair_crossings(paths) == mutual0
 
     out = _uncross_even_mutual_pairs(
         paths,
@@ -150,7 +152,7 @@ def test_uncross_even_mutual_clears_double_weave():
         entry_points,
         {"zones": {}, "metadata": {}},
     )
-    assert _mutual_crossing_count(out[0], out[1]) < mutual0
+    assert _mutual_crossing_count(out[0], out[1], use_dense=False) < mutual0
     np.testing.assert_allclose(out[0][0], electrodes_2d["A"])
     np.testing.assert_allclose(out[1][0], electrodes_2d["B"])
     np.testing.assert_allclose(out[0][-1], entry_points["A"])
