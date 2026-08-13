@@ -77,3 +77,39 @@ def test_entry_order_swap_skips_different_terminals():
     assert _count_pair_crossings(new_paths) == before
     np.testing.assert_allclose(new_entries["A"], entry_points["A"])
     np.testing.assert_allclose(new_entries["B"], entry_points["B"])
+
+
+def test_entry_order_swap_accepts_without_requiring_crossing_drop():
+    """Crossing pair is always swapped once; slots change even if X count stays > 0."""
+    electrodes_2d = {
+        "A": np.array([-30.0, 40.0]),
+        "B": np.array([0.0, 45.0]),
+        "C": np.array([30.0, 40.0]),
+    }
+    # A↔C crossed; B in the middle. Swapping A↔C uncrosses that pair.
+    entry_points = {
+        "A": np.array([10.0, 0.0]),
+        "B": np.array([0.0, 0.0]),
+        "C": np.array([-10.0, 0.0]),
+    }
+    paths = [
+        _straight_path_2d(electrodes_2d[n], entry_points[n]) for n in ("A", "B", "C")
+    ]
+    assert _count_pair_crossings(paths) >= 1
+
+    new_paths, new_entries, new_slots = _uncross_by_entry_order_swap(
+        paths,
+        ["A", "B", "C"],
+        ["TERMINAL_LEFT"] * 3,
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+        slot_index={"A": 0, "B": 1, "C": 2},
+    )
+    # At least one pair was swapped (assignment changed from the initial crossed map).
+    assert (
+        not np.allclose(new_entries["A"], entry_points["A"])
+        or not np.allclose(new_entries["C"], entry_points["C"])
+        or not np.allclose(new_entries["B"], entry_points["B"])
+    )
+    assert new_slots != {"A": 0, "B": 1, "C": 2} or _count_pair_crossings(new_paths) == 0

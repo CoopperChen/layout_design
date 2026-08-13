@@ -15,6 +15,8 @@ Repository root `layout_design/`. Paths via `app.paths`.
 3. **C** Polish optional (paths only, not hub discovery)
 4. **D** Smooth → export-bundle → convert-gcode → simulate-gcode
 
+**Entry-order swap rule:** When two same-hub traces cross, swap their strip slots and replan those two wires; **always accept** that swap (do not require total crossing count to decrease). Each electrode pair is swapped at most once.
+
 Do not treat `export-v4` / chord replay / `--inherit-preset-terminals` as the primary workflow.
 
 ## Commands

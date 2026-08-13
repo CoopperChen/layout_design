@@ -1168,12 +1168,14 @@ def _uncross_by_entry_order_swap(
     """
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Accepts a swap only when total pairwise crossings decrease. Runs before
-    geometric detour uncross so near-hub X patterns resolve by order, not bends.
+    Always accepts the swap for that pair (even if total crossings do not drop).
+    Each unordered electrode pair is swapped at most once to avoid A↔B oscillation.
+    Runs before geometric detour uncross so near-hub X patterns resolve by order.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
     slots = {k: int(v) for k, v in (slot_index or {}).items()}
+    swapped_pairs: set[frozenset[str]] = set()
 
     def _replan(idx: int) -> np.ndarray:
         name = path_electrodes[idx]
@@ -1199,6 +1201,9 @@ def _uncross_by_entry_order_swap(
                 name_b = path_electrodes[j]
                 if name_a not in entries or name_b not in entries:
                     continue
+                pair_key = frozenset((name_a, name_b))
+                if pair_key in swapped_pairs:
+                    continue
 
                 entries[name_a], entries[name_b] = (
                     entries[name_b].copy(),
@@ -1211,22 +1216,16 @@ def _uncross_by_entry_order_swap(
                 trial[i] = _replan(i)
                 trial[j] = _replan(j)
                 new_cross = _count_pair_crossings(trial)
-                if new_cross < cross_total:
-                    paths = trial
-                    improved = True
-                    print(
-                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
-                        f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
-                    )
-                    break
-
-                # Revert rejected swap
-                entries[name_a], entries[name_b] = (
-                    entries[name_b].copy(),
-                    entries[name_a].copy(),
+                # Always accept: crossing pair → swap slots + replan, keep result.
+                paths = trial
+                swapped_pairs.add(pair_key)
+                improved = True
+                print(
+                    f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
+                    f"crossings {cross_total}->{new_cross} (round {round_idx + 1}, "
+                    f"accepted)"
                 )
-                if name_a in slots and name_b in slots:
-                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+                break
             if improved:
                 break
 
@@ -1234,7 +1233,7 @@ def _uncross_by_entry_order_swap(
             if cross_total > 0:
                 print(
                     f"  Entry-order swap stopped at round {round_idx + 1} "
-                    f"(crossings={cross_total})"
+                    f"(crossings={cross_total}; remaining pairs already swapped once)"
                 )
             break
 
