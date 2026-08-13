@@ -1,7 +1,8 @@
 # Stage C — Polish (optional)
 
 Fixed-endpoint separation polish (`gentle` / `repair`): electrode and truncated wire ends
-stay pinned; phase 2 improves trace spacing without increasing crossing count.
+stay pinned; phase 2 improves **slot-adjacent** spacing (maximin min gap + near-hub
+fairness) without increasing crossing count.
 
 Modes:
 
@@ -10,6 +11,13 @@ Modes:
 3. `ga_short` — warm-start GA (~20 generations; may move endpoints)
 
 **Output:** `data/output/layouts/{tag}_s{id}.json` (e.g. `synth_s2_repaired.json`)
+
+### Phase-2 objective (gentle)
+
+- Conflict pairs = consecutive strip slots on the same hub
+- One accept per round: best `(min_adjacent_gap ↑, hub_gap_variance ↓)`
+- No credit for pairs already wider than `min_trace_separation_mm`
+- Metrics logged: `min_adjacent_gap`, `hub_gap_variance`, `hub_gap_spread`
 
 ### Phase-2 timing profile
 

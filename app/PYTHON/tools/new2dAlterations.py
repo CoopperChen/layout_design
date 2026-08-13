@@ -65,6 +65,9 @@ PHASE2_SPACING_MAX_DETOUR_RATIO = 1.8
 PHASE2_PAIR_RESOLUTION_MAX_ROUNDS = 4
 PHASE2_RANDOM_ATTEMPTS_PER_TRACE = 4
 PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS = 12
+# Near-terminal band (fraction of path length from strip end) for hub-gap fairness.
+PHASE2_HUB_GAP_FRACTION = 0.35
+PHASE2_MIN_ADJ_GAP_EPS = 0.05
 # Minimum centerline clearance between any two traces along their full route (fitness).
 TRACE_SEPARATION_MIN = 4.0
 TRACE_SEPARATION_SAMPLE_STEP = 0.25
@@ -755,6 +758,10 @@ def _empty_path_metrics(electrode_violations=0):
         'slot_ordered_crossing_count': 0,
         'trace_reentry_count': 0,
         'min_pairwise_distance': float('inf'),
+        'min_adjacent_gap': float('inf'),
+        'hub_gap_variance': 0.0,
+        'hub_gap_spread': 0.0,
+        'n_adjacent_slot_pairs': 0,
         'min_terminal_entry_distance': float('inf'),
         'min_closest_neighbor_entry_distance': float('inf'),
         'terminal_merge_tail_length': TERMINAL_MERGE_TAIL_LENGTH_MIN,
@@ -2433,6 +2440,17 @@ def analyze_path_collisions(
             terminal_zones,
         ),
     }
+    adj_metrics = compute_adjacent_slot_gap_metrics(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        electrode_zones,
+        slot_index_by_electrode,
+    )
+    result["min_adjacent_gap"] = adj_metrics["min_adjacent_gap"]
+    result["hub_gap_variance"] = adj_metrics["hub_gap_variance"]
+    result["hub_gap_spread"] = adj_metrics["hub_gap_spread"]
+    result["n_adjacent_slot_pairs"] = adj_metrics["n_adjacent_slot_pairs"]
     result['layout_score'] = compute_layout_score(
         result, ga_phase=ga_phase, path_length_excess=path_length_excess
     )
@@ -4853,6 +4871,178 @@ def introduces_coterminal_ordered_crossings(
     return bool(after - before)
 
 
+def _slot_adjacent_path_index_pairs(
+    path_electrodes,
+    path_terminals,
+    slot_index_by_electrode,
+):
+    """
+    Same-hub path index pairs that are consecutive in strip slot order.
+
+    Returns list of (i, j) with i < j. Empty if slot metadata is missing.
+    """
+    if not slot_index_by_electrode or not path_electrodes or not path_terminals:
+        return []
+    by_terminal = {}
+    for idx, (name, terminal) in enumerate(zip(path_electrodes, path_terminals)):
+        slot = slot_index_by_electrode.get(name)
+        if slot is None:
+            continue
+        by_terminal.setdefault(terminal, []).append((int(slot), idx))
+    pairs = []
+    for items in by_terminal.values():
+        items.sort(key=lambda item: item[0])
+        for (_slot_a, i), (_slot_b, j) in zip(items, items[1:]):
+            pairs.append((i, j) if i < j else (j, i))
+    return pairs
+
+
+def _path_near_terminal_sample_points(
+    path,
+    *,
+    fraction=PHASE2_HUB_GAP_FRACTION,
+    exclude_region=None,
+    sample_step=TRACE_SEPARATION_SAMPLE_STEP,
+):
+    """Sample points on the strip-proximal fraction of a path (electrode→terminal)."""
+    line = _path_to_linestring(path)
+    if line is None or line.is_empty:
+        return []
+    total = float(line.length)
+    if total < 1e-9:
+        return []
+    frac = float(np.clip(fraction, 0.05, 1.0))
+    start_len = total * (1.0 - frac)
+    n = max(2, int(np.ceil(total * frac / sample_step)))
+    pts = []
+    for t in np.linspace(start_len, total, n):
+        pt = line.interpolate(t)
+        if exclude_region is not None and not exclude_region.is_empty:
+            if exclude_region.covers(pt) or exclude_region.touches(pt):
+                continue
+        pts.append(pt)
+    return pts
+
+
+def _pair_near_hub_min_distance(
+    path_a,
+    path_b,
+    terminal_a,
+    terminal_b,
+    electrode_zones,
+    *,
+    fraction=PHASE2_HUB_GAP_FRACTION,
+):
+    """Min distance between near-terminal bands of two paths (outside merge tails)."""
+    line_a = _path_to_linestring(path_a)
+    line_b = _path_to_linestring(path_b)
+    if line_a is None or line_b is None:
+        return float("inf")
+    merge_tail_length = _terminal_merge_tail_length(electrode_zones)
+    pair_merge_union = _build_pair_merge_union(
+        path_a, path_b, terminal_a, terminal_b, merge_tail_length
+    )
+    min_dist = float("inf")
+    pts_a = _path_near_terminal_sample_points(
+        path_a, fraction=fraction, exclude_region=pair_merge_union
+    )
+    pts_b = _path_near_terminal_sample_points(
+        path_b, fraction=fraction, exclude_region=pair_merge_union
+    )
+    for pt in pts_a:
+        min_dist = min(min_dist, float(line_b.distance(pt)))
+    for pt in pts_b:
+        min_dist = min(min_dist, float(line_a.distance(pt)))
+    return min_dist
+
+
+def compute_adjacent_slot_gap_metrics(
+    paths_2d,
+    path_electrodes,
+    path_terminals,
+    electrode_zones,
+    slot_index_by_electrode,
+    *,
+    hub_fraction=PHASE2_HUB_GAP_FRACTION,
+):
+    """
+    Slot-adjacent same-hub spacing: global min gap + near-hub fairness.
+
+    Used by gentle polish to prefer maximin / equal fan over sum-of-shortfalls.
+    """
+    pairs = _slot_adjacent_path_index_pairs(
+        path_electrodes, path_terminals, slot_index_by_electrode
+    )
+    if not pairs:
+        return {
+            "min_adjacent_gap": float("inf"),
+            "hub_gap_variance": 0.0,
+            "hub_gap_spread": 0.0,
+            "n_adjacent_slot_pairs": 0,
+            "adjacent_gaps": [],
+            "hub_adjacent_gaps": [],
+        }
+
+    gaps = []
+    hub_gaps = []
+    for i, j in pairs:
+        gaps.append(
+            float(
+                _pair_centerline_min_distance(
+                    paths_2d[i],
+                    paths_2d[j],
+                    path_terminals[i],
+                    path_terminals[j],
+                    electrode_zones,
+                )
+            )
+        )
+        hub_gaps.append(
+            float(
+                _pair_near_hub_min_distance(
+                    paths_2d[i],
+                    paths_2d[j],
+                    path_terminals[i],
+                    path_terminals[j],
+                    electrode_zones,
+                    fraction=hub_fraction,
+                )
+            )
+        )
+
+    hub_arr = np.asarray(hub_gaps, dtype=float)
+    finite_hub = hub_arr[np.isfinite(hub_arr)]
+    if len(finite_hub) >= 2:
+        hub_var = float(np.var(finite_hub))
+        hub_spread = float(np.max(finite_hub) - np.min(finite_hub))
+    else:
+        hub_var = 0.0
+        hub_spread = 0.0
+
+    finite_gaps = [g for g in gaps if np.isfinite(g)]
+    min_gap = float(min(finite_gaps)) if finite_gaps else float("inf")
+    return {
+        "min_adjacent_gap": min_gap,
+        "hub_gap_variance": hub_var,
+        "hub_gap_spread": hub_spread,
+        "n_adjacent_slot_pairs": len(pairs),
+        "adjacent_gaps": gaps,
+        "hub_adjacent_gaps": hub_gaps,
+    }
+
+
+def _adjacent_gap_rank_key(metrics):
+    """Lexicographic polish rank: larger min gap, then smaller hub unfairness."""
+    min_gap = float(metrics.get("min_adjacent_gap", float("inf")))
+    if not np.isfinite(min_gap):
+        min_gap = 1e9
+    return (
+        -min_gap,
+        float(metrics.get("hub_gap_variance", 0.0)),
+        float(metrics.get("hub_gap_spread", 0.0)),
+    )
+
+
 def _pair_centerline_min_distance(
     path_a,
     path_b,
@@ -4918,15 +5108,31 @@ def _find_conflict_path_pairs(
     electrode_zones,
     min_separation=PHASE2_INNER_TRACE_SEPARATION,
     focus_separation: bool = False,
+    path_electrodes=None,
+    slot_index_by_electrode=None,
 ):
-    """Return [(i, j, penalty)] for pairs with crossings, overlap, or tight separation."""
+    """Return [(i, j, penalty)] for pairs with crossings, overlap, or tight separation.
+
+    With focus_separation + slot metadata, only slot-adjacent same-hub pairs are
+    considered (maximin / fan fairness), ranked tightest-first.
+    """
     pairs = {}
     pair_min_dist = {}
     dense_path_cache = _build_crossing_detection_path_cache(
         paths, path_terminals, electrode_zones
     )
+    adjacent = set()
+    if focus_separation and slot_index_by_electrode and path_electrodes:
+        adjacent = set(
+            _slot_adjacent_path_index_pairs(
+                path_electrodes, path_terminals, slot_index_by_electrode
+            )
+        )
+
     for i in range(len(paths)):
         for j in range(i + 1, len(paths)):
+            if adjacent and (i, j) not in adjacent:
+                continue
             inter, _pair_merge, crossing_points = _compute_path_pair_crossing_geometry(
                 paths[i],
                 paths[j],
@@ -4951,15 +5157,26 @@ def _find_conflict_path_pairs(
                 path_idx_b=j,
                 pair_geometry=(inter, crossing_points),
             )
-            if penalty > COLLISION_SCORE_EPSILON:
+            min_dist = _pair_centerline_min_distance(
+                paths[i],
+                paths[j],
+                path_terminals[i],
+                path_terminals[j],
+                electrode_zones,
+            )
+            pair_min_dist[(i, j)] = min_dist
+            # Separation focus: keep adjacent pairs under min_sep, or any with
+            # geometric conflict; also keep adjacent pairs for fairness polish
+            # when already above min_sep but hub gaps are uneven (always list
+            # adjacent when focus_separation + slots).
+            if focus_separation and adjacent:
+                if penalty > COLLISION_SCORE_EPSILON or min_dist < min_separation:
+                    pairs[(i, j)] = penalty
+                else:
+                    # Still candidate for fairness redistribution.
+                    pairs[(i, j)] = max(penalty, 1e-6)
+            elif penalty > COLLISION_SCORE_EPSILON:
                 pairs[(i, j)] = penalty
-                pair_min_dist[(i, j)] = _pair_centerline_min_distance(
-                    paths[i],
-                    paths[j],
-                    path_terminals[i],
-                    path_terminals[j],
-                    electrode_zones,
-                )
 
     if focus_separation:
         return sorted(
@@ -5001,6 +5218,7 @@ def _try_gentle_pair_trace_adjustment(
     focus_separation: bool = False,
     fixed_endpoints: bool = False,
     max_crossing_count: int | None = None,
+    baseline_adjacent_metrics: dict | None = None,
 ):
     """
     Gently adjust one trace in a conflicting pair (spacing greedy, then small random nudge).
@@ -5008,6 +5226,9 @@ def _try_gentle_pair_trace_adjustment(
     Rejects trials that cross foreign electrode discs, exceed detour limit, add
     co-terminal ordered crossings (same hub, different slot, outside merge tail),
     or re-enter the trace (self-intersection / electrode or terminal zone re-entry).
+
+    With focus_separation + slots: never shrink global min adjacent gap; prefer
+    maximin / hub-fairness rank improvement over pair-local over-separation.
     """
     from PYTHON.GA import greed
 
@@ -5039,6 +5260,26 @@ def _try_gentle_pair_trace_adjustment(
         max_random_attempts = max(
             max_random_attempts, PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS
         )
+
+    use_adjacent_rank = bool(
+        focus_separation and slot_index_by_electrode and path_electrodes
+    )
+    if use_adjacent_rank:
+        if baseline_adjacent_metrics is None:
+            baseline_adjacent_metrics = compute_adjacent_slot_gap_metrics(
+                paths,
+                path_electrodes,
+                path_terminals,
+                electrode_zones,
+                slot_index_by_electrode,
+            )
+        baseline_adj_key = _adjacent_gap_rank_key(baseline_adjacent_metrics)
+        baseline_min_adj = float(
+            baseline_adjacent_metrics.get("min_adjacent_gap", float("inf"))
+        )
+    else:
+        baseline_adj_key = None
+        baseline_min_adj = float("inf")
 
     crossing_cap_context = None
     if max_crossing_count is not None:
@@ -5112,7 +5353,37 @@ def _try_gentle_pair_trace_adjustment(
                 )
             separation_improved = trial_min_dist > baseline_min_dist + 0.05
             penalty_improved = trial_penalty + 1e-9 < baseline_penalty
-            if focus_separation:
+
+            trial_adj = None
+            if use_adjacent_rank:
+                with profile_step("accept_adjacent_metrics"):
+                    trial_adj = compute_adjacent_slot_gap_metrics(
+                        trial_paths,
+                        path_electrodes,
+                        path_terminals,
+                        electrode_zones,
+                        slot_index_by_electrode,
+                    )
+                trial_min_adj = float(trial_adj.get("min_adjacent_gap", float("inf")))
+                if (
+                    np.isfinite(baseline_min_adj)
+                    and trial_min_adj + PHASE2_MIN_ADJ_GAP_EPS < baseline_min_adj
+                ):
+                    return None
+                trial_adj_key = _adjacent_gap_rank_key(trial_adj)
+                rank_improved = trial_adj_key < baseline_adj_key
+                if not rank_improved and not separation_improved and not penalty_improved:
+                    return None
+                # Do not accept pair-local "wider" moves that only inflate an
+                # already-comfortable gap when global maximin/fairness did not improve.
+                if (
+                    not rank_improved
+                    and separation_improved
+                    and trial_min_dist >= min_separation
+                    and baseline_min_dist >= min_separation - 1e-6
+                ):
+                    return None
+            elif focus_separation:
                 if not separation_improved and not penalty_improved:
                     return None
                 if separation_improved and trial_penalty > baseline_penalty + 1e-6:
@@ -5143,7 +5414,7 @@ def _try_gentle_pair_trace_adjustment(
                 zone = terminal_zones.get(terminal_name)
                 if zone is not None and path_has_terminal_zone_reentry(trial_path, zone):
                     return None
-            return trial_paths, trial_penalty
+            return trial_paths, trial_penalty, trial_adj
 
     with profile_step("pair_adjust"):
         with profile_step("pair_greedy"):
@@ -5255,6 +5526,9 @@ def _resolve_phase2_ordered_trace_resolution(
     """
     Phase 2 gentle resolution: for each conflicting pair, try spacing-greedy and small
     random moves on BOTH traces (electrode-safe, detour-capped).
+
+    With focus_separation + slots: one accept per round, choosing the trial that best
+    improves (min adjacent gap, then hub-gap fairness).
     """
     del max_attempts_per_trace  # pair-based pass uses fixed caps
 
@@ -5288,6 +5562,7 @@ def _resolve_phase2_ordered_trace_resolution(
                     electrode_zones=electrode_zones,
                     path_electrodes=path_electrodes,
                     path_terminals=path_terminals,
+                    slot_index_by_electrode=slot_index_by_electrode,
                 )["crossing_count"]
             )
     pair_rounds = (
@@ -5295,11 +5570,22 @@ def _resolve_phase2_ordered_trace_resolution(
         if max_pair_rounds is not None
         else PHASE2_PAIR_RESOLUTION_MAX_ROUNDS
     )
+    use_maximin = bool(focus_separation and slot_index_by_electrode)
 
     for round_idx in range(pair_rounds):
         prof = get_phase2_profile()
         if prof is not None:
             prof.set_round(round_idx)
+        baseline_adj = None
+        if use_maximin:
+            with profile_step("adjacent_gap_metrics"):
+                baseline_adj = compute_adjacent_slot_gap_metrics(
+                    best_paths,
+                    path_electrodes,
+                    path_terminals,
+                    electrode_zones,
+                    slot_index_by_electrode,
+                )
         with profile_step("find_conflict_pairs"):
             conflict_pairs = _find_conflict_path_pairs(
                 best_paths,
@@ -5308,18 +5594,31 @@ def _resolve_phase2_ordered_trace_resolution(
                 electrode_zones,
                 min_separation=min_separation,
                 focus_separation=focus_separation,
+                path_electrodes=path_electrodes,
+                slot_index_by_electrode=slot_index_by_electrode,
             )
         if not conflict_pairs:
-            label = "separation" if focus_separation else "conflicts"
+            label = "adjacent separation" if focus_separation else "conflicts"
             print(f"Phase 2 pair resolution: no {label} (round {round_idx + 1})")
             break
 
-        print(
-            f"Phase 2 pair resolution round {round_idx + 1}: "
-            f"{len(conflict_pairs)} {'tight' if focus_separation else 'conflicting'} pair(s)"
-        )
+        if use_maximin and baseline_adj is not None:
+            print(
+                f"Phase 2 pair resolution round {round_idx + 1}: "
+                f"{len(conflict_pairs)} adjacent pair(s), "
+                f"min_adj_gap={baseline_adj['min_adjacent_gap']:.2f}, "
+                f"hub_var={baseline_adj['hub_gap_variance']:.2f}"
+            )
+        else:
+            print(
+                f"Phase 2 pair resolution round {round_idx + 1}: "
+                f"{len(conflict_pairs)} {'tight' if focus_separation else 'conflicting'} pair(s)"
+            )
+
+        best_candidate = None  # (rank_key, paths, msg)
         round_improved = False
         for i, j, pair_penalty in conflict_pairs:
+            pair_side_done = False
             for path_idx, partner_idx in ((i, j), (j, i)):
                 result = _try_gentle_pair_trace_adjustment(
                     best_paths,
@@ -5338,21 +5637,81 @@ def _resolve_phase2_ordered_trace_resolution(
                     focus_separation=focus_separation,
                     fixed_endpoints=fixed_endpoints,
                     max_crossing_count=max_crossing_count,
+                    baseline_adjacent_metrics=baseline_adj,
                 )
                 if result is None:
                     continue
-                best_paths, new_penalty = result
-                round_improved = True
-                print(
+                trial_paths, new_penalty, trial_adj = result
+                msg = (
                     f"  {path_electrodes[path_idx]} vs {path_electrodes[partner_idx]}: "
                     f"pair penalty {pair_penalty:.2f} -> {new_penalty:.2f}"
                 )
+                if use_maximin:
+                    if trial_adj is None:
+                        trial_adj = compute_adjacent_slot_gap_metrics(
+                            trial_paths,
+                            path_electrodes,
+                            path_terminals,
+                            electrode_zones,
+                            slot_index_by_electrode,
+                        )
+                    rank_key = (
+                        *_adjacent_gap_rank_key(trial_adj),
+                        float(new_penalty),
+                    )
+                    if use_maximin and trial_adj is not None and baseline_adj is not None:
+                        msg += (
+                            f", min_adj {baseline_adj['min_adjacent_gap']:.2f}"
+                            f"->{trial_adj['min_adjacent_gap']:.2f}, "
+                            f"hub_var {baseline_adj['hub_gap_variance']:.2f}"
+                            f"->{trial_adj['hub_gap_variance']:.2f}"
+                        )
+                    if best_candidate is None or rank_key < best_candidate[0]:
+                        best_candidate = (rank_key, trial_paths, msg)
+                else:
+                    best_paths = trial_paths
+                    round_improved = True
+                    print(msg)
+                    pair_side_done = True
+                    break
+            if not use_maximin and pair_side_done:
+                continue
 
-        if not round_improved:
+        if use_maximin:
+            if best_candidate is None:
+                print(
+                    f"Phase 2 pair resolution stopped "
+                    f"(round {round_idx + 1}, no gain)"
+                )
+                break
+            best_paths = best_candidate[1]
+            round_improved = True
+            print(best_candidate[2] + " [accepted]")
+        elif not round_improved:
             print(f"Phase 2 pair resolution stopped (round {round_idx + 1}, no gain)")
             break
+
         if prof is not None:
             prof.print_round_summary(round_idx)
+
+        if use_maximin and baseline_adj is not None:
+            after = compute_adjacent_slot_gap_metrics(
+                best_paths,
+                path_electrodes,
+                path_terminals,
+                electrode_zones,
+                slot_index_by_electrode,
+            )
+            if (
+                after["min_adjacent_gap"] >= min_separation - 1e-6
+                and after["hub_gap_spread"] <= max(0.5, 0.15 * min_separation)
+            ):
+                print(
+                    f"Phase 2 adjacent spacing goal met "
+                    f"(min_adj_gap={after['min_adjacent_gap']:.2f}, "
+                    f"hub_spread={after['hub_gap_spread']:.2f})"
+                )
+                break
 
     with profile_step("phase2_final_analysis"):
         final = analyze_path_collisions(
@@ -5362,11 +5721,14 @@ def _resolve_phase2_ordered_trace_resolution(
             path_electrodes=path_electrodes,
             path_terminals=path_terminals,
             min_separation=min_separation,
+            slot_index_by_electrode=slot_index_by_electrode,
         )
     print(
         f"Phase 2 pair final: crossings={final['crossing_count']}, "
         f"overlap={final['overlap_length']:.2f}, "
         f"trace_sep_norm={final['trace_separation_deficit_normalized']:.2f}, "
+        f"min_adj_gap={final.get('min_adjacent_gap', float('inf')):.2f}, "
+        f"hub_var={final.get('hub_gap_variance', 0.0):.2f}, "
         f"layout_score={final.get('layout_score', final['collision_score']):.2f}"
     )
     return best_paths
