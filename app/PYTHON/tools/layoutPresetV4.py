@@ -1493,7 +1493,9 @@ def _uncross_even_mutual_pairs(
     Targets same-hub pairs whose mutual crossing count is even and > 0 (topologically
     uncrossed endpoint pairing), using the same densified count as full analysis.
     Bends keep electrode + strip ends pinned.
-    Accepts a bend only if that pair's mutual count drops and global crossings do not rise.
+    Accepts a bend only if that pair's mutual drops, global crossings do not rise,
+    and same-hub odd-mutual pair count does not rise (a wrong bow can trade one
+    even weave for two odd singles against other wires).
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     tz = terminal_zones or {}
@@ -1516,10 +1518,21 @@ def _uncross_even_mutual_pairs(
             electrode_zones=electrode_zones,
         )
 
+    def _odd_pair_count(plist: list[np.ndarray]) -> int:
+        n_odd = 0
+        for i in range(len(plist)):
+            for j in range(i + 1, len(plist)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _pair_mutual(plist, i, j) % 2 == 1:
+                    n_odd += 1
+        return n_odd
+
     for round_idx in range(int(max_rounds)):
         global_cross = _cross_total(paths)
         if global_cross == 0:
             break
+        odd_total = _odd_pair_count(paths)
 
         improved = False
         even_candidates = 0
@@ -1553,14 +1566,20 @@ def _uncross_even_mutual_pairs(
                             trial[idx] = trial_path
                             new_mutual = _pair_mutual(trial, i, j)
                             new_global = _cross_total(trial)
-                            if new_mutual < mutual and new_global <= global_cross:
+                            new_odd = _odd_pair_count(trial)
+                            if (
+                                new_mutual < mutual
+                                and new_global <= global_cross
+                                and new_odd <= odd_total
+                            ):
                                 paths = trial
                                 improved = True
                                 print(
                                     f"  Even-mutual uncross "
                                     f"{path_electrodes[i]}↔{path_electrodes[j]}: "
                                     f"mutual {mutual}->{new_mutual}, "
-                                    f"crossings {global_cross}->{new_global} "
+                                    f"crossings {global_cross}->{new_global}, "
+                                    f"odd {odd_total}->{new_odd} "
                                     f"(round {round_idx + 1})"
                                 )
                                 break
@@ -1580,7 +1599,7 @@ def _uncross_even_mutual_pairs(
             )
             print(
                 f"  Even-mutual uncross stopped at round {round_idx + 1} "
-                f"(crossings={global_cross}; {why})"
+                f"(crossings={global_cross}, odd_pairs={odd_total}; {why})"
             )
             break
     return paths
