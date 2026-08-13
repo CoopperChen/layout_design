@@ -15,7 +15,8 @@ Modes:
 ### Phase-2 objective (gentle)
 
 - Conflict pairs = consecutive strip slots on the same hub
-- One accept per round: best `(min_adjacent_gap ↑, hub_gap_variance ↓)`
+- One accept per round: best `(min_adjacent_gap ↑, hub_gap_variance ↓)` among top-4 tightest pairs
+- Fast path: distance-only candidate ranking (no densified crossings); coarser gap sampling
 - No credit for pairs already wider than `min_trace_separation_mm`
 - Metrics logged: `min_adjacent_gap`, `hub_gap_variance`, `hub_gap_spread`
 
