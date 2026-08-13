@@ -1173,6 +1173,72 @@ def _bent_path_2d(
     return np.vstack([leg_a[:-1], leg_b])
 
 
+def _via_points_path_2d(
+    start: np.ndarray,
+    end: np.ndarray,
+    vias: list[np.ndarray],
+    *,
+    n: int = SYNTH_PATH_POINTS,
+) -> np.ndarray:
+    """Polyline start → vias… → end with roughly n samples total."""
+    pts = [np.asarray(start, dtype=float), *[np.asarray(v, dtype=float) for v in vias], np.asarray(end, dtype=float)]
+    n_legs = max(1, len(pts) - 1)
+    per = max(2, int(n) // n_legs)
+    chunks: list[np.ndarray] = []
+    for a, b in zip(pts[:-1], pts[1:]):
+        leg = _straight_path_2d(a, b, n=per)
+        chunks.append(leg if not chunks else leg[1:])
+    return np.vstack(chunks)
+
+
+def _double_knee_path_2d(
+    start: np.ndarray,
+    end: np.ndarray,
+    perp_sign: float,
+    scale: float,
+    *,
+    n: int = SYNTH_PATH_POINTS,
+) -> np.ndarray:
+    """Two same-side knees at 1/3 and 2/3 — wider corridor push than a single mid bow."""
+    start = np.asarray(start, dtype=float)
+    end = np.asarray(end, dtype=float)
+    direction = end - start
+    perp = np.array([-direction[1], direction[0]], dtype=float)
+    pn = float(np.linalg.norm(perp))
+    if pn < 1e-9:
+        return _straight_path_2d(start, end, n=n)
+    offset = perp_sign * scale * (perp / pn)
+    v1 = start + direction / 3.0 + offset
+    v2 = start + 2.0 * direction / 3.0 + offset
+    return _via_points_path_2d(start, end, [v1, v2], n=n)
+
+
+def _s_curve_path_2d(
+    start: np.ndarray,
+    end: np.ndarray,
+    perp_sign: float,
+    scale: float,
+    *,
+    n: int = SYNTH_PATH_POINTS,
+) -> np.ndarray:
+    """Opposite-side knees at 1/3 and 2/3 — snake past a partner weave."""
+    start = np.asarray(start, dtype=float)
+    end = np.asarray(end, dtype=float)
+    direction = end - start
+    perp = np.array([-direction[1], direction[0]], dtype=float)
+    pn = float(np.linalg.norm(perp))
+    if pn < 1e-9:
+        return _straight_path_2d(start, end, n=n)
+    unit = perp / pn
+    v1 = start + direction / 3.0 + perp_sign * scale * unit
+    v2 = start + 2.0 * direction / 3.0 - perp_sign * scale * unit
+    return _via_points_path_2d(start, end, [v1, v2], n=n)
+
+
+_EVEN_UNCROSS_SCALES = (8.0, 16.0, 28.0, 42.0, 60.0, 80.0)
+_EVEN_UNCROSS_BOTH_SCALES = (16.0, 28.0, 42.0, 60.0)
+
+
 def _first_crossing_point(path_a: np.ndarray, path_b: np.ndarray) -> np.ndarray | None:
     from shapely.geometry import LineString
 
@@ -1476,6 +1542,39 @@ def _uncross_by_tail_swap(
     return paths, entries
 
 
+def _even_uncross_path_family(
+    start: np.ndarray,
+    end: np.ndarray,
+    *,
+    scales: tuple[float, ...] = _EVEN_UNCROSS_SCALES,
+    include_multi_knee: bool = True,
+) -> list[tuple[str, np.ndarray]]:
+    """Fixed-end candidate shapes: straight, single knee, double knee, S-curve."""
+    start = np.asarray(start, dtype=float)
+    end = np.asarray(end, dtype=float)
+    out: list[tuple[str, np.ndarray]] = [("straight", _straight_path_2d(start, end))]
+    for sign in (1.0, -1.0):
+        side = "L" if sign > 0 else "R"
+        for scale in scales:
+            out.append(
+                (f"knee-{side}{scale:g}", _bent_path_2d(start, end, sign, scale))
+            )
+            if include_multi_knee:
+                out.append(
+                    (
+                        f"dknee-{side}{scale:g}",
+                        _double_knee_path_2d(start, end, sign, scale),
+                    )
+                )
+                out.append(
+                    (
+                        f"scurve-{side}{scale:g}",
+                        _s_curve_path_2d(start, end, sign, scale),
+                    )
+                )
+    return out
+
+
 def _uncross_even_mutual_pairs(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1492,10 +1591,9 @@ def _uncross_even_mutual_pairs(
 
     Targets same-hub pairs whose mutual crossing count is even and > 0 (topologically
     uncrossed endpoint pairing), using the same densified count as full analysis.
-    Bends keep electrode + strip ends pinned.
-    Accepts a bend only if that pair's mutual drops, global crossings do not rise,
-    and same-hub odd-mutual pair count does not rise (a wrong bow can trade one
-    even weave for two odd singles against other wires).
+    Search order per pair: single-wire shapes (straight / knee / double-knee / S),
+    then coordinated both-wire shapes. Accepts only if that pair's mutual drops,
+    global crossings do not rise, and same-hub odd-mutual pair count does not rise.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     tz = terminal_zones or {}
@@ -1528,6 +1626,45 @@ def _uncross_even_mutual_pairs(
                     n_odd += 1
         return n_odd
 
+    def _pinned(name: str, raw: np.ndarray) -> np.ndarray | None:
+        if name not in entry_points or name not in electrodes_2d:
+            return None
+        start = np.asarray(electrodes_2d[name], dtype=float)
+        end = np.asarray(entry_points[name], dtype=float)
+        path = new2d.pin_path_endpoints_2d(raw, start, end)
+        if _path_foreign_electrode_hits(path, name, electrode_zones):
+            return None
+        return path
+
+    def _accept(
+        trial: list[np.ndarray],
+        i: int,
+        j: int,
+        mutual: int,
+        global_cross: int,
+        odd_total: int,
+        how: str,
+        round_idx: int,
+    ) -> bool:
+        new_mutual = _pair_mutual(trial, i, j)
+        new_global = _cross_total(trial)
+        new_odd = _odd_pair_count(trial)
+        if not (
+            new_mutual < mutual
+            and new_global <= global_cross
+            and new_odd <= odd_total
+        ):
+            return False
+        print(
+            f"  Even-mutual uncross "
+            f"{path_electrodes[i]}↔{path_electrodes[j]}: "
+            f"mutual {mutual}->{new_mutual}, "
+            f"crossings {global_cross}->{new_global}, "
+            f"odd {odd_total}->{new_odd} "
+            f"(round {round_idx + 1}, {how})"
+        )
+        return True
+
     for round_idx in range(int(max_rounds)):
         global_cross = _cross_total(paths)
         if global_cross == 0:
@@ -1545,45 +1682,66 @@ def _uncross_even_mutual_pairs(
                     continue
                 even_candidates += 1
 
-                for idx in (i, j):
-                    name = path_electrodes[idx]
-                    if name not in entry_points or name not in electrodes_2d:
+                name_i = path_electrodes[i]
+                name_j = path_electrodes[j]
+                start_i = np.asarray(electrodes_2d[name_i], dtype=float)
+                end_i = np.asarray(entry_points[name_i], dtype=float)
+                start_j = np.asarray(electrodes_2d[name_j], dtype=float)
+                end_j = np.asarray(entry_points[name_j], dtype=float)
+
+                # 1) Single-wire family (includes straighten + multi-knee).
+                for idx, name, start, end in (
+                    (i, name_i, start_i, end_i),
+                    (j, name_j, start_j, end_j),
+                ):
+                    for label, raw in _even_uncross_path_family(start, end):
+                        pinned = _pinned(name, raw)
+                        if pinned is None:
+                            continue
+                        trial = list(paths)
+                        trial[idx] = pinned
+                        how = f"single {name}:{label}"
+                        if _accept(
+                            trial, i, j, mutual, global_cross, odd_total, how, round_idx
+                        ):
+                            paths = trial
+                            improved = True
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+
+                # 2) Both wires: compact family product (theory: move both ends-fixed).
+                fam_i = _even_uncross_path_family(
+                    start_i,
+                    end_i,
+                    scales=_EVEN_UNCROSS_BOTH_SCALES,
+                    include_multi_knee=True,
+                )
+                fam_j = _even_uncross_path_family(
+                    start_j,
+                    end_j,
+                    scales=_EVEN_UNCROSS_BOTH_SCALES,
+                    include_multi_knee=True,
+                )
+                for label_i, raw_i in fam_i:
+                    pinned_i = _pinned(name_i, raw_i)
+                    if pinned_i is None:
                         continue
-                    start = np.asarray(electrodes_2d[name], dtype=float)
-                    end = np.asarray(entry_points[name], dtype=float)
-                    for sign in (1.0, -1.0):
-                        for scale in (8.0, 16.0, 28.0, 42.0, 60.0):
-                            trial_path = new2d.pin_path_endpoints_2d(
-                                _bent_path_2d(start, end, sign, scale),
-                                start,
-                                end,
-                            )
-                            if _path_foreign_electrode_hits(
-                                trial_path, name, electrode_zones
-                            ):
-                                continue
-                            trial = list(paths)
-                            trial[idx] = trial_path
-                            new_mutual = _pair_mutual(trial, i, j)
-                            new_global = _cross_total(trial)
-                            new_odd = _odd_pair_count(trial)
-                            if (
-                                new_mutual < mutual
-                                and new_global <= global_cross
-                                and new_odd <= odd_total
-                            ):
-                                paths = trial
-                                improved = True
-                                print(
-                                    f"  Even-mutual uncross "
-                                    f"{path_electrodes[i]}↔{path_electrodes[j]}: "
-                                    f"mutual {mutual}->{new_mutual}, "
-                                    f"crossings {global_cross}->{new_global}, "
-                                    f"odd {odd_total}->{new_odd} "
-                                    f"(round {round_idx + 1})"
-                                )
-                                break
-                        if improved:
+                    for label_j, raw_j in fam_j:
+                        pinned_j = _pinned(name_j, raw_j)
+                        if pinned_j is None:
+                            continue
+                        trial = list(paths)
+                        trial[i] = pinned_i
+                        trial[j] = pinned_j
+                        how = f"both {name_i}:{label_i}+{name_j}:{label_j}"
+                        if _accept(
+                            trial, i, j, mutual, global_cross, odd_total, how, round_idx
+                        ):
+                            paths = trial
+                            improved = True
                             break
                     if improved:
                         break

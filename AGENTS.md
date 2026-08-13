@@ -15,7 +15,7 @@ Repository root `layout_design/`. Paths via `app.paths`.
 3. **C** Polish optional (paths only, not hub discovery)
 4. **D** Smooth → export-bundle → convert-gcode → simulate-gcode
 
-**Entry-order swap rule:** When two same-hub traces cross, swap their strip slots and replan those two. Primary goal: drive same-hub **odd-mutual pair count to 0** (slot parity); while odd pairs remain, accept only swaps that reduce `#odd_pairs` (total crossings may rise). After `#odd_pairs == 0`, accept count↓ or even-mutual residuals **only if odd stays 0** (never accept odd↑). Tried-pair memory clears on odd↓. After swap, synthesize runs an **even-mutual uncross** pass (fixed-end bends) before generic detour uncross; bends must not raise `#odd_pairs` (a wrong bow can trade one even weave for two odd singles). Crossing counts use the densified terminal-tail metric (same as full layout analysis).
+**Entry-order swap rule:** When two same-hub traces cross, swap their strip slots and replan those two. Primary goal: drive same-hub **odd-mutual pair count to 0** (slot parity); while odd pairs remain, accept only swaps that reduce `#odd_pairs` (total crossings may rise). After `#odd_pairs == 0`, accept count↓ or even-mutual residuals **only if odd stays 0** (never accept odd↑). Tried-pair memory clears on odd↓. After swap, synthesize runs an **even-mutual uncross** pass (fixed-end bends) before generic detour uncross: single-wire straight/knee/double-knee/S-curve, then coordinated both-wire shapes; bends must not raise `#odd_pairs`. Crossing counts use the densified terminal-tail metric (same as full layout analysis).
 
 Do not treat `export-v4` / chord replay / `--inherit-preset-terminals` as the primary workflow.
 

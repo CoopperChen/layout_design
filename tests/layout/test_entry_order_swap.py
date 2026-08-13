@@ -11,7 +11,9 @@ setup_runtime()
 from PYTHON.tools.layoutPresetV4 import (  # noqa: E402
     _bent_path_2d,
     _count_pair_crossings,
+    _double_knee_path_2d,
     _mutual_crossing_count,
+    _s_curve_path_2d,
     _straight_path_2d,
     _uncross_by_entry_order_swap,
     _uncross_even_mutual_pairs,
@@ -237,3 +239,44 @@ def test_uncross_even_mutual_clears_double_weave():
     np.testing.assert_allclose(out[1][0], electrodes_2d["B"])
     np.testing.assert_allclose(out[0][-1], entry_points["A"])
     np.testing.assert_allclose(out[1][-1], entry_points["B"])
+
+
+def test_multi_knee_helpers_pin_chord_ends():
+    start = np.array([-20.0, 40.0])
+    end = np.array([-10.0, 0.0])
+    for builder in (_double_knee_path_2d, _s_curve_path_2d):
+        path = builder(start, end, perp_sign=1.0, scale=25.0)
+        np.testing.assert_allclose(path[0], start)
+        np.testing.assert_allclose(path[-1], end)
+        assert len(path) >= 4
+
+
+def test_uncross_even_mutual_both_wire_fallback_clears_weave():
+    """Deep opposite bows still clear (straighten / both-wire family)."""
+    electrodes_2d = {
+        "A": np.array([-25.0, 50.0]),
+        "B": np.array([25.0, 50.0]),
+    }
+    entry_points = {
+        "A": np.array([-12.0, 0.0]),
+        "B": np.array([12.0, 0.0]),
+    }
+    paths = [
+        _s_curve_path_2d(electrodes_2d["A"], entry_points["A"], 1.0, 45.0),
+        _s_curve_path_2d(electrodes_2d["B"], entry_points["B"], -1.0, 45.0),
+    ]
+    mutual0 = _mutual_crossing_count(paths[0], paths[1], use_dense=False)
+    assert mutual0 >= 2 and mutual0 % 2 == 0
+
+    out = _uncross_even_mutual_pairs(
+        paths,
+        ["A", "B"],
+        ["TERMINAL_LEFT", "TERMINAL_LEFT"],
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+    )
+    assert _mutual_crossing_count(out[0], out[1], use_dense=False) < mutual0
+    assert _same_hub_odd_pair_count(
+        out, ["TERMINAL_LEFT", "TERMINAL_LEFT"]
+    ) == 0
