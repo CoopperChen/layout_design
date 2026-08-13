@@ -3019,7 +3019,8 @@ def plot_quad_comparison(versions, electrodes, terminals, electrode_zones, termi
 def plot_single_version(ax, paths, electrodes, terminals, electrode_zones, terminal_zones, 
                        path_collisions, electrode_collisions, title, dpi=100,
                        show_plot=True, save_path=None,
-                       entry_points_by_electrode=None, slot_index_by_electrode=None):
+                       entry_points_by_electrode=None, slot_index_by_electrode=None,
+                       path_ends_by_electrode=None):
     """Plot electrode paths with safety zones and collision visualization.
     
     Generates a 2D visualization of electrode connection paths with:
@@ -3106,6 +3107,32 @@ def plot_single_version(ax, paths, electrodes, terminals, electrode_zones, termi
     legend_handles = []
     legend_labels = []
 
+    if path_ends_by_electrode:
+        for name, pt in path_ends_by_electrode.items():
+            pt = np.asarray(pt, dtype=float)
+            ax.plot(
+                pt[0],
+                pt[1],
+                "o",
+                color="deepskyblue",
+                markersize=6,
+                markeredgecolor="black",
+                markeredgewidth=0.6,
+                zorder=13,
+            )
+        legend_handles.append(
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="deepskyblue",
+                markersize=8,
+                linestyle="None",
+                markeredgecolor="black",
+            )
+        )
+        legend_labels.append("Truncated wire ends")
+
     if entry_points_by_electrode:
         for name, pt in entry_points_by_electrode.items():
             pt = np.asarray(pt, dtype=float)
@@ -3117,6 +3144,18 @@ def plot_single_version(ax, paths, electrodes, terminals, electrode_zones, termi
                     markeredgewidth=0.8, zorder=12)
             label = f"{name}" if slot is None else f"{name} s{slot}"
             ax.text(pt[0], pt[1] - 0.06, label, ha='center', va='top', fontsize=7, color='goldenrod')
+            # Explicit gap marker: strip slot is not the wire end after truncation.
+            if path_ends_by_electrode and name in path_ends_by_electrode:
+                end = np.asarray(path_ends_by_electrode[name], dtype=float)
+                ax.plot(
+                    [end[0], pt[0]],
+                    [end[1], pt[1]],
+                    linestyle="--",
+                    color="0.55",
+                    linewidth=1.0,
+                    alpha=0.8,
+                    zorder=11,
+                )
         legend_handles.append(
             plt.Line2D([0], [0], marker='D', color='gold', markersize=8, linestyle='None',
                        markeredgecolor='black')

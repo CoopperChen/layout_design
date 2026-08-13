@@ -600,15 +600,24 @@ def entry_3d_for_strip(
     cz_pos: np.ndarray,
     terminal_2d_mode: str = TERMINAL_2D_INFLATED,
     terminal_zone_size: float | None = None,
+    blend_toward_hub: bool = True,
 ) -> np.ndarray:
-    """Surface entry at strip; UV lift when context available, else chord fraction."""
+    """
+    Surface lift for a strip-adjacent 2D point.
+
+    For fiducial hubs, strip entries near the terminal may optionally blend toward
+    the hub mesh point. Truncated wire ends must pass ``blend_toward_hub=False``;
+    otherwise the near-hub blend pulls them back onto the terminal and undoes
+    truncation in the 3D / viz path.
+    """
     if uv_context is not None and mesh is not None:
         end3d = entry_3d_from_uv(entry_2d, uv_context, mesh)
     else:
         end3d = entry_3d_from_chord_fraction(e3d, terminal_3d, e2d, entry_2d, cz_pos)
 
     if (
-        new2d.normalize_terminal_2d_mode(terminal_2d_mode) == "fiducial"
+        blend_toward_hub
+        and new2d.normalize_terminal_2d_mode(terminal_2d_mode) == "fiducial"
         and mesh is not None
         and terminal_zone_size is not None
         and terminal_zone_size > 0
@@ -2101,6 +2110,7 @@ def apply_layout_preset_v4_synthesize(
             terminal_zone_size=terminal_zone_size,
         )
         wire_end_2d = np.asarray(path_2d[-1], dtype=float)
+        # Do not hub-blend: truncated ends sit near the terminal by design.
         wire_end_3d = entry_3d_for_strip(
             wire_end_2d,
             uv_context,
@@ -2111,6 +2121,7 @@ def apply_layout_preset_v4_synthesize(
             cz_pos=cz_pos,
             terminal_2d_mode=terminal_2d_mode,
             terminal_zone_size=terminal_zone_size,
+            blend_toward_hub=False,
         )
         path_2d = new2d.pin_path_endpoints_2d(path_2d, e2d, wire_end_2d)
         path_3d = uv_context.reconstruct(

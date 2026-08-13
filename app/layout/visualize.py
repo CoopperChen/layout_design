@@ -188,12 +188,14 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
         if conn.get("path_end_3d") is not None:
             end3d = np.asarray(conn["path_end_3d"], dtype=float)
         else:
-            if conn.get("path_end_2d") is not None:
+            use_truncated_end = conn.get("path_end_2d") is not None
+            if use_truncated_end:
                 end2d = np.asarray(conn["path_end_2d"], dtype=float)
             elif conn.get("entry_point_2d") is not None:
                 end2d = np.asarray(conn["entry_point_2d"], dtype=float)
             else:
                 end2d = new2d.polar_projection(np.array([t3d]), cz_pos)[0]
+            # Truncated wire ends must not hub-blend (that reconnects them).
             end3d = entry_3d_for_strip(
                 end2d,
                 uv_ctx,
@@ -204,6 +206,7 @@ def _surface_paths_3d(data: dict, subject_id: int) -> dict:
                 cz_pos=cz_pos,
                 terminal_2d_mode=terminal_2d_mode,
                 terminal_zone_size=terminal_zone_size,
+                blend_toward_hub=not use_truncated_end,
             )
 
         path_3d = uv_ctx.reconstruct(e3d, end3d, path_2d)
@@ -374,6 +377,20 @@ def _show_3d_interactive(
         path_3d = np.asarray(conn.get("path_points"), dtype=float)
         if len(path_3d) >= 2:
             plotter.add_mesh(pv.Spline(path_3d), color="cyan", line_width=4)
+        # Strip slot (aim point) vs truncated tip — do not imply the wire reaches the strip.
+        if conn.get("entry_position_3d") is not None:
+            ep = np.asarray(conn["entry_position_3d"], dtype=float)
+            plotter.add_mesh(
+                pv.Sphere(radius=mesh.length * 0.005, center=ep), color="lime"
+            )
+        if conn.get("path_end_3d") is not None:
+            we = np.asarray(conn["path_end_3d"], dtype=float)
+            plotter.add_mesh(
+                pv.Sphere(radius=mesh.length * 0.006, center=we), color="deepskyblue"
+            )
+            if conn.get("entry_position_3d") is not None:
+                ep = np.asarray(conn["entry_position_3d"], dtype=float)
+                plotter.add_mesh(pv.Line(we, ep), color="yellow", line_width=2)
     plotter.add_title(f"Subject {subject_id} — {preset_id}", font_size=14)
 
     if save_3d_path:

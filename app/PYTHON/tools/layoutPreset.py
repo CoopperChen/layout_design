@@ -1242,6 +1242,11 @@ def visualize_applied_preset(
         for p in path_specs
         if p.get("entry_point_2d") is not None
     }
+    path_ends_2d = {
+        p["electrode"]: np.asarray(p["path_end_2d"], dtype=float)
+        for p in path_specs
+        if p.get("path_end_2d") is not None
+    }
 
     if not only_3d:
         if skip_collisions:
@@ -1281,6 +1286,7 @@ def visualize_applied_preset(
             show_plot=show_plot and not show_3d,
             save_path=save_path,
             entry_points_by_electrode=entry_points_2d or None,
+            path_ends_by_electrode=path_ends_2d or None,
         )
         print(f"2D layout saved: {save_path}")
 
