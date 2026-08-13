@@ -1217,7 +1217,6 @@ def visualize_applied_preset(
     meta = data.get("metadata", {})
     target_id = int(meta["target_subject_id"])
     preset_id = meta.get("preset_id", "preset")
-    collision_metrics = data.get("collision_metrics", {})
 
     electrodes, fiducials = load_subject_data(target_id)
     layout_fiducials = fiducials
@@ -1244,16 +1243,19 @@ def visualize_applied_preset(
     }
 
     if not only_3d:
-        if skip_collisions:
-            path_collisions, electrode_collisions = None, None
-        else:
-            path_collisions, electrode_collisions = _collision_highlights_for_visualize(
-                paths_2d,
-                terminal_zones,
-                electrode_zones,
-                path_electrodes,
-                path_terminals,
-            )
+        # Path-crossing X markers are not drawn on 2D layout pics.
+        path_collisions = None
+        electrode_collisions = None
+        if not skip_collisions:
+            try:
+                electrode_collisions = new2d.find_electrode_collisions(
+                    paths_2d, electrode_zones, path_electrodes
+                )
+            except RecursionError:
+                print(
+                    "WARNING: electrode collision markers skipped "
+                    "(Shapely recursion). Paths and zones are still plotted."
+                )
 
         if save_path is None:
             stem = Path(applied_path).stem
@@ -1261,12 +1263,8 @@ def visualize_applied_preset(
 
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
-        title = (
-            f"Applied preset — subject {target_id} ({preset_id})\n"
-            f"collision_score={collision_metrics.get('collision_score', '?')}, "
-            f"crossings={collision_metrics.get('crossing_count', '?')}, "
-            f"electrode_violations={collision_metrics.get('electrode_violations', '?')}"
-        )
+        lift = meta.get("path_lift") or "layout"
+        title = f"Subject {target_id} — {preset_id} ({lift})"
         new2d.plot_single_version(
             ax=None,
             paths=paths_2d,
