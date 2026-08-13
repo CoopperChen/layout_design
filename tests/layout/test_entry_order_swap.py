@@ -83,7 +83,7 @@ def test_entry_order_swap_skips_different_terminals():
 
 
 def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
-    """Accept swap that clears the pair (even mutual=0), even among 3 wires."""
+    """Odd-crossing pair: accept swap that leaves even mutual, even among 3 wires."""
     electrodes_2d = {
         "A": np.array([-30.0, 40.0]),
         "B": np.array([0.0, 45.0]),
@@ -113,6 +113,38 @@ def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
         or not np.allclose(new_entries["C"], entry_points["C"])
         or not np.allclose(new_entries["B"], entry_points["B"])
     )
+
+
+def test_entry_order_swap_skips_even_mutual_pair():
+    """Even mutual weave must not trigger a slot swap (bend uncross handles it)."""
+    electrodes_2d = {
+        "A": np.array([-20.0, 40.0]),
+        "B": np.array([20.0, 40.0]),
+    }
+    entry_points = {
+        "A": np.array([-10.0, 0.0]),
+        "B": np.array([10.0, 0.0]),
+    }
+    paths = [
+        _bent_path_2d(electrodes_2d["A"], entry_points["A"], perp_sign=1.0, scale=30.0),
+        _bent_path_2d(electrodes_2d["B"], entry_points["B"], perp_sign=-1.0, scale=30.0),
+    ]
+    mutual0 = _mutual_crossing_count(paths[0], paths[1], use_dense=False)
+    assert mutual0 >= 2 and mutual0 % 2 == 0
+
+    new_paths, new_entries, new_slots = _uncross_by_entry_order_swap(
+        paths,
+        ["A", "B"],
+        ["TERMINAL_LEFT", "TERMINAL_LEFT"],
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+        slot_index={"A": 0, "B": 1},
+    )
+    np.testing.assert_allclose(new_entries["A"], entry_points["A"])
+    np.testing.assert_allclose(new_entries["B"], entry_points["B"])
+    assert new_slots == {"A": 0, "B": 1}
+    assert _mutual_crossing_count(new_paths[0], new_paths[1], use_dense=False) == mutual0
 
 
 def test_mutual_crossing_count_parity():

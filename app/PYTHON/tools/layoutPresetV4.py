@@ -1229,11 +1229,11 @@ def _uncross_by_entry_order_swap(
     max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
 ) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     """
-    If two same-terminal traces cross, swap their strip entry slots and replan.
+    Swap strip slots only for same-hub pairs with an odd mutual crossing count.
 
-    Accept when total crossings decrease, OR when they do not decrease but the
-    two involved wires have an even mutual crossing count (0, 2, …) so polish
-    can clear residual contact. Odd mutual crossings after swap are rejected.
+    Even mutual weaves (2, 4, …) are left for the fixed-end even-mutual uncross
+    pass. After a trial swap+replan, accept if total crossings decrease, OR if
+    the pair's mutual count is even (0, 2, …). Reject odd mutual leftovers.
     Each unordered electrode pair is tried at most once.
 
     Crossing counts match full layout analysis (densified terminal tails).
@@ -1279,7 +1279,9 @@ def _uncross_by_entry_order_swap(
             for j in range(i + 1, len(paths)):
                 if path_terminals[i] != path_terminals[j]:
                     continue
-                if _pair_mutual(paths, i, j) == 0:
+                mutual_before = _pair_mutual(paths, i, j)
+                # Only odd mutual needs a slot swap; even weaves stay for bend uncross.
+                if mutual_before == 0 or (mutual_before % 2) == 0:
                     continue
 
                 name_a = path_electrodes[i]
@@ -1316,7 +1318,7 @@ def _uncross_by_entry_order_swap(
                     print(
                         f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
                         f"crossings {cross_total}->{new_cross} "
-                        f"(round {round_idx + 1}, {reason})"
+                        f"(round {round_idx + 1}, odd→{reason})"
                     )
                     break
 
@@ -1338,7 +1340,7 @@ def _uncross_by_entry_order_swap(
             if cross_total > 0:
                 print(
                     f"  Entry-order swap stopped at round {round_idx + 1} "
-                    f"(crossings={cross_total}; no accepted swap left)"
+                    f"(crossings={cross_total}; no odd-mutual swap left)"
                 )
             break
 
