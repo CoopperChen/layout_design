@@ -1229,14 +1229,15 @@ def _uncross_by_entry_order_swap(
     max_rounds: int = SYNTH_ENTRY_SWAP_MAX_ROUNDS,
 ) -> tuple[list[np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     """
-    Swap strip slots only for same-hub pairs with an odd mutual crossing count.
+    If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Even mutual weaves (2, 4, …) are left for the fixed-end even-mutual uncross
-    pass. After a trial swap+replan, accept if total crossings decrease, OR if
-    the pair's mutual count is even (0, 2, …). Reject odd mutual leftovers.
-    Each unordered electrode pair is tried at most once.
+    Primary objective: drive same-hub odd-mutual pair count to 0 (slot parity).
+    While odd pairs remain, accept a swap only when #odd_pairs decreases (total
+    crossings may stay flat or rise). After #odd_pairs == 0, accept swaps that
+    cut total crossings or leave an even mutual on the swapped pair.
 
-    Crossing counts match full layout analysis (densified terminal tails).
+    Tried-pair memory clears whenever #odd_pairs drops so later configurations
+    can revisit pairs. Crossing counts match full densified layout analysis.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
@@ -1262,6 +1263,16 @@ def _uncross_by_entry_order_swap(
             electrode_zones=electrode_zones,
         )
 
+    def _odd_pair_count(plist: list[np.ndarray]) -> int:
+        n_odd = 0
+        for i in range(len(plist)):
+            for j in range(i + 1, len(plist)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _pair_mutual(plist, i, j) % 2 == 1:
+                    n_odd += 1
+        return n_odd
+
     def _replan(idx: int) -> np.ndarray:
         name = path_electrodes[idx]
         start = electrodes_2d[name]
@@ -1269,78 +1280,101 @@ def _uncross_by_entry_order_swap(
         path = _path_with_electrode_detour(start, end, name, electrode_zones)
         return new2d.pin_path_endpoints_2d(path, start, end)
 
+    def _revert_swap(name_a: str, name_b: str) -> None:
+        entries[name_a], entries[name_b] = (
+            entries[name_b].copy(),
+            entries[name_a].copy(),
+        )
+        if name_a in slots and name_b in slots:
+            slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+
     for round_idx in range(max_rounds):
         cross_total = _cross_total(paths)
+        odd_total = _odd_pair_count(paths)
         if cross_total == 0:
             break
 
-        improved = False
+        # While odd pairs remain, only consider those; else any crossing pair.
+        candidates: list[tuple[int, int, int]] = []
         for i in range(len(paths)):
             for j in range(i + 1, len(paths)):
                 if path_terminals[i] != path_terminals[j]:
                     continue
-                mutual_before = _pair_mutual(paths, i, j)
-                # Only odd mutual needs a slot swap; even weaves stay for bend uncross.
-                if mutual_before == 0 or (mutual_before % 2) == 0:
+                mutual = _pair_mutual(paths, i, j)
+                if mutual == 0:
                     continue
-
-                name_a = path_electrodes[i]
-                name_b = path_electrodes[j]
-                if name_a not in entries or name_b not in entries:
+                is_odd = (mutual % 2) == 1
+                if odd_total > 0 and not is_odd:
                     continue
-                pair_key = frozenset((name_a, name_b))
-                if pair_key in tried_pairs:
-                    continue
+                candidates.append((0 if is_odd else 1, i, j))
+        candidates.sort()
 
-                entries[name_a], entries[name_b] = (
-                    entries[name_b].copy(),
-                    entries[name_a].copy(),
-                )
-                if name_a in slots and name_b in slots:
-                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+        improved = False
+        for _, i, j in candidates:
+            name_a = path_electrodes[i]
+            name_b = path_electrodes[j]
+            if name_a not in entries or name_b not in entries:
+                continue
+            pair_key = frozenset((name_a, name_b))
+            if pair_key in tried_pairs:
+                continue
 
-                trial = list(paths)
-                trial[i] = _replan(i)
-                trial[j] = _replan(j)
-                new_cross = _cross_total(trial)
-                mutual = _pair_mutual(trial, i, j)
-                count_improved = new_cross < cross_total
-                even_mutual = (mutual % 2) == 0
+            entries[name_a], entries[name_b] = (
+                entries[name_b].copy(),
+                entries[name_a].copy(),
+            )
+            if name_a in slots and name_b in slots:
+                slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+
+            trial = list(paths)
+            trial[i] = _replan(i)
+            trial[j] = _replan(j)
+            new_cross = _cross_total(trial)
+            new_odd = _odd_pair_count(trial)
+            mutual = _pair_mutual(trial, i, j)
+            tried_pairs.add(pair_key)
+
+            odd_improved = new_odd < odd_total
+            count_improved = new_cross < cross_total
+            even_mutual = (mutual % 2) == 0
+            if odd_total > 0:
+                # Never accept a move that fails to reduce odd parity debt.
+                accept = odd_improved
+            else:
                 accept = count_improved or even_mutual
-                tried_pairs.add(pair_key)
 
-                if accept:
-                    paths = trial
-                    improved = True
-                    reason = (
-                        "count↓" if count_improved else f"even mutual={mutual}"
-                    )
-                    print(
-                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
-                        f"crossings {cross_total}->{new_cross} "
-                        f"(round {round_idx + 1}, odd→{reason})"
-                    )
-                    break
-
-                # Reject: revert slots (odd residual mutual crossings, no count gain).
-                entries[name_a], entries[name_b] = (
-                    entries[name_b].copy(),
-                    entries[name_a].copy(),
-                )
-                if name_a in slots and name_b in slots:
-                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+            if accept:
+                paths = trial
+                improved = True
+                if odd_improved:
+                    tried_pairs.clear()
+                if odd_improved:
+                    reason = f"odd↓ {odd_total}->{new_odd}"
+                elif count_improved:
+                    reason = "count↓"
+                else:
+                    reason = f"even mutual={mutual}"
                 print(
-                    f"  Entry-order swap {name_a}↔{name_b} rejected: "
-                    f"crossings {cross_total}->{new_cross}, mutual={mutual} (odd)"
+                    f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
+                    f"crossings {cross_total}->{new_cross}, "
+                    f"odd {odd_total}->{new_odd} "
+                    f"(round {round_idx + 1}, {reason})"
                 )
-            if improved:
                 break
+
+            _revert_swap(name_a, name_b)
+            print(
+                f"  Entry-order swap {name_a}↔{name_b} rejected: "
+                f"crossings {cross_total}->{new_cross}, "
+                f"odd {odd_total}->{new_odd}, mutual={mutual}"
+            )
 
         if not improved:
             if cross_total > 0:
                 print(
                     f"  Entry-order swap stopped at round {round_idx + 1} "
-                    f"(crossings={cross_total}; no odd-mutual swap left)"
+                    f"(crossings={cross_total}, odd_pairs={odd_total}; "
+                    f"no accepted swap left)"
                 )
             break
 

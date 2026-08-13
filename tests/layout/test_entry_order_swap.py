@@ -82,8 +82,22 @@ def test_entry_order_swap_skips_different_terminals():
     np.testing.assert_allclose(new_entries["B"], entry_points["B"])
 
 
+def _same_hub_odd_pair_count(
+    paths: list[np.ndarray],
+    path_terminals: list[str],
+) -> int:
+    n_odd = 0
+    for i in range(len(paths)):
+        for j in range(i + 1, len(paths)):
+            if path_terminals[i] != path_terminals[j]:
+                continue
+            if _mutual_crossing_count(paths[i], paths[j], use_dense=False) % 2 == 1:
+                n_odd += 1
+    return n_odd
+
+
 def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
-    """Odd-crossing pair: accept swap that leaves even mutual, even among 3 wires."""
+    """Accept swap that clears the pair (even mutual=0), even among 3 wires."""
     electrodes_2d = {
         "A": np.array([-30.0, 40.0]),
         "B": np.array([0.0, 45.0]),
@@ -98,11 +112,12 @@ def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
         _straight_path_2d(electrodes_2d[n], entry_points[n]) for n in ("A", "B", "C")
     ]
     assert _count_pair_crossings(paths) >= 1
+    terminals = ["TERMINAL_LEFT"] * 3
 
     new_paths, new_entries, _ = _uncross_by_entry_order_swap(
         paths,
         ["A", "B", "C"],
-        ["TERMINAL_LEFT"] * 3,
+        terminals,
         electrodes_2d,
         entry_points,
         {"zones": {}, "metadata": {}},
@@ -113,38 +128,37 @@ def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
         or not np.allclose(new_entries["C"], entry_points["C"])
         or not np.allclose(new_entries["B"], entry_points["B"])
     )
+    assert _same_hub_odd_pair_count(new_paths, terminals) == 0
 
 
-def test_entry_order_swap_skips_even_mutual_pair():
-    """Even mutual weave must not trigger a slot swap (bend uncross handles it)."""
+def test_entry_order_swap_clears_all_odd_mutual_pairs():
+    """Crossed strip assignment must finish with zero odd-mutual same-hub pairs."""
     electrodes_2d = {
         "A": np.array([-20.0, 40.0]),
         "B": np.array([20.0, 40.0]),
     }
     entry_points = {
-        "A": np.array([-10.0, 0.0]),
-        "B": np.array([10.0, 0.0]),
+        "A": np.array([10.0, 0.0]),
+        "B": np.array([-10.0, 0.0]),
     }
     paths = [
-        _bent_path_2d(electrodes_2d["A"], entry_points["A"], perp_sign=1.0, scale=30.0),
-        _bent_path_2d(electrodes_2d["B"], entry_points["B"], perp_sign=-1.0, scale=30.0),
+        _straight_path_2d(electrodes_2d["A"], entry_points["A"]),
+        _straight_path_2d(electrodes_2d["B"], entry_points["B"]),
     ]
-    mutual0 = _mutual_crossing_count(paths[0], paths[1], use_dense=False)
-    assert mutual0 >= 2 and mutual0 % 2 == 0
+    terminals = ["TERMINAL_LEFT", "TERMINAL_LEFT"]
+    assert _same_hub_odd_pair_count(paths, terminals) == 1
 
-    new_paths, new_entries, new_slots = _uncross_by_entry_order_swap(
+    new_paths, _, _ = _uncross_by_entry_order_swap(
         paths,
         ["A", "B"],
-        ["TERMINAL_LEFT", "TERMINAL_LEFT"],
+        terminals,
         electrodes_2d,
         entry_points,
         {"zones": {}, "metadata": {}},
         slot_index={"A": 0, "B": 1},
     )
-    np.testing.assert_allclose(new_entries["A"], entry_points["A"])
-    np.testing.assert_allclose(new_entries["B"], entry_points["B"])
-    assert new_slots == {"A": 0, "B": 1}
-    assert _mutual_crossing_count(new_paths[0], new_paths[1], use_dense=False) == mutual0
+    assert _same_hub_odd_pair_count(new_paths, terminals) == 0
+    assert _count_pair_crossings(new_paths) == 0
 
 
 def test_mutual_crossing_count_parity():
