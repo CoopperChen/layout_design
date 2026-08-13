@@ -6,7 +6,7 @@ Unified pipeline CLI.
   python -m app preprocess --subject 1 --step clear-islands
   python -m app build-assignments --reference 1 --id s1_assignments
   python -m app synthesize --target 2
-  python -m app polish --applied data/output/layouts/synth_s2.json --mode refine
+  python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
   python -m app smooth --applied data/output/layouts/synth_s2.json
   python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
   python -m app init-print-config --subject {id}
@@ -502,7 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     po.add_argument("--applied", required=True)
     po.add_argument(
         "--mode",
-        default=str(load_defaults().get("polish", {}).get("mode", "refine")),
+        default=str(load_defaults().get("polish", {}).get("mode", "gentle")),
         choices=["gentle", "repair", "refine", "ga-short"],
     )
     po.add_argument("--out")

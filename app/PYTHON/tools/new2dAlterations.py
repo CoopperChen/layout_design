@@ -68,6 +68,19 @@ PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS = 12
 # Minimum centerline clearance between any two traces along their full route (fitness).
 TRACE_SEPARATION_MIN = 4.0
 TRACE_SEPARATION_SAMPLE_STEP = 0.25
+# Pair-level gentle polish: integrated close-contact + severe near-miss terms.
+PAIR_SEP_INTEGRATED_WEIGHT = 1.5
+PAIR_SEP_SEVERE_WEIGHT = 6.0
+PAIR_SEP_SEVERE_FRACTION = 0.5  # d < this×min_sep counts as "super close"
+# Soft upper band for slot-adjacent co-terminal "twins": too-far pairs hog corridor
+# space that pinched neighbors need. Only applied when abs(slot_i-slot_j)==1.
+PAIR_SEP_MAX_MULTIPLIER = 1.75  # max_sep = this × min_sep
+PAIR_SEP_SPARSE_WEIGHT = 2.5
+PAIR_SEP_COMPACT_BLENDS = (0.12, 0.22, 0.35)
+# Near-terminal packing: equalize slot-neighbor gaps to the hub mean (may be < min_sep).
+PAIR_EQUALIZE_TERMINAL_MM = 10.0
+PAIR_EQUAL_GAP_WEIGHT = 4.0
+PAIR_EQUALIZE_BLENDS = (0.15, 0.28, 0.42)
 # Electrode keep-out disc radius = avg electrode distance × this factor (2D projection units).
 ELECTRODE_ZONE_FACTOR = 0.05
 # Terminal zone radius uses a separate factor in create_zones().
@@ -4861,19 +4874,228 @@ def _pair_centerline_min_distance(
     electrode_zones,
 ):
     """Minimum centerline distance between two paths outside terminal merge tails."""
+    return float(
+        _pair_separation_metrics(
+            path_a,
+            path_b,
+            terminal_a,
+            terminal_b,
+            electrode_zones,
+            min_separation=PHASE2_INNER_TRACE_SEPARATION,
+        )["min_dist"]
+    )
+
+
+def _are_slot_adjacent_coterminal(
+    terminal_a,
+    terminal_b,
+    electrode_a,
+    electrode_b,
+    slot_index_by_electrode,
+):
+    """True for same-hub wires in neighboring strip slots (packing 'twins')."""
+    if terminal_a != terminal_b or not slot_index_by_electrode:
+        return False
+    slot_a = slot_index_by_electrode.get(electrode_a)
+    slot_b = slot_index_by_electrode.get(electrode_b)
+    if slot_a is None or slot_b is None:
+        return False
+    return abs(int(slot_a) - int(slot_b)) == 1
+
+
+def _path_point_at_arc_from_end(path, arc_from_end):
+    """Point on the polyline that is ``arc_from_end`` before the terminal end."""
+    path = np.asarray(path, dtype=float)
+    if path.shape[0] < 2:
+        return path[-1].copy()
+    seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    total = float(np.sum(seg))
+    if total < 1e-9:
+        return path[-1].copy()
+    target = max(0.0, total - float(arc_from_end))
+    walked = 0.0
+    for i, length in enumerate(seg):
+        if walked + length >= target - 1e-12:
+            t = 0.0 if length < 1e-12 else (target - walked) / length
+            return (1.0 - t) * path[i] + t * path[i + 1]
+        walked += float(length)
+    return path[-1].copy()
+
+
+def _near_terminal_pair_gap(
+    path_a,
+    path_b,
+    band_mm=PAIR_EQUALIZE_TERMINAL_MM,
+    n_samples=5,
+):
+    """Mean centerline gap in the last ``band_mm`` approaching the terminal end."""
+    band = max(1e-3, float(band_mm))
+    gaps = []
+    for k in range(n_samples):
+        # Sample from end (0) out to band; skip the exact pinned endpoint.
+        arc = band * (k + 1) / float(n_samples)
+        pa = _path_point_at_arc_from_end(path_a, arc)
+        pb = _path_point_at_arc_from_end(path_b, arc)
+        gaps.append(float(np.linalg.norm(pa - pb)))
+    return float(np.mean(gaps)) if gaps else float("inf")
+
+
+def _hub_near_terminal_gap_targets(
+    paths,
+    path_terminals,
+    path_electrodes,
+    slot_index_by_electrode,
+    band_mm=PAIR_EQUALIZE_TERMINAL_MM,
+):
+    """
+    Per hub, mean near-terminal gap over consecutive slot neighbors.
+
+    Returns ``{(i, j): mean_gap}`` with i<j for every slot-adjacent pair.
+    """
+    if not path_electrodes or not slot_index_by_electrode:
+        return {}
+    by_term: dict[str, list[tuple[int, int]]] = {}
+    for idx, (term, electrode) in enumerate(zip(path_terminals, path_electrodes)):
+        slot = slot_index_by_electrode.get(electrode)
+        if slot is None:
+            continue
+        by_term.setdefault(term, []).append((int(slot), idx))
+
+    targets = {}
+    for idxs in by_term.values():
+        if len(idxs) < 2:
+            continue
+        ordered = [i for _slot, i in sorted(idxs, key=lambda item: item[0])]
+        gaps = []
+        pairs = []
+        for a, b in zip(ordered, ordered[1:]):
+            gap = _near_terminal_pair_gap(paths[a], paths[b], band_mm=band_mm)
+            if not np.isfinite(gap):
+                continue
+            gaps.append(gap)
+            pairs.append((min(a, b), max(a, b)))
+        if not gaps:
+            continue
+        mean_gap = float(np.mean(np.asarray(gaps, dtype=float)))
+        for key in pairs:
+            targets[key] = mean_gap
+    return targets
+
+
+def _sample_arc_from_path_end(path, point):
+    """Arc length from ``point`` (projected) to the terminal end of ``path``."""
+    line = _path_to_linestring(path)
+    if line is None or line.is_empty:
+        return 0.0
+    pt = Point(float(point[0]), float(point[1])) if not isinstance(point, Point) else point
+    return max(0.0, float(line.length) - float(line.project(pt)))
+
+
+def _pair_separation_metrics(
+    path_a,
+    path_b,
+    terminal_a,
+    terminal_b,
+    electrode_zones,
+    min_separation=PHASE2_INNER_TRACE_SEPARATION,
+    sample_step=TRACE_SEPARATION_SAMPLE_STEP,
+    punish_sparse: bool = False,
+    equalize_terminal: bool = False,
+    target_near_terminal_gap: float | None = None,
+):
+    """
+    Pair separation stats outside co-terminal merge tails.
+
+    ``deficit_norm`` / ``severe_norm`` apply on the mid-route. For slot-adjacent
+    pairs, the near-terminal band is exempt from min-sep so equal fan spacing can
+    sit below ``min_separation``. ``equal_norm`` punishes deviation from the hub
+    mean near-terminal neighbor gap.
+    """
     line_a = _path_to_linestring(path_a)
     line_b = _path_to_linestring(path_b)
+    empty = {
+        "min_dist": float("inf"),
+        "mid_min_dist": float("inf"),
+        "deficit_norm": 0.0,
+        "severe_norm": 0.0,
+        "sparse_norm": 0.0,
+        "equal_norm": 0.0,
+        "near_terminal_gap": float("inf"),
+        "max_sep": float(PAIR_SEP_MAX_MULTIPLIER * float(min_separation)),
+        "n_close": 0,
+    }
     if line_a is None or line_b is None:
-        return float("inf")
+        return empty
 
+    min_sep = float(min_separation)
+    max_sep = float(PAIR_SEP_MAX_MULTIPLIER * min_sep)
+    severe_cut = max(1e-9, PAIR_SEP_SEVERE_FRACTION * min_sep)
+    equalize_band = float(PAIR_EQUALIZE_TERMINAL_MM) if equalize_terminal else 0.0
     merge_tail_length = _terminal_merge_tail_length(electrode_zones)
     pair_merge_union = _build_pair_merge_union(
         path_a, path_b, terminal_a, terminal_b, merge_tail_length
     )
     min_dist = float("inf")
-    for pt in _linestring_sample_points(line_a, pair_merge_union):
-        min_dist = min(min_dist, float(line_b.distance(pt)))
-    return min_dist
+    mid_min_dist = float("inf")
+    deficit_norm = 0.0
+    severe_norm = 0.0
+    n_close = 0
+    for line, other, path_self, path_other in (
+        (line_a, line_b, path_a, path_b),
+        (line_b, line_a, path_b, path_a),
+    ):
+        for pt in _linestring_sample_points(line, pair_merge_union, sample_step):
+            d = float(other.distance(pt))
+            min_dist = min(min_dist, d)
+            near_term = False
+            if equalize_band > 0.0:
+                arc_self = _sample_arc_from_path_end(path_self, pt)
+                # Partner proximity to its own terminal end (projected).
+                nearest_other = nearest_points(pt, other)[1]
+                arc_other = _sample_arc_from_path_end(
+                    path_other, (nearest_other.x, nearest_other.y)
+                )
+                near_term = arc_self <= equalize_band or arc_other <= equalize_band
+            if near_term:
+                continue
+            mid_min_dist = min(mid_min_dist, d)
+            if d < min_sep:
+                shortfall = min_sep - d
+                deficit_norm += (shortfall / min_sep) ** 2
+                n_close += 1
+                if d < severe_cut:
+                    severe_norm += (severe_cut / max(d, 1e-6)) ** 2 - 1.0
+    sparse_norm = 0.0
+    if (
+        punish_sparse
+        and mid_min_dist > max_sep
+        and np.isfinite(mid_min_dist)
+    ):
+        excess = mid_min_dist - max_sep
+        sparse_norm = (excess / max_sep) ** 2
+
+    near_gap = _near_terminal_pair_gap(path_a, path_b) if equalize_terminal else float("inf")
+    equal_norm = 0.0
+    if (
+        equalize_terminal
+        and target_near_terminal_gap is not None
+        and np.isfinite(near_gap)
+        and float(target_near_terminal_gap) > 1e-9
+    ):
+        scale = max(float(target_near_terminal_gap), 0.5 * min_sep, 1e-3)
+        equal_norm = ((near_gap - float(target_near_terminal_gap)) / scale) ** 2
+
+    return {
+        "min_dist": min_dist,
+        "mid_min_dist": mid_min_dist if np.isfinite(mid_min_dist) else min_dist,
+        "deficit_norm": float(deficit_norm),
+        "severe_norm": float(max(0.0, severe_norm)),
+        "sparse_norm": float(sparse_norm),
+        "equal_norm": float(equal_norm),
+        "near_terminal_gap": float(near_gap),
+        "max_sep": max_sep,
+        "n_close": int(n_close),
+    }
 
 
 def _pair_layout_penalty(
@@ -4888,6 +5110,9 @@ def _pair_layout_penalty(
     path_idx_a=None,
     path_idx_b=None,
     pair_geometry=None,
+    punish_sparse: bool = False,
+    equalize_terminal: bool = False,
+    target_near_terminal_gap: float | None = None,
 ):
     """Crossing, overlap, and trace-separation penalty for one path pair."""
     penalty = analyze_pair_path_penalty(
@@ -4902,13 +5127,44 @@ def _pair_layout_penalty(
         path_idx_b=path_idx_b,
         pair_geometry=pair_geometry,
     )
-    min_dist = _pair_centerline_min_distance(
-        path_a, path_b, terminal_a, terminal_b, electrode_zones
+    sep = _pair_separation_metrics(
+        path_a,
+        path_b,
+        terminal_a,
+        terminal_b,
+        electrode_zones,
+        min_separation=min_separation,
+        punish_sparse=punish_sparse,
+        equalize_terminal=equalize_terminal,
+        target_near_terminal_gap=target_near_terminal_gap,
     )
-    if min_dist < min_separation:
-        shortfall = min_separation - min_dist
-        penalty += (shortfall / min_separation) ** 2
+    penalty += PAIR_SEP_INTEGRATED_WEIGHT * sep["deficit_norm"]
+    penalty += PAIR_SEP_SEVERE_WEIGHT * sep["severe_norm"]
+    penalty += PAIR_SEP_SPARSE_WEIGHT * sep["sparse_norm"]
+    penalty += PAIR_EQUAL_GAP_WEIGHT * sep["equal_norm"]
     return penalty
+
+
+def _nudge_path_toward_partner(path, partner_path, blend=0.2, toward=True):
+    """Move interior samples toward/away from the partner centerline."""
+    path = np.asarray(path, dtype=float)
+    if path.shape[0] < 3:
+        return None
+    line_b = _path_to_linestring(partner_path)
+    if line_b is None or line_b.is_empty:
+        return None
+    out = path.copy()
+    sign = 1.0 if toward else -1.0
+    for i in range(1, len(path) - 1):
+        pt = Point(float(path[i, 0]), float(path[i, 1]))
+        nearest = line_b.interpolate(line_b.project(pt))
+        target = np.asarray([nearest.x, nearest.y], dtype=float)
+        # Stronger motion near the terminal end (equal-fan region).
+        w_end = float(i) / float(len(path) - 1)
+        local_blend = blend * (0.35 + 0.65 * w_end)
+        delta = target - path[i]
+        out[i] = path[i] + sign * local_blend * delta
+    return out
 
 
 def _find_conflict_path_pairs(
@@ -4918,10 +5174,19 @@ def _find_conflict_path_pairs(
     electrode_zones,
     min_separation=PHASE2_INNER_TRACE_SEPARATION,
     focus_separation: bool = False,
+    path_electrodes=None,
+    slot_index_by_electrode=None,
 ):
-    """Return [(i, j, penalty)] for pairs with crossings, overlap, or tight separation."""
+    """Return [(i, j, penalty)] for pairs with crossings, overlap, tight, or sparse gaps."""
     pairs = {}
     pair_min_dist = {}
+    pair_pack_priority = {}
+    gap_targets = _hub_near_terminal_gap_targets(
+        paths,
+        path_terminals,
+        path_electrodes or [],
+        slot_index_by_electrode or {},
+    )
     dense_path_cache = _build_crossing_detection_path_cache(
         paths, path_terminals, electrode_zones
     )
@@ -4938,6 +5203,27 @@ def _find_conflict_path_pairs(
                 path_idx_a=i,
                 path_idx_b=j,
             )
+            slot_adj = False
+            if path_electrodes is not None:
+                slot_adj = _are_slot_adjacent_coterminal(
+                    path_terminals[i],
+                    path_terminals[j],
+                    path_electrodes[i],
+                    path_electrodes[j],
+                    slot_index_by_electrode,
+                )
+            target_gap = gap_targets.get((i, j)) if slot_adj else None
+            sep = _pair_separation_metrics(
+                paths[i],
+                paths[j],
+                path_terminals[i],
+                path_terminals[j],
+                electrode_zones,
+                min_separation=min_separation,
+                punish_sparse=slot_adj,
+                equalize_terminal=slot_adj,
+                target_near_terminal_gap=target_gap,
+            )
             penalty = _pair_layout_penalty(
                 paths[i],
                 paths[j],
@@ -4950,21 +5236,39 @@ def _find_conflict_path_pairs(
                 path_idx_a=i,
                 path_idx_b=j,
                 pair_geometry=(inter, crossing_points),
+                punish_sparse=slot_adj,
+                equalize_terminal=slot_adj,
+                target_near_terminal_gap=target_gap,
             )
             if penalty > COLLISION_SCORE_EPSILON:
                 pairs[(i, j)] = penalty
-                pair_min_dist[(i, j)] = _pair_centerline_min_distance(
-                    paths[i],
-                    paths[j],
-                    path_terminals[i],
-                    path_terminals[j],
-                    electrode_zones,
-                )
+                pair_min_dist[(i, j)] = float(sep["mid_min_dist"])
+                # 0 = unequal near-terminal fan, 1 = sparse mid-route, 2 = tight mid.
+                if slot_adj and sep["equal_norm"] > 1e-6:
+                    pair_pack_priority[(i, j)] = 0
+                elif (
+                    slot_adj
+                    and sep["sparse_norm"] > 0.0
+                    and sep["deficit_norm"] <= 0.0
+                    and sep["severe_norm"] <= 0.0
+                ):
+                    pair_pack_priority[(i, j)] = 1
+                else:
+                    pair_pack_priority[(i, j)] = 2
 
     if focus_separation:
+        # Equalize / compact slot neighbors before fighting mid-route pinches.
         return sorted(
             ((i, j, penalty) for (i, j), penalty in pairs.items()),
-            key=lambda item: (pair_min_dist[(item[0], item[1])], -item[2]),
+            key=lambda item: (
+                pair_pack_priority[(item[0], item[1])],
+                (
+                    -pairs[(item[0], item[1])]
+                    if pair_pack_priority[(item[0], item[1])] < 2
+                    else pair_min_dist[(item[0], item[1])]
+                ),
+                -item[2],
+            ),
         )
     return sorted(
         ((i, j, penalty) for (i, j), penalty in pairs.items()),
@@ -5013,27 +5317,65 @@ def _try_gentle_pair_trace_adjustment(
 
     electrode_name = path_electrodes[path_idx]
     terminal_name = path_terminals[path_idx]
+    partner_electrode = path_electrodes[partner_idx]
+    partner_terminal = path_terminals[partner_idx]
     start = np.asarray(electrodes_2d[electrode_name], dtype=float)
     end = np.asarray(
         entry_points_2d.get(electrode_name, terminals_2d[terminal_name]), dtype=float
     )
     path = paths[path_idx]
     partner_path = paths[partner_idx]
+    slot_adj = _are_slot_adjacent_coterminal(
+        terminal_name,
+        partner_terminal,
+        electrode_name,
+        partner_electrode,
+        slot_index_by_electrode,
+    )
+    gap_targets = _hub_near_terminal_gap_targets(
+        paths,
+        path_terminals,
+        path_electrodes,
+        slot_index_by_electrode or {},
+    )
+    pair_key = (min(path_idx, partner_idx), max(path_idx, partner_idx))
+    target_gap = gap_targets.get(pair_key) if slot_adj else None
     baseline_penalty = _pair_layout_penalty(
         path,
         partner_path,
         terminal_name,
-        path_terminals[partner_idx],
+        partner_terminal,
         terminal_zones,
         electrode_zones,
         min_separation=min_separation,
+        punish_sparse=slot_adj,
+        equalize_terminal=slot_adj,
+        target_near_terminal_gap=target_gap,
     )
-    baseline_min_dist = _pair_centerline_min_distance(
+    baseline_sep = _pair_separation_metrics(
         path,
         partner_path,
         terminal_name,
-        path_terminals[partner_idx],
+        partner_terminal,
         electrode_zones,
+        min_separation=min_separation,
+        punish_sparse=slot_adj,
+        equalize_terminal=slot_adj,
+        target_near_terminal_gap=target_gap,
+    )
+    baseline_min_dist = float(baseline_sep["mid_min_dist"])
+    baseline_deficit = float(baseline_sep["deficit_norm"])
+    baseline_severe = float(baseline_sep["severe_norm"])
+    baseline_sparse = float(baseline_sep["sparse_norm"])
+    baseline_equal = float(baseline_sep["equal_norm"])
+    baseline_near_gap = float(baseline_sep["near_terminal_gap"])
+    equalize_only = slot_adj and baseline_equal > 1e-6
+    sparse_only = (
+        slot_adj
+        and baseline_sparse > 0.0
+        and baseline_deficit <= 0.0
+        and baseline_severe <= 0.0
+        and not equalize_only
     )
     if focus_separation:
         max_random_attempts = max(
@@ -5094,25 +5436,62 @@ def _try_gentle_pair_trace_adjustment(
             trial_paths = [p.copy() for p in paths]
             trial_paths[path_idx] = trial_path
             with profile_step("accept_pair_metrics"):
+                # Recompute hub mean so accepted equalize moves chase a stable fan.
+                trial_targets = _hub_near_terminal_gap_targets(
+                    trial_paths,
+                    path_terminals,
+                    path_electrodes,
+                    slot_index_by_electrode or {},
+                )
+                trial_target_gap = (
+                    trial_targets.get(pair_key) if slot_adj else None
+                )
                 trial_penalty = _pair_layout_penalty(
                     trial_paths[path_idx],
                     trial_paths[partner_idx],
                     terminal_name,
-                    path_terminals[partner_idx],
+                    partner_terminal,
                     terminal_zones,
                     electrode_zones,
                     min_separation=min_separation,
+                    punish_sparse=slot_adj,
+                    equalize_terminal=slot_adj,
+                    target_near_terminal_gap=trial_target_gap,
                 )
-                trial_min_dist = _pair_centerline_min_distance(
+                trial_sep = _pair_separation_metrics(
                     trial_paths[path_idx],
                     trial_paths[partner_idx],
                     terminal_name,
-                    path_terminals[partner_idx],
+                    partner_terminal,
                     electrode_zones,
+                    min_separation=min_separation,
+                    punish_sparse=slot_adj,
+                    equalize_terminal=slot_adj,
+                    target_near_terminal_gap=trial_target_gap,
                 )
-            separation_improved = trial_min_dist > baseline_min_dist + 0.05
+                trial_min_dist = float(trial_sep["mid_min_dist"])
+                trial_deficit = float(trial_sep["deficit_norm"])
+                trial_severe = float(trial_sep["severe_norm"])
+                trial_sparse = float(trial_sep["sparse_norm"])
+                trial_equal = float(trial_sep["equal_norm"])
+            separation_improved = (
+                trial_min_dist > baseline_min_dist + 0.05
+                or trial_deficit + 1e-9 < baseline_deficit
+                or trial_severe + 1e-9 < baseline_severe
+                or trial_sparse + 1e-9 < baseline_sparse
+                or trial_equal + 1e-9 < baseline_equal
+            )
             penalty_improved = trial_penalty + 1e-9 < baseline_penalty
             if focus_separation:
+                # Mid-route severe pinches must not worsen; near-terminal equalize
+                # may sit below min_sep (exempt from severe/deficit in that band).
+                if trial_severe > baseline_severe + 1e-6:
+                    return None
+                if (
+                    sparse_only
+                    and trial_deficit > baseline_deficit + 1e-6
+                ):
+                    return None
                 if not separation_improved and not penalty_improved:
                     return None
                 if separation_improved and trial_penalty > baseline_penalty + 1e-6:
@@ -5146,21 +5525,46 @@ def _try_gentle_pair_trace_adjustment(
             return trial_paths, trial_penalty
 
     with profile_step("pair_adjust"):
-        with profile_step("pair_greedy"):
-            spacing_trial = _greedy_spacing_outside_terminal_zone(
-                np.asarray(path, dtype=float),
-                terminal_name,
-                terminal_zones,
-                electrode_name,
-                electrode_zones,
-                start,
-                end,
-                partner_path,
-            )
-        if spacing_trial is not None:
-            accepted = _accept(spacing_trial)
-            if accepted is not None:
-                return accepted
+        # Equalize near-terminal fan gaps (toward/away) before mid-route spacing.
+        if equalize_only and target_gap is not None and np.isfinite(baseline_near_gap):
+            toward = baseline_near_gap > float(target_gap)
+            with profile_step("pair_equalize"):
+                for blend in PAIR_EQUALIZE_BLENDS:
+                    eq_trial = _nudge_path_toward_partner(
+                        path, partner_path, blend=blend, toward=toward
+                    )
+                    if eq_trial is None:
+                        continue
+                    accepted = _accept(eq_trial)
+                    if accepted is not None:
+                        return accepted
+        elif sparse_only:
+            with profile_step("pair_compact"):
+                for blend in PAIR_SEP_COMPACT_BLENDS:
+                    compact_trial = _nudge_path_toward_partner(
+                        path, partner_path, blend=blend, toward=True
+                    )
+                    if compact_trial is None:
+                        continue
+                    accepted = _accept(compact_trial)
+                    if accepted is not None:
+                        return accepted
+        else:
+            with profile_step("pair_greedy"):
+                spacing_trial = _greedy_spacing_outside_terminal_zone(
+                    np.asarray(path, dtype=float),
+                    terminal_name,
+                    terminal_zones,
+                    electrode_name,
+                    electrode_zones,
+                    start,
+                    end,
+                    partner_path,
+                )
+            if spacing_trial is not None:
+                accepted = _accept(spacing_trial)
+                if accepted is not None:
+                    return accepted
 
         with profile_step("pair_random_loop"):
             for _ in range(max_random_attempts):
@@ -5308,6 +5712,8 @@ def _resolve_phase2_ordered_trace_resolution(
                 electrode_zones,
                 min_separation=min_separation,
                 focus_separation=focus_separation,
+                path_electrodes=path_electrodes,
+                slot_index_by_electrode=slot_index_by_electrode,
             )
         if not conflict_pairs:
             label = "separation" if focus_separation else "conflicts"
@@ -5316,7 +5722,8 @@ def _resolve_phase2_ordered_trace_resolution(
 
         print(
             f"Phase 2 pair resolution round {round_idx + 1}: "
-            f"{len(conflict_pairs)} {'tight' if focus_separation else 'conflicting'} pair(s)"
+            f"{len(conflict_pairs)} "
+            f"{'spacing' if focus_separation else 'conflicting'} pair(s)"
         )
         round_improved = False
         for i, j, pair_penalty in conflict_pairs:

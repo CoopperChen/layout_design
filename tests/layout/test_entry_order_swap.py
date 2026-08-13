@@ -77,3 +77,35 @@ def test_entry_order_swap_skips_different_terminals():
     assert _count_pair_crossings(new_paths) == before
     np.testing.assert_allclose(new_entries["A"], entry_points["A"])
     np.testing.assert_allclose(new_entries["B"], entry_points["B"])
+
+
+def test_entry_order_angular_escape_uncrosses_three_wire_reversal():
+    """Fully reversed 3-slot assignment: pairwise may stall; angular reassign clears it."""
+    electrodes_2d = {
+        "A": np.array([-30.0, 40.0]),
+        "B": np.array([0.0, 45.0]),
+        "C": np.array([30.0, 40.0]),
+    }
+    # Slots reversed vs electrode left-to-right order.
+    entry_points = {
+        "A": np.array([10.0, 0.0]),
+        "B": np.array([0.0, 0.0]),
+        "C": np.array([-10.0, 0.0]),
+    }
+    paths = [
+        _straight_path_2d(electrodes_2d[n], entry_points[n]) for n in ("A", "B", "C")
+    ]
+    assert _count_pair_crossings(paths) >= 1
+
+    new_paths, new_entries, _ = _uncross_by_entry_order_swap(
+        paths,
+        ["A", "B", "C"],
+        ["TERMINAL_LEFT", "TERMINAL_LEFT", "TERMINAL_LEFT"],
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+        slot_index={"A": 0, "B": 1, "C": 2},
+    )
+    assert _count_pair_crossings(new_paths) == 0
+    # Left electrode should own left strip slot after escape.
+    assert new_entries["A"][0] < new_entries["B"][0] < new_entries["C"][0]

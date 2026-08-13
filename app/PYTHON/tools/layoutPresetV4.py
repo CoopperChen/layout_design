@@ -1169,11 +1169,15 @@ def _uncross_by_entry_order_swap(
     """
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Accepts a swap only when total pairwise crossings decrease.
+    Accepts a move only when total pairwise crossings decrease.
 
-    ``entry_points`` are strip-slot anchors (swapped). ``replan_fn(idx, entries)``
-    may rebuild a truncated wire (electrode → stop short of strip); default
-    replans a full electrode→strip chord.
+    When pairwise swaps plateau, tries two escapes on each hub:
+      1) reassign strip slots by electrode angular order (global uncross for
+         straight/truncated chords),
+      2) 3-cycles among wires that still cross.
+
+    ``entry_points`` are strip-slot anchors. ``replan_fn(idx, entries)`` may
+    rebuild a truncated wire; default replans electrode→strip.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
@@ -1188,61 +1192,197 @@ def _uncross_by_entry_order_swap(
         path = _path_with_electrode_detour(start, end, name, electrode_zones)
         return new2d.pin_path_endpoints_2d(path, start, end)
 
-    for round_idx in range(max_rounds):
-        cross_total = _count_pair_crossings(paths)
-        if cross_total == 0:
-            break
+    def _replan_many(idxs: list[int], base: list[np.ndarray]) -> list[np.ndarray]:
+        trial = list(base)
+        for idx in idxs:
+            trial[idx] = _replan(idx)
+        return trial
 
-        improved = False
+    def _swap_entries(name_a: str, name_b: str) -> None:
+        entries[name_a], entries[name_b] = (
+            entries[name_b].copy(),
+            entries[name_a].copy(),
+        )
+        if name_a in slots and name_b in slots:
+            slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+
+    def _apply_entry_assignment(
+        idxs: list[int],
+        new_ends: list[np.ndarray],
+        new_slot_vals: list[int] | None,
+    ) -> None:
+        for k, idx in enumerate(idxs):
+            name = path_electrodes[idx]
+            entries[name] = np.asarray(new_ends[k], dtype=float).copy()
+            if new_slot_vals is not None and name in slots:
+                slots[name] = int(new_slot_vals[k])
+
+    def _try_pairwise(cross_total: int, round_idx: int) -> bool:
         for i in range(len(paths)):
             for j in range(i + 1, len(paths)):
                 if path_terminals[i] != path_terminals[j]:
                     continue
                 if _first_crossing_point(paths[i], paths[j]) is None:
                     continue
-
                 name_a = path_electrodes[i]
                 name_b = path_electrodes[j]
                 if name_a not in entries or name_b not in entries:
                     continue
-
-                entries[name_a], entries[name_b] = (
-                    entries[name_b].copy(),
-                    entries[name_a].copy(),
-                )
-                if name_a in slots and name_b in slots:
-                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
-
-                trial = list(paths)
-                trial[i] = _replan(i)
-                trial[j] = _replan(j)
+                _swap_entries(name_a, name_b)
+                trial = _replan_many([i, j], paths)
                 new_cross = _count_pair_crossings(trial)
                 if new_cross < cross_total:
-                    paths = trial
-                    improved = True
+                    paths[:] = trial
                     print(
                         f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
                         f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
                     )
-                    break
+                    return True
+                _swap_entries(name_a, name_b)
+        return False
 
-                # Revert rejected swap
-                entries[name_a], entries[name_b] = (
-                    entries[name_b].copy(),
-                    entries[name_a].copy(),
-                )
-                if name_a in slots and name_b in slots:
-                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
-            if improved:
-                break
+    def _hub_indices(terminal: str) -> list[int]:
+        return [i for i, t in enumerate(path_terminals) if t == terminal]
 
-        if not improved:
-            if cross_total > 0:
+    def _try_angular_reorder(cross_total: int, round_idx: int) -> bool:
+        """Assign strip slots in electrode angular order (escapes pairwise plateaus)."""
+        terminals = sorted({t for t in path_terminals})
+        for terminal in terminals:
+            idxs = _hub_indices(terminal)
+            if len(idxs) < 3:
+                continue
+            names = [path_electrodes[i] for i in idxs]
+            if any(n not in entries for n in names):
+                continue
+            pts = np.stack([electrodes_2d[n] for n in names], axis=0)
+            cent = np.mean(pts, axis=0)
+
+            def _elec_angle(i: int) -> float:
+                p = np.asarray(electrodes_2d[path_electrodes[i]], dtype=float) - cent
+                return float(np.arctan2(p[1], p[0]))
+
+            order = sorted(idxs, key=_elec_angle)
+            # Keep the multiset of strip ends; redistribute by electrode angle.
+            end_pool = [entries[path_electrodes[i]].copy() for i in idxs]
+            end_cent = np.mean(np.stack(end_pool, axis=0), axis=0)
+
+            def _end_angle(p: np.ndarray) -> float:
+                d = np.asarray(p, dtype=float) - end_cent
+                return float(np.arctan2(d[1], d[0]))
+
+            ends_sorted = sorted(end_pool, key=_end_angle)
+            slot_pool = (
+                [slots[path_electrodes[i]] for i in idxs]
+                if all(path_electrodes[i] in slots for i in idxs)
+                else None
+            )
+            slots_sorted = sorted(slot_pool) if slot_pool is not None else None
+
+            old_ends = [entries[path_electrodes[i]].copy() for i in idxs]
+            old_slots = (
+                [slots[path_electrodes[i]] for i in idxs]
+                if slots_sorted is not None
+                else None
+            )
+            _apply_entry_assignment(order, ends_sorted, slots_sorted)
+            trial = _replan_many(idxs, paths)
+            new_cross = _count_pair_crossings(trial)
+            if new_cross < cross_total:
+                paths[:] = trial
                 print(
-                    f"  Entry-order swap stopped at round {round_idx + 1} "
-                    f"(crossings={cross_total})"
+                    f"  Entry-order angular reassign on {terminal}: "
+                    f"crossings {cross_total}->{new_cross} (round {round_idx + 1})"
                 )
+                return True
+            _apply_entry_assignment(idxs, old_ends, old_slots)
+        return False
+
+    def _try_triple_cycles(cross_total: int, round_idx: int) -> bool:
+        """Rotate strip slots on crossing triples when 2-swaps stall."""
+        conflict: list[int] = []
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _first_crossing_point(paths[i], paths[j]) is None:
+                    continue
+                if i not in conflict:
+                    conflict.append(i)
+                if j not in conflict:
+                    conflict.append(j)
+        by_term: dict[str, list[int]] = {}
+        for i in conflict:
+            by_term.setdefault(path_terminals[i], []).append(i)
+
+        for terminal, idxs in by_term.items():
+            if len(idxs) < 3:
+                continue
+            for a_i in range(len(idxs)):
+                for b_i in range(a_i + 1, len(idxs)):
+                    for c_i in range(b_i + 1, len(idxs)):
+                        triple = [idxs[a_i], idxs[b_i], idxs[c_i]]
+                        names = [path_electrodes[t] for t in triple]
+                        if any(n not in entries for n in names):
+                            continue
+                        old_ends = [entries[n].copy() for n in names]
+                        old_slots = (
+                            [slots[n] for n in names]
+                            if all(n in slots for n in names)
+                            else None
+                        )
+                        rotations = [
+                            (
+                                [old_ends[2], old_ends[0], old_ends[1]],
+                                (
+                                    [old_slots[2], old_slots[0], old_slots[1]]
+                                    if old_slots is not None
+                                    else None
+                                ),
+                            ),
+                            (
+                                [old_ends[1], old_ends[2], old_ends[0]],
+                                (
+                                    [old_slots[1], old_slots[2], old_slots[0]]
+                                    if old_slots is not None
+                                    else None
+                                ),
+                            ),
+                        ]
+                        for new_ends, new_slots in rotations:
+                            _apply_entry_assignment(triple, new_ends, new_slots)
+                            trial = _replan_many(triple, paths)
+                            new_cross = _count_pair_crossings(trial)
+                            if new_cross < cross_total:
+                                paths[:] = trial
+                                print(
+                                    f"  Entry-order 3-cycle "
+                                    f"{names[0]}→{names[1]}→{names[2]} on {terminal}: "
+                                    f"crossings {cross_total}->{new_cross} "
+                                    f"(round {round_idx + 1})"
+                                )
+                                return True
+                            _apply_entry_assignment(triple, old_ends, old_slots)
+        return False
+
+    for round_idx in range(max_rounds):
+        cross_total = _count_pair_crossings(paths)
+        if cross_total == 0:
             break
+
+        # Work on the shared `paths` list in place via paths[:] updates above.
+        if _try_pairwise(cross_total, round_idx):
+            continue
+        if _try_angular_reorder(cross_total, round_idx):
+            continue
+        if _try_triple_cycles(cross_total, round_idx):
+            continue
+
+        if cross_total > 0:
+            print(
+                f"  Entry-order swap stopped at round {round_idx + 1} "
+                f"(crossings={cross_total}; pairwise/angular/3-cycle plateau)"
+            )
+        break
 
     return paths, entries, slots
 
@@ -1314,15 +1454,17 @@ def _spread_truncated_wire_ends(
     max_rounds: int = 40,
 ) -> list[np.ndarray]:
     """
-    Keep truncated wire ends fanned like strip slots.
+    Keep truncated wire ends fanned like strip slots with equal neighbor gaps.
 
     1) Snap each end onto its hub→strip ray (preserves slot angular spacing).
-    2) Push same-terminal neighbors apart along that fan until ``min_separation``.
+    2) Equalize radii per hub (median r) so equal slot angles → equal chord gaps,
+       even when that gap is below ``min_separation``.
+
+    ``min_separation`` is kept for call-site compatibility; equal fan spacing wins.
     """
+    del max_rounds  # equal-radius pass is closed-form
+    _ = float(min_separation)
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
-    min_sep = float(min_separation)
-    if min_sep <= 0.0:
-        return paths
 
     for i, name in enumerate(path_electrodes):
         hub = terminals_2d[path_terminals[i]]
@@ -1330,52 +1472,44 @@ def _spread_truncated_wire_ends(
         end = _align_end_to_strip_ray(paths[i][-1], strip, hub)
         paths[i] = new2d.pin_path_endpoints_2d(paths[i], electrodes_2d[name], end)
 
-    for _ in range(int(max_rounds)):
-        moved = False
-        by_term: dict[str, list[int]] = {}
-        for i, term in enumerate(path_terminals):
-            by_term.setdefault(term, []).append(i)
+    by_term: dict[str, list[int]] = {}
+    for i, term in enumerate(path_terminals):
+        by_term.setdefault(term, []).append(i)
 
-        for term, idxs in by_term.items():
-            if len(idxs) < 2:
+    for term, idxs in by_term.items():
+        if len(idxs) < 2:
+            continue
+        hub = np.asarray(terminals_2d[term], dtype=float).reshape(2)
+        radii = []
+        ray_caps = []
+        for i in idxs:
+            name = path_electrodes[i]
+            strip = np.asarray(strip_entries[name], dtype=float).reshape(2)
+            un = float(np.linalg.norm(strip - hub))
+            if un < 1e-9:
                 continue
-            hub = np.asarray(terminals_2d[term], dtype=float).reshape(2)
-
-            def _strip_angle(i: int) -> float:
-                s = np.asarray(strip_entries[path_electrodes[i]], dtype=float) - hub
-                return float(np.arctan2(s[1], s[0]))
-
-            ordered = sorted(idxs, key=_strip_angle)
-            for a, b in zip(ordered, ordered[1:]):
-                name_a = path_electrodes[a]
-                name_b = path_electrodes[b]
-                ea = np.asarray(paths[a][-1], dtype=float)
-                eb = np.asarray(paths[b][-1], dtype=float)
-                delta = eb - ea
-                dist = float(np.linalg.norm(delta))
-                if dist >= min_sep - 1e-9:
-                    continue
-                if dist < 1e-9:
-                    sa = np.asarray(strip_entries[name_a], dtype=float)
-                    sb = np.asarray(strip_entries[name_b], dtype=float)
-                    delta = sb - sa
-                    dist = float(np.linalg.norm(delta))
-                    if dist < 1e-9:
-                        delta = np.array([1.0, 0.0], dtype=float)
-                        dist = 1.0
-                u = delta / dist
-                need = 0.5 * (min_sep - dist)
-                ea2 = _align_end_to_strip_ray(ea - need * u, strip_entries[name_a], hub)
-                eb2 = _align_end_to_strip_ray(eb + need * u, strip_entries[name_b], hub)
-                paths[a] = new2d.pin_path_endpoints_2d(
-                    paths[a], electrodes_2d[name_a], ea2
-                )
-                paths[b] = new2d.pin_path_endpoints_2d(
-                    paths[b], electrodes_2d[name_b], eb2
-                )
-                moved = True
-        if not moved:
-            break
+            radii.append(
+                float(np.linalg.norm(np.asarray(paths[i][-1], dtype=float) - hub))
+            )
+            ray_caps.append(0.999 * un)
+        if not radii or not ray_caps:
+            continue
+        # Shared radius must fit every hub→strip ray or gaps stay unequal.
+        r_target = min(
+            float(np.median(np.asarray(radii, dtype=float))),
+            float(min(ray_caps)),
+        )
+        for i in idxs:
+            name = path_electrodes[i]
+            strip = np.asarray(strip_entries[name], dtype=float).reshape(2)
+            u = strip - hub
+            un = float(np.linalg.norm(u))
+            if un < 1e-9:
+                continue
+            end = hub + (r_target / un) * u
+            paths[i] = new2d.pin_path_endpoints_2d(
+                paths[i], electrodes_2d[name], end
+            )
     return paths
 
 

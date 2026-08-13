@@ -32,7 +32,7 @@ synthesize:
 
 polish:
   enabled: true  # run polish in `python -m app run` (override with --no-polish)
-  mode: refine  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
+  mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
   refine_passes: 2  # run refine (repair + uncross) this many times
   focus: separation
   phase2_max_rounds: 20
@@ -41,6 +41,7 @@ polish:
   fixed_endpoints: true
   profile: false  # set true or use --profile / --polish-profile for timing breakdown
   # Target centerline clearance (mm): phase-2 pair penalty + layout deficit metric.
+  # Soft max for slot-adjacent twins is PAIR_SEP_MAX_MULTIPLIER × this (see new2dAlterations).
   min_trace_separation_mm: 6.0
   ga_generations: 20
   ga_population: 20
