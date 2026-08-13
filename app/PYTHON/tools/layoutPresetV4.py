@@ -1163,6 +1163,75 @@ def _separate_entry_points(
     )
 
 
+def _uncross_with_fixed_ends(
+    paths: list[np.ndarray],
+    path_electrodes: list[str],
+    electrodes_2d: dict[str, np.ndarray],
+    electrode_zones: dict,
+    end_points: dict[str, np.ndarray],
+    *,
+    idxs: list[int] | None = None,
+    max_rounds: int = 40,
+) -> list[np.ndarray]:
+    """
+    Bend wires to clear crossings while keeping electrode and wire ends fixed.
+
+    ``end_points`` must be the actual path ends (e.g. truncated tips), not strip
+    slots — pinning to strip would reconnect truncated synthesize wires.
+    """
+    from shapely.geometry import LineString
+
+    paths = [np.asarray(p, dtype=float).copy() for p in paths]
+    mutable = set(idxs) if idxs is not None else set(range(len(paths)))
+    for _ in range(int(max_rounds)):
+        cross = _count_pair_crossings(paths)
+        if cross == 0:
+            break
+        lines = [LineString(p) for p in paths]
+        improved = False
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                inter = lines[i].intersection(lines[j])
+                if inter.is_empty or inter.geom_type not in ("Point", "MultiPoint"):
+                    continue
+                for idx in (i, j):
+                    if idx not in mutable:
+                        continue
+                    name = path_electrodes[idx]
+                    if name not in end_points or name not in electrodes_2d:
+                        continue
+                    start = np.asarray(electrodes_2d[name], dtype=float)
+                    end = np.asarray(end_points[name], dtype=float)
+                    for sign in (1.0, -1.0):
+                        for scale in (8.0, 16.0, 28.0, 42.0):
+                            trial = new2d.pin_path_endpoints_2d(
+                                _bent_path_2d(start, end, sign, scale),
+                                start,
+                                end,
+                            )
+                            if _path_foreign_electrode_hits(
+                                trial, name, electrode_zones
+                            ):
+                                continue
+                            trial_list = list(paths)
+                            trial_list[idx] = trial
+                            if _count_pair_crossings(trial_list) < cross:
+                                paths = trial_list
+                                improved = True
+                                break
+                        if improved:
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+    return paths
+
+
 def _uncross_by_entry_order_swap(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1179,6 +1248,9 @@ def _uncross_by_entry_order_swap(
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
     Accepts a move only when total pairwise crossings decrease.
+
+    When a straight/detour replan still crosses (correct slots, bad chords),
+    bends residual crossings with fixed wire ends before accept/reject.
 
     When pairwise swaps plateau, tries two escapes on each hub:
       1) reassign strip slots by electrode angular order (global uncross for
@@ -1206,6 +1278,57 @@ def _uncross_by_entry_order_swap(
         for idx in idxs:
             trial[idx] = _replan(idx)
         return trial
+
+    def _ends_from_trial(trial: list[np.ndarray], idxs: list[int]) -> dict[str, np.ndarray]:
+        ends: dict[str, np.ndarray] = {}
+        for idx in idxs:
+            name = path_electrodes[idx]
+            path = np.asarray(trial[idx], dtype=float)
+            if len(path) == 0:
+                continue
+            ends[name] = path[-1].copy()
+        return ends
+
+    def _pair_still_crosses(trial: list[np.ndarray], idxs: list[int]) -> bool:
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                i, j = idxs[a], idxs[b]
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                if _first_crossing_point(trial[i], trial[j]) is not None:
+                    return True
+        return False
+
+    def _evaluate_replan_trial(
+        idxs: list[int], base: list[np.ndarray], cross_total: int
+    ) -> tuple[list[np.ndarray] | None, int]:
+        """
+        Straight/truncate replan, then fixed-end bends if crossings remain.
+
+        Returns (trial, new_cross) when improved, else (None, cross_total).
+        """
+        trial = _replan_many(idxs, base)
+        new_cross = _count_pair_crossings(trial)
+        needs_bend = new_cross >= cross_total or _pair_still_crosses(trial, idxs)
+        if needs_bend:
+            ends = _ends_from_trial(trial, idxs)
+            # Also pin ends for any path that may interact; bend only idxs.
+            for idx in idxs:
+                name = path_electrodes[idx]
+                if name not in ends and len(trial[idx]) > 0:
+                    ends[name] = np.asarray(trial[idx][-1], dtype=float).copy()
+            trial = _uncross_with_fixed_ends(
+                trial,
+                path_electrodes,
+                electrodes_2d,
+                electrode_zones,
+                ends,
+                idxs=idxs,
+            )
+            new_cross = _count_pair_crossings(trial)
+        if new_cross < cross_total:
+            return trial, new_cross
+        return None, cross_total
 
     def _swap_entries(name_a: str, name_b: str) -> None:
         entries[name_a], entries[name_b] = (
@@ -1238,9 +1361,8 @@ def _uncross_by_entry_order_swap(
                 if name_a not in entries or name_b not in entries:
                     continue
                 _swap_entries(name_a, name_b)
-                trial = _replan_many([i, j], paths)
-                new_cross = _count_pair_crossings(trial)
-                if new_cross < cross_total:
+                trial, new_cross = _evaluate_replan_trial([i, j], paths, cross_total)
+                if trial is not None:
                     paths[:] = trial
                     print(
                         f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
@@ -1294,9 +1416,8 @@ def _uncross_by_entry_order_swap(
                 else None
             )
             _apply_entry_assignment(order, ends_sorted, slots_sorted)
-            trial = _replan_many(idxs, paths)
-            new_cross = _count_pair_crossings(trial)
-            if new_cross < cross_total:
+            trial, new_cross = _evaluate_replan_trial(idxs, paths, cross_total)
+            if trial is not None:
                 paths[:] = trial
                 print(
                     f"  Entry-order angular reassign on {terminal}: "
@@ -1359,9 +1480,10 @@ def _uncross_by_entry_order_swap(
                         ]
                         for new_ends, new_slots in rotations:
                             _apply_entry_assignment(triple, new_ends, new_slots)
-                            trial = _replan_many(triple, paths)
-                            new_cross = _count_pair_crossings(trial)
-                            if new_cross < cross_total:
+                            trial, new_cross = _evaluate_replan_trial(
+                                triple, paths, cross_total
+                            )
+                            if trial is not None:
                                 paths[:] = trial
                                 print(
                                     f"  Entry-order 3-cycle "
