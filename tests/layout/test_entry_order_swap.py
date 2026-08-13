@@ -161,6 +161,40 @@ def test_entry_order_swap_clears_all_odd_mutual_pairs():
     assert _count_pair_crossings(new_paths) == 0
 
 
+def test_entry_order_swap_rejects_count_drop_that_reintroduces_odd():
+    """Once odd is clear, reject a swap whose replan recreates odd mutual."""
+    electrodes_2d = {
+        "A": np.array([-20.0, 40.0]),
+        "B": np.array([20.0, 40.0]),
+    }
+    # Correct (uncrossed) strip order; opposite bows → even mutual weave.
+    entry_points = {
+        "A": np.array([-10.0, 0.0]),
+        "B": np.array([10.0, 0.0]),
+    }
+    paths = [
+        _bent_path_2d(electrodes_2d["A"], entry_points["A"], perp_sign=1.0, scale=30.0),
+        _bent_path_2d(electrodes_2d["B"], entry_points["B"], perp_sign=-1.0, scale=30.0),
+    ]
+    terminals = ["TERMINAL_LEFT", "TERMINAL_LEFT"]
+    assert _same_hub_odd_pair_count(paths, terminals) == 0
+    assert _count_pair_crossings(paths) >= 2
+
+    new_paths, new_entries, _ = _uncross_by_entry_order_swap(
+        paths,
+        ["A", "B"],
+        terminals,
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+        slot_index={"A": 0, "B": 1},
+    )
+    # Slot swap + straight replan would make mutual odd; must not accept that.
+    assert _same_hub_odd_pair_count(new_paths, terminals) == 0
+    np.testing.assert_allclose(new_entries["A"], entry_points["A"])
+    np.testing.assert_allclose(new_entries["B"], entry_points["B"])
+
+
 def test_mutual_crossing_count_parity():
     a = _straight_path_2d(np.array([-10.0, 10.0]), np.array([10.0, -10.0]))
     b = _straight_path_2d(np.array([-10.0, -10.0]), np.array([10.0, 10.0]))

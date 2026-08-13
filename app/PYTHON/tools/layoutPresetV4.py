@@ -1337,11 +1337,14 @@ def _uncross_by_entry_order_swap(
             odd_improved = new_odd < odd_total
             count_improved = new_cross < cross_total
             even_mutual = (mutual % 2) == 0
-            if odd_total > 0:
-                # Never accept a move that fails to reduce odd parity debt.
+            # Never increase odd parity debt. While odds remain, only odd↓;
+            # once clear, count↓ / even-mutual only if odd stays 0.
+            if new_odd > odd_total:
+                accept = False
+            elif odd_total > 0:
                 accept = odd_improved
             else:
-                accept = count_improved or even_mutual
+                accept = new_odd == 0 and (count_improved or even_mutual)
 
             if accept:
                 paths = trial
