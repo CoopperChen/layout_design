@@ -10,6 +10,7 @@ setup_runtime()
 
 from PYTHON.tools.layoutPresetV4 import (  # noqa: E402
     _count_pair_crossings,
+    _mutual_crossing_count,
     _straight_path_2d,
     _uncross_by_entry_order_swap,
 )
@@ -79,14 +80,13 @@ def test_entry_order_swap_skips_different_terminals():
     np.testing.assert_allclose(new_entries["B"], entry_points["B"])
 
 
-def test_entry_order_swap_accepts_without_requiring_crossing_drop():
-    """Crossing pair is always swapped once; slots change even if X count stays > 0."""
+def test_entry_order_swap_accepts_even_mutual_when_count_may_not_drop():
+    """Accept swap that clears the pair (even mutual=0), even among 3 wires."""
     electrodes_2d = {
         "A": np.array([-30.0, 40.0]),
         "B": np.array([0.0, 45.0]),
         "C": np.array([30.0, 40.0]),
     }
-    # A↔C crossed; B in the middle. Swapping A↔C uncrosses that pair.
     entry_points = {
         "A": np.array([10.0, 0.0]),
         "B": np.array([0.0, 0.0]),
@@ -97,7 +97,7 @@ def test_entry_order_swap_accepts_without_requiring_crossing_drop():
     ]
     assert _count_pair_crossings(paths) >= 1
 
-    new_paths, new_entries, new_slots = _uncross_by_entry_order_swap(
+    new_paths, new_entries, _ = _uncross_by_entry_order_swap(
         paths,
         ["A", "B", "C"],
         ["TERMINAL_LEFT"] * 3,
@@ -106,10 +106,17 @@ def test_entry_order_swap_accepts_without_requiring_crossing_drop():
         {"zones": {}, "metadata": {}},
         slot_index={"A": 0, "B": 1, "C": 2},
     )
-    # At least one pair was swapped (assignment changed from the initial crossed map).
     assert (
         not np.allclose(new_entries["A"], entry_points["A"])
         or not np.allclose(new_entries["C"], entry_points["C"])
         or not np.allclose(new_entries["B"], entry_points["B"])
     )
-    assert new_slots != {"A": 0, "B": 1, "C": 2} or _count_pair_crossings(new_paths) == 0
+
+
+def test_mutual_crossing_count_parity():
+    a = _straight_path_2d(np.array([-10.0, 10.0]), np.array([10.0, -10.0]))
+    b = _straight_path_2d(np.array([-10.0, -10.0]), np.array([10.0, 10.0]))
+    assert _mutual_crossing_count(a, b) == 1
+    c = _straight_path_2d(np.array([-10.0, 0.0]), np.array([10.0, 0.0]))
+    d = _straight_path_2d(np.array([-10.0, 5.0]), np.array([10.0, 5.0]))
+    assert _mutual_crossing_count(c, d) == 0

@@ -899,6 +899,23 @@ def _count_pair_crossings(paths: list[np.ndarray]) -> int:
     return n_cross
 
 
+def _mutual_crossing_count(path_a: np.ndarray, path_b: np.ndarray) -> int:
+    """Number of discrete intersection points between two polylines."""
+    from shapely.geometry import LineString
+
+    inter = LineString(path_a).intersection(LineString(path_b))
+    if inter.is_empty:
+        return 0
+    if inter.geom_type == "Point":
+        return 1
+    if inter.geom_type == "MultiPoint":
+        return int(len(inter.geoms))
+    if inter.geom_type == "GeometryCollection":
+        return int(sum(1 for g in inter.geoms if g.geom_type == "Point"))
+    # Overlapping segments are not discrete point crossings; treat as odd (reject).
+    return 1
+
+
 def _layout_violation_score(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1168,14 +1185,15 @@ def _uncross_by_entry_order_swap(
     """
     If two same-terminal traces cross, swap their strip entry slots and replan.
 
-    Always accepts the swap for that pair (even if total crossings do not drop).
-    Each unordered electrode pair is swapped at most once to avoid A↔B oscillation.
-    Runs before geometric detour uncross so near-hub X patterns resolve by order.
+    Accept when total crossings decrease, OR when they do not decrease but the
+    two involved wires have an even mutual crossing count (0, 2, …) so polish
+    can clear residual contact. Odd mutual crossings after swap are rejected.
+    Each unordered electrode pair is tried at most once.
     """
     paths = [np.asarray(p, dtype=float).copy() for p in paths]
     entries = {k: np.asarray(v, dtype=float).copy() for k, v in entry_points.items()}
     slots = {k: int(v) for k, v in (slot_index or {}).items()}
-    swapped_pairs: set[frozenset[str]] = set()
+    tried_pairs: set[frozenset[str]] = set()
 
     def _replan(idx: int) -> np.ndarray:
         name = path_electrodes[idx]
@@ -1202,7 +1220,7 @@ def _uncross_by_entry_order_swap(
                 if name_a not in entries or name_b not in entries:
                     continue
                 pair_key = frozenset((name_a, name_b))
-                if pair_key in swapped_pairs:
+                if pair_key in tried_pairs:
                     continue
 
                 entries[name_a], entries[name_b] = (
@@ -1216,16 +1234,36 @@ def _uncross_by_entry_order_swap(
                 trial[i] = _replan(i)
                 trial[j] = _replan(j)
                 new_cross = _count_pair_crossings(trial)
-                # Always accept: crossing pair → swap slots + replan, keep result.
-                paths = trial
-                swapped_pairs.add(pair_key)
-                improved = True
-                print(
-                    f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
-                    f"crossings {cross_total}->{new_cross} (round {round_idx + 1}, "
-                    f"accepted)"
+                mutual = _mutual_crossing_count(trial[i], trial[j])
+                count_improved = new_cross < cross_total
+                even_mutual = (mutual % 2) == 0
+                accept = count_improved or even_mutual
+                tried_pairs.add(pair_key)
+
+                if accept:
+                    paths = trial
+                    improved = True
+                    reason = (
+                        "count↓" if count_improved else f"even mutual={mutual}"
+                    )
+                    print(
+                        f"  Entry-order swap {name_a}↔{name_b} on {path_terminals[i]}: "
+                        f"crossings {cross_total}->{new_cross} "
+                        f"(round {round_idx + 1}, {reason})"
+                    )
+                    break
+
+                # Reject: revert slots (odd residual mutual crossings, no count gain).
+                entries[name_a], entries[name_b] = (
+                    entries[name_b].copy(),
+                    entries[name_a].copy(),
                 )
-                break
+                if name_a in slots and name_b in slots:
+                    slots[name_a], slots[name_b] = slots[name_b], slots[name_a]
+                print(
+                    f"  Entry-order swap {name_a}↔{name_b} rejected: "
+                    f"crossings {cross_total}->{new_cross}, mutual={mutual} (odd)"
+                )
             if improved:
                 break
 
@@ -1233,7 +1271,7 @@ def _uncross_by_entry_order_swap(
             if cross_total > 0:
                 print(
                     f"  Entry-order swap stopped at round {round_idx + 1} "
-                    f"(crossings={cross_total}; remaining pairs already swapped once)"
+                    f"(crossings={cross_total}; no accepted swap left)"
                 )
             break
 
