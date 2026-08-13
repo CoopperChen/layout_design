@@ -9,10 +9,12 @@ from app.runtime import setup_runtime
 setup_runtime()
 
 from PYTHON.tools.layoutPresetV4 import (  # noqa: E402
+    _bent_path_2d,
     _count_pair_crossings,
     _mutual_crossing_count,
     _straight_path_2d,
     _uncross_by_entry_order_swap,
+    _uncross_even_mutual_pairs,
 )
 
 
@@ -120,3 +122,36 @@ def test_mutual_crossing_count_parity():
     c = _straight_path_2d(np.array([-10.0, 0.0]), np.array([10.0, 0.0]))
     d = _straight_path_2d(np.array([-10.0, 5.0]), np.array([10.0, 5.0]))
     assert _mutual_crossing_count(c, d) == 0
+
+
+def test_uncross_even_mutual_clears_double_weave():
+    """Uncrossed ends with a double weave should uncross via fixed-end bends."""
+    electrodes_2d = {
+        "A": np.array([-20.0, 40.0]),
+        "B": np.array([20.0, 40.0]),
+    }
+    entry_points = {
+        "A": np.array([-10.0, 0.0]),
+        "B": np.array([10.0, 0.0]),
+    }
+    # Opposite bows create an even mutual weave with uncrossed strip ends.
+    paths = [
+        _bent_path_2d(electrodes_2d["A"], entry_points["A"], perp_sign=1.0, scale=30.0),
+        _bent_path_2d(electrodes_2d["B"], entry_points["B"], perp_sign=-1.0, scale=30.0),
+    ]
+    mutual0 = _mutual_crossing_count(paths[0], paths[1])
+    assert mutual0 >= 2 and mutual0 % 2 == 0
+
+    out = _uncross_even_mutual_pairs(
+        paths,
+        ["A", "B"],
+        ["TERMINAL_LEFT", "TERMINAL_LEFT"],
+        electrodes_2d,
+        entry_points,
+        {"zones": {}, "metadata": {}},
+    )
+    assert _mutual_crossing_count(out[0], out[1]) < mutual0
+    np.testing.assert_allclose(out[0][0], electrodes_2d["A"])
+    np.testing.assert_allclose(out[1][0], electrodes_2d["B"])
+    np.testing.assert_allclose(out[0][-1], entry_points["A"])
+    np.testing.assert_allclose(out[1][-1], entry_points["B"])

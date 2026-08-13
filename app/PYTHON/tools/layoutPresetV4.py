@@ -1370,6 +1370,87 @@ def _uncross_by_tail_swap(
     return paths, entries
 
 
+def _uncross_even_mutual_pairs(
+    paths: list[np.ndarray],
+    path_electrodes: list[str],
+    path_terminals: list[str],
+    electrodes_2d: dict[str, np.ndarray],
+    entry_points: dict[str, np.ndarray],
+    electrode_zones: dict,
+    *,
+    max_rounds: int = 40,
+) -> list[np.ndarray]:
+    """
+    After entry-order swap: clear even mutual crossings with fixed ends.
+
+    Targets same-hub pairs whose mutual crossing count is even and > 0 (topologically
+    uncrossed endpoint pairing). Bends keep electrode + strip ends pinned.
+    Accepts a bend only if that pair's mutual count drops and global crossings do not rise.
+    """
+    paths = [np.asarray(p, dtype=float).copy() for p in paths]
+    for round_idx in range(int(max_rounds)):
+        global_cross = _count_pair_crossings(paths)
+        if global_cross == 0:
+            break
+
+        improved = False
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                if path_terminals[i] != path_terminals[j]:
+                    continue
+                mutual = _mutual_crossing_count(paths[i], paths[j])
+                if mutual == 0 or (mutual % 2) != 0:
+                    continue
+
+                for idx in (i, j):
+                    name = path_electrodes[idx]
+                    if name not in entry_points or name not in electrodes_2d:
+                        continue
+                    start = np.asarray(electrodes_2d[name], dtype=float)
+                    end = np.asarray(entry_points[name], dtype=float)
+                    for sign in (1.0, -1.0):
+                        for scale in (8.0, 16.0, 28.0, 42.0, 60.0):
+                            trial_path = new2d.pin_path_endpoints_2d(
+                                _bent_path_2d(start, end, sign, scale),
+                                start,
+                                end,
+                            )
+                            if _path_foreign_electrode_hits(
+                                trial_path, name, electrode_zones
+                            ):
+                                continue
+                            trial = list(paths)
+                            trial[idx] = trial_path
+                            new_mutual = _mutual_crossing_count(trial[i], trial[j])
+                            new_global = _count_pair_crossings(trial)
+                            if new_mutual < mutual and new_global <= global_cross:
+                                paths = trial
+                                improved = True
+                                print(
+                                    f"  Even-mutual uncross "
+                                    f"{path_electrodes[i]}↔{path_electrodes[j]}: "
+                                    f"mutual {mutual}->{new_mutual}, "
+                                    f"crossings {global_cross}->{new_global} "
+                                    f"(round {round_idx + 1})"
+                                )
+                                break
+                        if improved:
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+        if not improved:
+            print(
+                f"  Even-mutual uncross stopped at round {round_idx + 1} "
+                f"(crossings={global_cross})"
+            )
+            break
+    return paths
+
+
 def _uncross_paths_with_detours(
     paths: list[np.ndarray],
     path_electrodes: list[str],
@@ -1738,6 +1819,16 @@ def apply_layout_preset_v4_synthesize(
             terminal_zones,
             electrode_zones,
         )
+    # Even mutual weaves left after swap: bend with fixed ends (polishable topology).
+    print("  Even-mutual uncross (fixed ends, post-swap)...")
+    paths_2d = _uncross_even_mutual_pairs(
+        paths_2d,
+        path_electrodes,
+        path_terminals,
+        electrodes_2d,
+        entry_points_2d,
+        electrode_zones,
+    )
     paths_2d = _uncross_paths_with_detours(
         paths_2d,
         path_electrodes,
