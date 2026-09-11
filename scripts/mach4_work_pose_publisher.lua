@@ -26,7 +26,21 @@ local CMD_BIND_PORT = 62110
 local inst = mc.mcGetInstance()
 local udp_sockets = {}
 local lastPublish = 0.0
-local cmd_sock = nil
+local cmd_bind_error = nil
+
+-- Global so a PLC/script reload can close the previous OS bind (locals reset,
+-- but the port stays held until that userdata is closed).
+local function close_cmd_sock()
+  local sock = LayoutDesignCncCmdSock
+  LayoutDesignCncCmdSock = nil
+  if sock ~= nil then
+    pcall(function()
+      sock:close()
+    end)
+  end
+end
+
+close_cmd_sock()
 
 local function axis_pos(axisConst)
   -- mcAxisGetPos returns the active work coordinate (not machine coords).
@@ -301,7 +315,7 @@ local function handle_cmd(payload)
 end
 
 local function ensure_cmd_udp()
-  if cmd_sock ~= nil then
+  if LayoutDesignCncCmdSock ~= nil then
     return true
   end
   local ok, socket = pcall(require, "socket")
@@ -311,12 +325,23 @@ local function ensure_cmd_udp()
   end
   local udp = socket.udp()
   udp:settimeout(0)
+  pcall(function()
+    udp:setoption("reuseaddr", true)
+  end)
   local bind_ok, err = udp:setsockname(CMD_BIND_IP, CMD_BIND_PORT)
   if bind_ok == nil then
-    mc.mcCntlSetLastError(inst, "cnc command UDP: bind failed " .. tostring(err))
+    pcall(function()
+      udp:close()
+    end)
+    local msg = "cnc command UDP: bind failed " .. tostring(err)
+    if cmd_bind_error ~= msg then
+      cmd_bind_error = msg
+      mc.mcCntlSetLastError(inst, msg)
+    end
     return false
   end
-  cmd_sock = udp
+  cmd_bind_error = nil
+  LayoutDesignCncCmdSock = udp
   return true
 end
 
@@ -324,7 +349,8 @@ function PollCncCommandUdp()
   if not ensure_cmd_udp() then
     return
   end
-  local data, ip, port = cmd_sock:receivefrom()
+  local sock = LayoutDesignCncCmdSock
+  local data, ip, port = sock:receivefrom()
   if not data then
     return
   end
@@ -332,8 +358,10 @@ function PollCncCommandUdp()
   if not ok then
     ack = make_ack(false, "", "", tostring(ack))
   end
-  cmd_sock:sendto(ack, ip, port)
+  sock:sendto(ack, ip, port)
 end
 
 -- Call PublishWorkPoseUdp() and PollCncCommandUdp() from the profile PLC
 -- script each cycle. PollCncCommandUdp processes at most one datagram per call.
+-- Paste this file once (not Macros plus a second full copy in PLC). If bind
+-- still fails after a reload, Disable then Enable Mach4 to drop the old socket.

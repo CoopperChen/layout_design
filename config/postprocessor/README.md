@@ -147,6 +147,7 @@ You do **not** need to zero work coordinates at central. Relative storage keeps 
 |---------|--------|
 | `work pose: waiting` | Mach4 Lua running? `TARGETS` include this PC:`62101`? Firewall blocking UDP? |
 | `work pose: stale` | Publisher stopped or PLC not calling `PublishWorkPoseUdp` often enough |
+| `cnc command UDP: bind failed ... already in use` | Port `127.0.0.1:62110` still held from a previous PLC compile or a second copy of this script. Re-paste the updated Lua (it closes the old socket on load). If it persists: call `PollCncCommandUdp()` only once, then **Disable / Enable** Mach4 |
 | Capture refused | Need a **live** packet; wait until status shows `live` |
 | Wrong registration later | Same tip / same B/C habit as print; digital picks must be the same three markers; use matching `--rot0y`/`--rot0z` on convert and simulate |
 
