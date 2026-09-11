@@ -150,5 +150,5 @@ def test_client_timeout():
     port = probe.getsockname()[1]
     probe.close()
     client = CncControlClient(host="127.0.0.1", port=port)
-    with pytest.raises(CncControlError, match="no ack"):
+    with pytest.raises(CncControlError, match="not listening|timed out"):
         client.status(timeout_sec=0.1)

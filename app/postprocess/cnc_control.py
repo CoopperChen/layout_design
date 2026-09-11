@@ -204,10 +204,17 @@ class CncControlClient:
             sock.sendto(payload, (self.host, self.port))
             try:
                 data, _addr = sock.recvfrom(4096)
-            except (TimeoutError, ConnectionResetError, ConnectionRefusedError) as exc:
+            except (ConnectionResetError, ConnectionRefusedError) as exc:
                 raise CncControlError(
-                    f"no ack from Mach4 at {self.host}:{self.port} "
-                    f"(cmd={record['cmd']})"
+                    f"Mach4 is not listening on {self.host}:{self.port} "
+                    f"(cmd={record['cmd']}). PLC must call PollCncCommandUdp() "
+                    "every cycle; check Mach4 for a bind-failed message."
+                ) from exc
+            except TimeoutError as exc:
+                raise CncControlError(
+                    f"timed out waiting for Mach4 ACK at {self.host}:{self.port} "
+                    f"(cmd={record['cmd']}). If this is load, the controller "
+                    "may still be opening the file — try: python -m app cnc status"
                 ) from exc
         finally:
             sock.close()

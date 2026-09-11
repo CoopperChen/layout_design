@@ -14,6 +14,8 @@
 -- Edit TARGETS to match each consumer on the LAN (one UDP socket per target).
 -- Keep pose TARGETS in sync with Orbbec CV `scripts/mach4_work_pose_publisher.lua`.
 -- Command socket binds 127.0.0.1 only (do not use 0.0.0.0).
+-- Mach4 runs the PLC script top-to-bottom every cycle: keep sockets in
+-- globals so a paste-into-PLC install does not close/rebind 62110 each tick.
 
 local TARGETS = {
   { ip = "192.168.208.10", port = 62100 }, -- Orbbec head tracking / orbbec-head-stream-cnc
@@ -24,23 +26,6 @@ local CMD_BIND_IP = "127.0.0.1"
 local CMD_BIND_PORT = 62110
 
 local inst = mc.mcGetInstance()
-local udp_sockets = {}
-local lastPublish = 0.0
-local cmd_bind_error = nil
-
--- Global so a PLC/script reload can close the previous OS bind (locals reset,
--- but the port stays held until that userdata is closed).
-local function close_cmd_sock()
-  local sock = LayoutDesignCncCmdSock
-  LayoutDesignCncCmdSock = nil
-  if sock ~= nil then
-    pcall(function()
-      sock:close()
-    end)
-  end
-end
-
-close_cmd_sock()
 
 local function axis_pos(axisConst)
   -- mcAxisGetPos returns the active work coordinate (not machine coords).
@@ -48,7 +33,7 @@ local function axis_pos(axisConst)
 end
 
 local function ensure_udp()
-  if next(udp_sockets) ~= nil then
+  if type(LayoutDesignPoseSocks) == "table" and LayoutDesignPoseSocks[1] ~= nil then
     return true
   end
   local ok, socket = pcall(require, "socket")
@@ -56,20 +41,23 @@ local function ensure_udp()
     mc.mcCntlSetLastError(inst, "work pose UDP: LuaSocket not available")
     return false
   end
+  local socks = {}
   for i, target in ipairs(TARGETS) do
     local udp = socket.udp()
     udp:setpeername(target.ip, target.port)
-    udp_sockets[i] = udp
+    socks[i] = udp
   end
+  LayoutDesignPoseSocks = socks
   return true
 end
 
 function PublishWorkPoseUdp()
   local now = os.clock()
-  if (now - lastPublish) < PUBLISH_PERIOD_SEC then
+  local last = LayoutDesignPoseLastPublish or 0.0
+  if (now - last) < PUBLISH_PERIOD_SEC then
     return
   end
-  lastPublish = now
+  LayoutDesignPoseLastPublish = now
   if not ensure_udp() then
     return
   end
@@ -84,7 +72,7 @@ function PublishWorkPoseUdp()
     '{"coord":"work","units":"mm","x":%.4f,"y":%.4f,"z":%.4f,"b":%.4f,"c":%.4f}',
     x, y, z, b, c
   )
-  for _, udp in ipairs(udp_sockets) do
+  for _, udp in ipairs(LayoutDesignPoseSocks) do
     udp:send(payload)
   end
 end
@@ -334,13 +322,13 @@ local function ensure_cmd_udp()
       udp:close()
     end)
     local msg = "cnc command UDP: bind failed " .. tostring(err)
-    if cmd_bind_error ~= msg then
-      cmd_bind_error = msg
+    if LayoutDesignCmdBindError ~= msg then
+      LayoutDesignCmdBindError = msg
       mc.mcCntlSetLastError(inst, msg)
     end
     return false
   end
-  cmd_bind_error = nil
+  LayoutDesignCmdBindError = nil
   LayoutDesignCncCmdSock = udp
   return true
 end
@@ -362,6 +350,6 @@ function PollCncCommandUdp()
 end
 
 -- Call PublishWorkPoseUdp() and PollCncCommandUdp() from the profile PLC
--- script each cycle. PollCncCommandUdp processes at most one datagram per call.
--- Paste this file once (not Macros plus a second full copy in PLC). If bind
--- still fails after a reload, Disable then Enable Mach4 to drop the old socket.
+-- script each cycle. If this whole file is pasted into the PLC script, add
+-- those two calls at the bottom (do not close/rebind inside the paste).
+-- PollCncCommandUdp processes at most one datagram per call.
