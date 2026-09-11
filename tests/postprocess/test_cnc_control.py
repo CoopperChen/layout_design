@@ -58,6 +58,27 @@ def test_parse_ack_lua_style():
     assert "state=idle" in line
 
 
+def test_parse_ack_missing_closing_quotes_is_invalid():
+    """Regression: Lua concat omitted '"' after each string field."""
+    broken = (
+        '{"ok":true,"id":"8e27d87b7cd04014a71471880c93ab29,"cmd":"status,'
+        '"error":","state":"idle,"enabled":true,"file":","x":-57.8981,'
+        '"y":27.0700,"z":29.7000,"b":-0.0000,"c":200.3175}'
+    )
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(broken)
+    fixed = (
+        '{"ok":true,"id":"8e27d87b7cd04014a71471880c93ab29","cmd":"status",'
+        '"error":"","state":"idle","enabled":true,"file":"","x":-57.8981,'
+        '"y":27.0700,"z":29.7000,"b":-0.0000,"c":200.3175}'
+    )
+    ack = parse_ack(fixed)
+    assert ack.ok is True
+    assert ack.cmd == "status"
+    assert ack.state == "idle"
+    assert ack.c_deg == 200.3175
+
+
 def test_parse_ack_false_error():
     ack = parse_ack('{"ok":false,"id":"1","cmd":"start","error":"not idle (state=running)"}')
     assert ack.ok is False

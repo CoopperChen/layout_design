@@ -242,12 +242,12 @@ local function make_ack(ok, id, cmd, err)
   local x, y, z, b, c = work_pose()
   return table.concat({
     '{"ok":', ok and "true" or "false",
-    ',"id":"', json_escape(id),
-    ',"cmd":"', json_escape(cmd),
-    ',"error":"', json_escape(err or ""),
-    ',"state":"', json_escape(state_label()),
+    ',"id":"', json_escape(id), '"',
+    ',"cmd":"', json_escape(cmd), '"',
+    ',"error":"', json_escape(err or ""), '"',
+    ',"state":"', json_escape(state_label()), '"',
     ',"enabled":', machine_enabled() and "true" or "false",
-    ',"file":"', json_escape(gcode_filename()),
+    ',"file":"', json_escape(gcode_filename()), '"',
     ',"x":', json_num(x),
     ',"y":', json_num(y),
     ',"z":', json_num(z),
