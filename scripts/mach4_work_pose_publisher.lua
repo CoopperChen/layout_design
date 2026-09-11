@@ -79,10 +79,49 @@ end
 
 local function json_escape(s)
   s = tostring(s or "")
-  s = s:gsub("\\", "\\\\")
-  s = s:gsub('"', '\\"')
-  s = s:gsub("\r", "\\r")
-  s = s:gsub("\n", "\\n")
+  local out = {}
+  for i = 1, #s do
+    local ch = s:sub(i, i)
+    local b = s:byte(i)
+    if ch == "\\" then
+      out[#out + 1] = "\\\\"
+    elseif ch == '"' then
+      out[#out + 1] = '\\"'
+    elseif ch == "\n" then
+      out[#out + 1] = "\\n"
+    elseif ch == "\r" then
+      out[#out + 1] = "\\r"
+    elseif ch == "\t" then
+      out[#out + 1] = "\\t"
+    elseif b < 32 then
+      out[#out + 1] = string.format("\\u%04x", b)
+    else
+      out[#out + 1] = ch
+    end
+  end
+  return table.concat(out)
+end
+
+local function json_num(n)
+  n = tonumber(n)
+  if n == nil or n ~= n then
+    return "0"
+  end
+  local neg = n < 0
+  if neg then
+    n = -n
+  end
+  if n > 1e12 then
+    return "0"
+  end
+  local scaled = math.floor(n * 10000 + 0.5)
+  local ipart = math.floor(scaled / 10000)
+  local frac = scaled - ipart * 10000
+  local s = string.format("%d.%04d", ipart, frac)
+  s = s:gsub(",", ".")
+  if neg then
+    s = "-" .. s
+  end
   return s
 end
 
@@ -209,14 +248,18 @@ local function make_ack(ok, id, cmd, err)
     ',"state":"', json_escape(state_label()),
     ',"enabled":', machine_enabled() and "true" or "false",
     ',"file":"', json_escape(gcode_filename()),
-    ',"x":', string.format("%.4f", x),
-    ',"y":', string.format("%.4f", y),
-    ',"z":', string.format("%.4f", z),
-    ',"b":', string.format("%.4f", b),
-    ',"c":', string.format("%.4f", c),
+    ',"x":', json_num(x),
+    ',"y":', json_num(y),
+    ',"z":', json_num(z),
+    ',"b":', json_num(b),
+    ',"c":', json_num(c),
     "}",
   })
 end
+
+local MINIMAL_NACK =
+  '{"ok":false,"id":"","cmd":"","error":"ack-build-failed","state":"unknown",'
+  .. '"enabled":false,"file":"","x":0,"y":0,"z":0,"b":0,"c":0}'
 
 local function file_readable(path)
   local f = io.open(path, "r")
@@ -344,7 +387,15 @@ function PollCncCommandUdp()
   end
   local ok, ack = pcall(handle_cmd, data)
   if not ok then
-    ack = make_ack(false, "", "", tostring(ack))
+    local built, nack = pcall(make_ack, false, "", "", tostring(ack))
+    if built then
+      ack = nack
+    else
+      ack = MINIMAL_NACK
+    end
+  end
+  if type(ack) ~= "string" then
+    ack = MINIMAL_NACK
   end
   sock:sendto(ack, ip, port)
 end

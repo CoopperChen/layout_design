@@ -221,4 +221,11 @@ class CncControlClient:
         try:
             return parse_ack(data)
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError, KeyError) as exc:
-            raise CncControlError(f"invalid ack from Mach4: {exc}") from exc
+            if isinstance(data, bytes):
+                preview = data.decode("utf-8", errors="replace")
+            else:
+                preview = str(data)
+            preview = preview.replace("\r", " ").replace("\n", " ")[:180]
+            raise CncControlError(
+                f"invalid ack from Mach4: {exc}; raw={preview!r}"
+            ) from exc

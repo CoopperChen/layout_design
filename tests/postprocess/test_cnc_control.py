@@ -144,6 +144,27 @@ def test_client_roundtrip_status():
         server.close()
 
 
+def test_client_invalid_ack_includes_raw():
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind(("127.0.0.1", 0))
+    port = server.getsockname()[1]
+
+    def serve() -> None:
+        _data, addr = server.recvfrom(4096)
+        server.sendto(b'{"ok":true,"id":"","cmd":"load","error":"[string "PLC"]"}', addr)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        client = CncControlClient(host="127.0.0.1", port=port)
+        with pytest.raises(CncControlError, match=r"raw=.*string") as caught:
+            client.status(timeout_sec=2.0)
+        assert "Expecting" in str(caught.value) or "delimiter" in str(caught.value)
+    finally:
+        thread.join(timeout=2.0)
+        server.close()
+
+
 def test_client_timeout():
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     probe.bind(("127.0.0.1", 0))
