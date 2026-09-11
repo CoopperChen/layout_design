@@ -20,6 +20,7 @@ Console entry point (same interface): `layout <command> …`
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
 | C — Polish (optional) | `polish` |
 | D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `record-pm`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
+| Machine (Mach4) | `cnc` (`status` / `load` / `start` / `hold` / `stop`) |
 
 Typical end-to-end (recommended):
 
@@ -40,6 +41,8 @@ python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
 python -m app record-pm --subject 2                    # preferred: CNC DRO + keyboard
 # python -m app init-print-config --subject 2          # empty scaffold only
 python -m app convert-gcode --bundle data/output/bundles/subject_2
+python -m app cnc load --gcode data/output/gcode/subject_2_post/allinterconnects.txt
+python -m app cnc start --confirm
 python -m app simulate-gcode --gcode data/output/gcode/subject_2_post/allinterconnects.txt --bundle data/output/bundles/subject_2
 ```
 
@@ -444,6 +447,33 @@ data/output/gcode/subject_{id}_post/
 python -m app convert-gcode --bundle ... --trace interconnect   # wires only
 python -m app convert-gcode --bundle ... --trace electrode      # pads only
 ```
+
+---
+
+### `cnc`
+
+Load a convert-gcode file in Mach4 and Cycle Start / hold / stop. **Not** wired into `run`. Jog and MDI stay on the pendant.
+
+**Prerequisites:** same Windows PC as Mach4. LuaSocket in Mach4. PLC calls both `PublishWorkPoseUdp()` and `PollCncCommandUdp()` from [`scripts/mach4_work_pose_publisher.lua`](../scripts/mach4_work_pose_publisher.lua). Command socket is **localhost** `127.0.0.1:62110` (not `0.0.0.0`).
+
+```bash
+python -m app cnc status
+python -m app cnc load --gcode data/output/gcode/subject_2_post/allinterconnects.txt
+python -m app cnc start --confirm
+python -m app cnc hold
+python -m app cnc stop
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--host` | `127.0.0.1` | Mach4 command UDP host |
+| `--port` | `62110` | Mach4 command UDP port |
+| `--gcode` | — | `load` only: G-code `.txt` (relative paths resolve from repo root) |
+| `--confirm` | required on `start` | Must be passed; Cycle Start is never automatic |
+
+`load`/`start` are refused unless Mach4 is enabled and idle. `hold`/`stop` are always sent (twice) and do not require `--confirm`. Pendant E-stop remains primary.
+
+Setup: [config/postprocessor/README.md](../config/postprocessor/README.md).
 
 ---
 

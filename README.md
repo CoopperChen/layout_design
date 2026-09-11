@@ -346,6 +346,8 @@ python -m app record-pm --subject 2
 python -m app init-print-config --subject 2
 
 python -m app convert-gcode --bundle data/output/bundles/subject_2
+python -m app cnc load --gcode data/output/gcode/subject_2_post/allinterconnects.txt
+python -m app cnc start --confirm
 python -m app list-electrodes --bundle data/output/bundles/subject_2
 python -m app simulate-gcode `
   --gcode data/output/gcode/subject_2_post/allinterconnects.txt `
@@ -366,7 +368,7 @@ Digital calibration picks in `fiducials_{id}.json` are **scan-frame**. At print 
 
 ### Automated capture (CNC DRO + keyboard)
 
-1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (publishes to `62100` Orbbec + `62101` record-pm).
+1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (publishes to `62100` Orbbec + `62101` record-pm; PLC must also call `PollCncCommandUdp()` for `python -m app cnc`).
 2. Mount the end-effector; jog the tip to each marker.
 3. Capture:
 
@@ -442,7 +444,7 @@ layout_design/
 ├── data/                   # Pipeline I/O (see data/README.md)
 ├── docs/                   # CLI.md, PIPELINE.md, MACHINE_KINEMATICS.md, …
 ├── legacy_gcode_examples/  # MATLAB reference (optional)
-├── scripts/                # Mach4 work-pose Lua, NSF helpers, …
+├── scripts/                # Mach4 work-pose + cnc command Lua, NSF helpers, …
 └── tests/
 ```
 

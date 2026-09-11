@@ -12,6 +12,8 @@ Unified pipeline CLI.
   python -m app init-print-config --subject {id}
   python -m app record-pm --subject {id}
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
+  python -m app cnc load --gcode data/output/gcode/subject_{id}_post/allinterconnects.txt
+  python -m app cnc start --confirm
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
   python -m app run --target 2
   python -m app run --target 2 --ply data/raw/2.ply --from synthesize
@@ -317,6 +319,34 @@ def cmd_record_pm(args: argparse.Namespace) -> int:
         return int(e.code) if isinstance(e.code, int) else 1
 
 
+def cmd_cnc(args: argparse.Namespace) -> int:
+    from app.postprocess.cnc_control import CncControlClient, CncControlError
+
+    client = CncControlClient(host=args.host, port=args.port)
+    try:
+        if args.cnc_cmd == "status":
+            ack = client.status()
+        elif args.cnc_cmd == "load":
+            ack = client.load(args.gcode)
+        elif args.cnc_cmd == "start":
+            ack = client.start()
+        elif args.cnc_cmd == "hold":
+            ack = client.hold()
+        elif args.cnc_cmd == "stop":
+            ack = client.stop()
+        else:
+            print(f"unknown cnc command {args.cnc_cmd}", file=sys.stderr)
+            return 2
+    except FileNotFoundError as e:
+        print(e, file=sys.stderr)
+        return 1
+    except CncControlError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(ack.format_line())
+    return 0 if ack.ok else 1
+
+
 def cmd_convert_gcode(args: argparse.Namespace) -> int:
     from app.postprocess import convert_gcode as cg
 
@@ -619,6 +649,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rpm.add_argument("--force", action="store_true", help="Overwrite existing file")
     rpm.set_defaults(func=cmd_record_pm)
+
+    from app.postprocess.cnc_control import DEFAULT_CNC_HOST, DEFAULT_CNC_PORT
+
+    cnc_opts = argparse.ArgumentParser(add_help=False)
+    cnc_opts.add_argument(
+        "--host",
+        default=DEFAULT_CNC_HOST,
+        help=f"Mach4 command UDP host (default: {DEFAULT_CNC_HOST})",
+    )
+    cnc_opts.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_CNC_PORT,
+        help=f"Mach4 command UDP port (default: {DEFAULT_CNC_PORT})",
+    )
+    cnc = sub.add_parser(
+        "cnc",
+        help="Load/run G-code on Mach4 (localhost UDP; not wired into run)",
+    )
+    cnc_sub = cnc.add_subparsers(dest="cnc_cmd", required=True)
+    cnc_sub.add_parser(
+        "status",
+        parents=[cnc_opts],
+        help="Query Mach4 idle/enabled/file/DRO",
+    ).set_defaults(func=cmd_cnc)
+    cnc_load = cnc_sub.add_parser(
+        "load",
+        parents=[cnc_opts],
+        help="Load a G-code file (absolute path sent to Mach4)",
+    )
+    cnc_load.add_argument(
+        "--gcode",
+        required=True,
+        type=Path,
+        help="G-code .txt (relative paths resolve from repo root)",
+    )
+    cnc_load.set_defaults(func=cmd_cnc)
+    cnc_start = cnc_sub.add_parser(
+        "start",
+        parents=[cnc_opts],
+        help="Cycle Start (requires --confirm)",
+    )
+    cnc_start.add_argument(
+        "--confirm",
+        action="store_true",
+        required=True,
+        help="Required confirmation; Cycle Start is never automatic",
+    )
+    cnc_start.set_defaults(func=cmd_cnc)
+    cnc_sub.add_parser(
+        "hold",
+        parents=[cnc_opts],
+        help="Feed hold",
+    ).set_defaults(func=cmd_cnc)
+    cnc_sub.add_parser(
+        "stop",
+        parents=[cnc_opts],
+        help="Cycle stop",
+    ).set_defaults(func=cmd_cnc)
 
     cg = sub.add_parser("convert-gcode", help="Stage D: bundle → 5-axis G-code")
     cg.add_argument("--bundle", required=True, help="Bundle dir")

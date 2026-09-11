@@ -40,7 +40,7 @@ Reads the live CNC **work** DRO over UDP (same Mach4 publisher used by Orbbec CN
    - `192.168.208.10:62101` — this repo’s `record-pm`
 3. Both apps can run at once because Mach4 sends the same JSON to **two ports** (one unicast port cannot be shared).
 4. Ensure **LuaSocket** is available to Mach4 (`socket.dll` under Mach4’s Lua API tree).
-5. Call `PublishWorkPoseUdp()` every PLC cycle (or from a timer). The script uses `mc.mcAxisGetPos()` — **active work coordinates** (G54/G55… DRO), not machine coordinates.
+5. Call `PublishWorkPoseUdp()` **and** `PollCncCommandUdp()` every PLC cycle. Pose uses `mc.mcAxisGetPos()` — **active work coordinates** (G54/G55… DRO), not machine coordinates. Commands bind **`127.0.0.1:62110`** only (one datagram per PLC cycle).
 
 **Packet format** (JSON over UDP):
 
@@ -50,6 +50,28 @@ Reads the live CNC **work** DRO over UDP (same Mach4 publisher used by Orbbec CN
 
 - `coord` must be `"work"` (also accepts `"g54"` / `"active"`).
 - Prefer `"units":"mm"`. Inches are scaled by 25.4 if `"units":"in"`.
+
+### Load and run G-code from Python (`cnc`)
+
+Same Lua file also listens on **`127.0.0.1:62110`** for JSON commands from this PC (not the LAN). After `convert-gcode`:
+
+```powershell
+python -m app cnc status
+python -m app cnc load --gcode data/output/gcode/subject_4_post/allinterconnects.txt
+python -m app cnc start --confirm
+python -m app cnc hold
+python -m app cnc stop
+```
+
+`start` requires `--confirm`. `load`/`start` run only when the machine is enabled and idle. This is **not** part of `python -m app run`.
+
+Command packet (Python → Mach4):
+
+```json
+{"id":"…","cmd":"load","path":"D:\\Research\\layout_design\\data\\output\\gcode\\subject_4_post\\allinterconnects.txt"}
+```
+
+`cmd` is `status`, `load`, `start`, `hold`, or `stop`. Mach4 replies with one JSON ACK (`ok`, `state`, `enabled`, `file`, work XYZBC).
 
 ### 2. Mount and jog
 
@@ -209,10 +231,11 @@ Use the **same** `pm` YAML and `--rot0y` / `--rot0z` as `convert-gcode`. Digital
 | `subjects/subject_{id}.yaml` | **pm** for that subject (+ optional `capture:` audit) |
 | `subjects/example.yaml` | Empty template |
 | `subjects/synthetic.yaml` | Contract tests only |
-| [`scripts/mach4_work_pose_publisher.lua`](../../scripts/mach4_work_pose_publisher.lua) | Mach4 → UDP work DRO publisher |
+| [`scripts/mach4_work_pose_publisher.lua`](../../scripts/mach4_work_pose_publisher.lua) | Mach4 → UDP work DRO publisher; localhost load/run command listener |
 
 | Code | Role |
 |------|------|
 | `app/postprocess/cnc_work_pose.py` | UDP client / JSON parse |
+| `app/postprocess/cnc_control.py` | Localhost load/run UDP client |
 | `app/postprocess/record_pm.py` | Keyboard capture loop |
 | `app/postprocess/print_config.py` | Scaffold + load/save pm YAML |
