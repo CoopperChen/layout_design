@@ -27,6 +27,17 @@ def _retract_feed(machine: MachineConfig) -> float:
     return float(machine.retract_speed_mm_min)
 
 
+def _reverse_trace_keeping_jet_cycles(trace: np.ndarray) -> np.ndarray:
+    """Reverse a trace and swap M10/M11 so a parked slew stays jet-off."""
+    out = np.flipud(_ensure7(trace)).copy()
+    markers = out[:, 6]
+    swapped = markers.copy()
+    swapped[markers == 10] = 11
+    swapped[markers == 11] = 10
+    out[:, 6] = swapped
+    return out
+
+
 def _ensure7(trace: np.ndarray) -> np.ndarray:
     if trace.ndim == 1:
         trace = trace.reshape(1, -1)
@@ -120,6 +131,18 @@ def _append_disengage_offset_retract(
     return np.vstack([trace, suffix])
 
 
+def _drop_idle_terminal_jet_on(trace: np.ndarray) -> np.ndarray:
+    """Drop a closing M10 that has no dispense move after it."""
+    trace = _ensure7(trace)
+    if len(trace) < 2 or int(trace[-1, 6]) != 10:
+        return trace
+    if np.linalg.norm(trace[-1, :3] - trace[-2, :3]) > 1e-3:
+        return trace
+    if abs(float(trace[-1, 3]) - float(trace[-2, 3])) > 1e-3:
+        return trace
+    return trace[:-1].copy()
+
+
 def _apply_last_trace_end(
     trace: np.ndarray,
     zsafe: float,
@@ -130,6 +153,7 @@ def _apply_last_trace_end(
     engage_config: EngageClearanceConfig,
 ) -> np.ndarray:
     """M11 on duplicated last row, then optional offset retract to Zsafe."""
+    trace = _drop_idle_terminal_jet_on(trace)
     exit_row = trace[-1]
     t = _append_row(trace)
     t[-1, 6] = 11
@@ -153,11 +177,16 @@ def _apply_first_trace_approach(
     checker: HeadMeshInsideChecker | None,
     engage_config: EngageClearanceConfig,
 ) -> np.ndarray:
-    """Zsafe on row 1, approach rows, M10 on first print pose before jetting."""
+    """Zsafe on row 1, approach rows, M10 on first print pose before jetting.
+
+    A trace that already starts with M11 begins on a parked slew. The approach
+    stays jet-off and the trace's own M10 starts dispensing.
+    """
     if trace.shape[0] < 1:
         return trace
 
     engage_row = trace[0]
+    starts_jet_off = int(trace[0, 6]) == 11
     offset_xy = _engage_offset_xy(
         engage_row,
         zsafe,
@@ -174,6 +203,8 @@ def _apply_first_trace_approach(
     jet_on[0, 6] = 10
 
     if prefix.shape[0] > 0:
+        if starts_jet_off:
+            return np.vstack([prefix, trace])
         return np.vstack([prefix, jet_on, trace[1:]])
 
     row_zsafe = trace[0:1].copy()
@@ -182,6 +213,8 @@ def _apply_first_trace_approach(
     row_print = trace[0:1].copy()
     if abs(float(row_zsafe[0, 2]) - float(row_print[0, 2])) > 0.5:
         row_print[0, 5] = _retract_feed(machine)
+    if starts_jet_off:
+        return np.vstack([row_zsafe, row_print, trace[1:]])
     return np.vstack([row_zsafe, row_print, jet_on, trace[1:]])
 
 
@@ -204,7 +237,7 @@ def merge_traces(
     if alternate_flip:
         for i in range(len(traces)):
             if (i + 1) % 2 == 0:
-                traces[i] = np.flipud(traces[i])
+                traces[i] = _reverse_trace_keeping_jet_cycles(traces[i])
 
     zsafe = round(mesh_z_max + machine.zsafe_margin_mm)
     engage_config = load_engage_clearance_config(machine)
@@ -233,7 +266,7 @@ def merge_traces(
         return merged
 
     for i in range(len(traces) - 1):
-        t = traces[i]
+        t = _drop_idle_terminal_jet_on(traces[i])
         exit_row = t[-1]
         t = _append_row(t)
         t[-1, 6] = 11
@@ -282,11 +315,12 @@ def merge_traces(
         )
         t = _append_engage_approach(t, engage_row, zsafe, offset_xy, machine)
 
-        jet_on = np.zeros((1, 7))
-        jet_on[0, :6] = t[-1, :6]
-        jet_on[0, 5] = float(engage_row[5])
-        jet_on[0, 6] = 10
-        t = np.vstack([t, jet_on])
+        if int(engage_row[6]) != 11:
+            jet_on = np.zeros((1, 7))
+            jet_on[0, :6] = t[-1, :6]
+            jet_on[0, 5] = float(engage_row[5])
+            jet_on[0, 6] = 10
+            t = np.vstack([t, jet_on])
         traces[i] = t
 
     traces[-1] = _apply_last_trace_end(

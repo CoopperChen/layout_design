@@ -131,15 +131,15 @@ Use `arm_offset_xy_matlab(c, a)` for the sin/cos arm term in the postprocessor (
 
 ## Print feedrate (constant tip speed)
 
-Controller **F** commands **C-pivot (XYZ)** speed. For each print segment:
+Controller **F** commands **C-pivot (XYZ)** speed. The jet is a fixed on/off rate, so every dispensing block keeps the tip at ``speed_mm_min``:
 
 ```
-F = V_tip · ||ΔC_pivot|| / ||Δtip_FK||
+F = speed_mm_min · ||ΔC_pivot|| / ||Δtip_FK||
 ```
 
-with ``V_tip = speed_mm_min``, clamped to ``max_speed_mm_min``.
+``Δtip_FK`` is the rigid forward-kinematics tip travel for the programmed ``(X,Y,Z,B,C)`` poses. ``max_speed_mm_min`` is the pivot speed the axes can hold. A block whose required F exceeds that cap is not dispensed.
 
-``Δtip_FK`` is the rigid forward-kinematics tip travel for the programmed ``(X,Y,Z,B,C)`` poses — not the raw scalp chord — so B/C swings that move the tip are included. Using the path chord alone sets **F too high** during orientation changes (tip serpentine at max feed).
+Where ``|n_xy|`` is below ``c_pole_nxy_min``, C is held: at the crown it is a twist about a vertical nozzle. Any remaining over-limit orientation change is a parked slew with the jet off (``M11``, travel feed, ``M10``). If the tip advance itself cannot hold ``speed_mm_min`` with B/C frozen, that hop is jet-off as well.
 
 ## Simulator (`simulate-gcode`)
 

@@ -46,7 +46,9 @@ def compute_feed_rates(
 
     Segments with negligible tip motion but nonzero C-pivot travel use
     ``max_speed_mm_min`` (pure reorientation). All feeds are capped at
-    ``max_speed_mm_min``; when capped, tip speed is below ``V_tip`` for that hop.
+    ``max_speed_mm_min``. A capped block would move the tip slower than
+    ``V_tip``. ``dispense_pivot_feed`` rejects those blocks so they are not
+    printed with the jet on.
     """
     pivots = np.asarray(machine_positions, dtype=float)
     tips = np.asarray(nozzle_positions, dtype=float)
@@ -83,6 +85,38 @@ def compute_feed_rates(
     # First print row inherits the nominal tip speed (approach feeds set in merge).
     feeds[0] = v_tip
     return np.round(feeds, 0)
+
+
+def required_pivot_feed(
+    disp_pivot: float,
+    disp_tip: float,
+    machine: MachineConfig,
+) -> float:
+    """C-pivot feed that holds tip speed at ``speed_mm_min``.
+
+    Returns infinity when the pivot must move and the tip does not: that block
+    cannot dispense at the setpoint.
+    """
+    v_tip = float(machine.speed_mm_min)
+    if disp_tip > 1e-6:
+        return v_tip * float(disp_pivot) / float(disp_tip)
+    if disp_pivot > 1e-6:
+        return float("inf")
+    return v_tip
+
+
+def dispense_pivot_feed(
+    disp_pivot: float,
+    disp_tip: float,
+    machine: MachineConfig,
+) -> float | None:
+    """Rounded pivot feed for a jet-on block, or None if the cap would be exceeded."""
+    feed = required_pivot_feed(disp_pivot, disp_tip, machine)
+    if not np.isfinite(feed):
+        return None
+    if feed > float(machine.max_speed_mm_min) + 1e-6:
+        return None
+    return float(np.round(feed, 0))
 
 
 def compute_print_feed_rates(
