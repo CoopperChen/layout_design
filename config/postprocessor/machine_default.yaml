@@ -7,9 +7,9 @@ machine:
   calgap_z_mm: 26.62
   c0_deg: 90
   b0_deg: 0
-  speed_mm_min: 750
-  max_speed_mm_min: 1500  # C-pivot cap; dispensing tip speed stays speed_mm_min
-  transition_speed_mm_min: 1500
-  retract_speed_mm_min: 750
+  speed_mm_min: 1000
+  max_speed_mm_min: 1000  # C-pivot cap; dispensing tip speed stays speed_mm_min
+  transition_speed_mm_min: 2000
+  retract_speed_mm_min: 1000
   jet_freq_hz: 12
   zsafe_margin_mm: 10
