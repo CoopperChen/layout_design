@@ -34,6 +34,12 @@ jobs:
 
 
 
+      - name: Install Open3D system libraries
+
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+
+
+
       - name: Install package and test deps
 
         run: pip install -e ".[dev]"
