@@ -11,7 +11,6 @@ from app.postprocess.gcode.config_loader import load_machine_config
 from app.postprocess.gcode.kinematics.flip_correction import (
     correct_flip,
     enforce_axis_continuity,
-    hold_c_near_pole,
     limit_c_slew,
     max_c_step_deg,
     validate_axis_continuity,
@@ -62,24 +61,6 @@ def test_validate_axis_continuity_raises_on_large_jump():
         validate_axis_continuity(b, c, max_c_step_deg=45.0)
 
 
-def test_hold_c_near_pole_freezes_singular_samples():
-    c = np.array([10.0, 80.0, 20.0, 25.0])
-    normals = np.array(
-        [
-            [0.6, 0.0, 0.8],
-            [0.02, 0.0, 1.0],
-            [0.03, 0.04, 1.0],
-            [0.0, 0.7, 0.7],
-        ]
-    )
-    normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
-    held = hold_c_near_pole(c, normals, nxy_min=0.2)
-    assert held[0] == 10.0
-    assert held[1] == 10.0
-    assert held[2] == 10.0
-    assert held[3] == 25.0
-
-
 def test_limit_c_slew_caps_steps():
     b = np.zeros(4)
     c = np.array([0.0, 40.0, 80.0, 120.0])
@@ -120,18 +101,8 @@ def test_process_trace_applies_correct_flip_on_subject_4():
         mesh_points=mesh_m,
         mesh_faces=bundle.mesh_faces,
     )
-    jet = True
-    steps: list[float] = []
-    for i in range(1, len(rows)):
-        if jet:
-            steps.append(_c_delta_deg(rows[i - 1, 4], rows[i, 4]))
-        marker = int(rows[i, 6])
-        if marker == 11:
-            jet = False
-        elif marker == 10:
-            jet = True
-    assert steps
-    assert max(steps) < 45.0
+    max_step = max(_c_delta_deg(rows[i, 4], rows[i - 1, 4]) for i in range(1, len(rows)))
+    assert max_step < 45.0
 
 
 def test_process_trace_o2_no_start_c_jump_on_subject_5():
@@ -169,8 +140,8 @@ def test_process_trace_o2_no_start_c_jump_on_subject_5():
     assert _c_delta_deg(rows[0, 4], rows[1, 4]) < 5.0
 
 
-def test_process_trace_fz_jet_on_steps_hold_tip_speed():
-    """Fz crown C catch-up is jet-off; dispensing steps stay within the pivot cap."""
+def test_process_trace_slew_limits_c_on_subject_5_fz():
+    """Fz crown can demand large C changes; slew limit caps printer steps."""
     bundle_dir = paths.REPO_ROOT / "data/output/bundles/subject_5"
     if not (bundle_dir / "manifest.json").is_file():
         pytest.skip("subject_5 bundle not present")
@@ -191,11 +162,6 @@ def test_process_trace_fz_jet_on_steps_hold_tip_speed():
         calgap_z_mm=machine.calgap_z_mm,
     )
 
-    from app.postprocess.gcode.kinematics.feed_rate import (
-        dispense_pivot_feed,
-        tip_positions_from_poses,
-    )
-
     fz = next(ch for ch in channels if ch.name == "Fz")
     rows = process_trace(
         fz.interconnect,
@@ -204,24 +170,5 @@ def test_process_trace_fz_jet_on_steps_hold_tip_speed():
         mesh_faces=bundle.mesh_faces,
         channel_name="Fz",
     )
-    jet = True
-    checked = 0
-    for i in range(1, len(rows)):
-        moved = float(np.linalg.norm(rows[i, :3] - rows[i - 1, :3])) > 1e-3
-        if jet and moved:
-            tips = tip_positions_from_poses(
-                rows[i - 1 : i + 1, :3],
-                rows[i - 1 : i + 1, 3],
-                rows[i - 1 : i + 1, 4],
-                machine,
-            )
-            disp_pivot = float(np.linalg.norm(rows[i, :3] - rows[i - 1, :3]))
-            disp_tip = float(np.linalg.norm(tips[1] - tips[0]))
-            assert dispense_pivot_feed(disp_pivot, disp_tip, machine) is not None
-            checked += 1
-        marker = int(rows[i, 6])
-        if marker == 11:
-            jet = False
-        elif marker == 10:
-            jet = True
-    assert checked > 0
+    max_step = max(_c_delta_deg(rows[i, 4], rows[i - 1, 4]) for i in range(1, len(rows)))
+    assert max_step <= 12.0 + 1e-6

@@ -15,14 +15,15 @@ from app.postprocess.mesh_normals import (
 )
 
 from ..kinematics.axis_angles import compute_axis_angles
-from ..kinematics.dispense_plan import plan_constant_tip_dispense
+from ..kinematics.feed_rate import compute_print_feed_rates
 from ..kinematics.flip_correction import (
     correct_flip,
     enforce_axis_continuity,
-    hold_c_near_pole,
-    validate_defined_c_steps,
+    limit_c_slew,
+    validate_axis_continuity,
 )
 from ..kinematics.machine_zero import apply_machine_zero_offset
+from ..kinematics.tool_offset import apply_tool_offset
 from ..models import MachineConfig, TraceChannel
 
 
@@ -47,9 +48,7 @@ def process_trace(
     """
     Process one Nx6 trace into gcode rows [X, Y, Z, B, C, F, marker].
 
-    Jet-on blocks keep the nozzle tip at ``speed_mm_min``. C is held where the
-    normal is nearly vertical. Orientation changes that would exceed the pivot
-    feed cap are parked slews with M11/M10. When the rigid C–B arm falls inside
+    Uses synthesized XYZ and normals as-is. When the rigid C–B arm falls inside
     the registered head mesh, the normal is flipped and B/C recomputed.
     """
     g = data[:, :3].copy()
@@ -89,28 +88,26 @@ def process_trace(
     b_angles, c_angles = compute_axis_angles(en)
     b_angles, c_angles = correct_flip(b_angles, c_angles)
     b_angles, c_angles = enforce_axis_continuity(b_angles, c_angles)
+    c_slew = float(pp.get("c_max_slew_deg", 12.0))
+    if c_slew > 0.0:
+        b_angles, c_angles = limit_c_slew(
+            b_angles, c_angles, max_step_deg=c_slew
+        )
     max_c_step = float(pp.get("axis_max_c_step_deg", 90.0))
     try:
-        validate_defined_c_steps(
-            c_angles,
-            en,
-            nxy_min=nxy_min,
-            max_c_step_deg=max_c_step,
-        )
+        validate_axis_continuity(b_angles, c_angles, max_c_step_deg=max_c_step)
     except ValueError as exc:
         label = channel_name or "trace"
         raise ValueError(f"{label}: {exc}") from exc
-    if nxy_min > 0.0:
-        c_angles = hold_c_near_pole(c_angles, en, nxy_min=nxy_min)
     offset_gap = 0.0 if coords_include_gap else None
-    return plan_constant_tip_dispense(
-        g,
-        en,
-        b_angles,
-        c_angles,
-        machine,
-        gap_mm=offset_gap,
-    )
+    g = apply_tool_offset(g, en, c_angles, machine, gap_mm=offset_gap)
+
+    b_angles = np.round(b_angles, 2)
+    c_angles = np.round(c_angles, 2)
+
+    feed = compute_print_feed_rates(g, b_angles, c_angles, machine)
+
+    return np.column_stack([g, b_angles, c_angles, feed, np.zeros(len(g))])
 
 
 def process_all_traces(
