@@ -104,25 +104,35 @@ def limit_c_slew(
     return b, c
 
 
-def collapse_pinned_crown_slew(
+def _signed_c_delta(c_from: float, c_to: float) -> float:
+    """Shortest signed step from ``c_from`` to ``c_to``, in (-180, 180]."""
+    return (float(c_to) - float(c_from) + 180.0) % 360.0 - 180.0
+
+
+def _wrap_c(angle: float) -> float:
+    return (float(angle) + 180.0) % 360.0 - 180.0
+
+
+def walk_pinned_crown_heading(
     b_angles: np.ndarray,
     c_angles: np.ndarray,
     *,
     max_step_deg: float,
     b_upright_deg: float = 20.0,
     unwind_deg: float = 4.0,
+    step_deg: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray, list[int]]:
-    """Hold C across a crown slew-limit walk. Return catch-up sample indices.
+    """Walk a pinned crown heading toward the normal in small C steps.
 
     ``limit_c_slew`` turns one crown heading change into a staircase of
-    ``max_step_deg`` jet-on moves. Each of those swings the arm while the
-    nozzle is already nearly vertical. A run pinned on that cap, with |B|
-    below ``b_upright_deg``, keeps the last heading from before the run.
-    The single remaining change is the step out of the run, once B is
-    rising and the exit heading is defined again.
+    ``max_step_deg`` moves. A run pinned on that cap, with |B| below
+    ``b_upright_deg``, is replaced by steps of at most ``step_deg`` toward
+    the heading the trace settles to after the run. The caller rebuilds the
+    normal from that C so the pose still lies on the normal.
     """
     b = np.asarray(b_angles, dtype=float).copy()
     c = np.asarray(c_angles, dtype=float).copy()
+    original = c.copy()
     catchups: list[int] = []
     if len(c) <= 2 or max_step_deg <= 0.0:
         return b, c, catchups
@@ -168,16 +178,56 @@ def collapse_pinned_crown_slew(
                 break
             start -= 1
         n_pinned = int(np.count_nonzero(pinned[start : end + 1]))
-        if n_pinned < 2:
+        if n_pinned < 2 or step_deg <= 0.0:
             visited[start : end + 1] = True
             continue
-        # Freeze the last heading that was still well defined. Catch up on
-        # the first sample after the run, where the exit heading has settled.
-        c[start : end + 1] = float(c[start - 1])
-        if end + 1 < len(c):
-            catchups.append(end + 1)
+        target = float(original[end + 1]) if end + 1 < len(c) else float(original[end])
+        step = float(step_deg)
+        prev = float(original[start - 1])
+        for k in range(start, len(c)):
+            goal = target if k <= end else float(original[k])
+            delta = _signed_c_delta(prev, goal)
+            if abs(delta) <= step:
+                c[k] = _wrap_c(prev + delta)
+                prev = float(c[k])
+                if k > end:
+                    break
+                continue
+            c[k] = _wrap_c(prev + float(np.sign(delta)) * step)
+            prev = float(c[k])
         visited[start : end + 1] = True
     return b, c, catchups
+
+
+def retarget_normals_to_c(
+    normals: np.ndarray,
+    c_angles: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """Point each masked normal's XY heading at ``c_angles`` without changing tilt.
+
+    ``find_caxis_angle`` is inverted while keeping ``sign(ny)``, so B stays
+    the tilt of the same normal and the tool offset matches the commanded C.
+    """
+    out = np.asarray(normals, dtype=float).copy()
+    c = np.asarray(c_angles, dtype=float)
+    use = np.asarray(mask, dtype=bool)
+    if out.ndim == 1:
+        out = out.reshape(1, 3)
+    for i in np.flatnonzero(use):
+        nxy = float(np.hypot(out[i, 0], out[i, 1]))
+        if nxy < 1e-8:
+            continue
+        if float(out[i, 1]) >= 0.0:
+            alpha = np.deg2rad(90.0 - float(c[i]))
+        else:
+            alpha = np.deg2rad(-90.0 - float(c[i]))
+        out[i, 0] = float(np.cos(alpha)) * nxy
+        out[i, 1] = float(np.sin(alpha)) * nxy
+        length = float(np.linalg.norm(out[i]))
+        if length > 1e-12:
+            out[i] /= length
+    return out
 
 
 def max_c_step_deg(c_angles: np.ndarray) -> float:

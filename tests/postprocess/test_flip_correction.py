@@ -8,13 +8,15 @@ import pytest
 from app import paths
 from app.postprocess.bundle.load import load_bundle
 from app.postprocess.gcode.config_loader import load_machine_config
+from app.postprocess.gcode.kinematics.axis_angles import compute_axis_angles
 from app.postprocess.gcode.kinematics.flip_correction import (
-    collapse_pinned_crown_slew,
     correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
     max_c_step_deg,
+    retarget_normals_to_c,
     validate_axis_continuity,
+    walk_pinned_crown_heading,
 )
 from app.postprocess.gcode.kinematics.machine_fk import registration_to_machine_frame
 from app.postprocess.gcode.models import JobConfig
@@ -62,26 +64,32 @@ def test_validate_axis_continuity_raises_on_large_jump():
         validate_axis_continuity(b, c, max_c_step_deg=45.0)
 
 
-def test_collapse_pinned_crown_slew_holds_entry_c():
-    """A 12° crown staircase keeps the pre-crown C and catches up once at the exit."""
+def test_walk_pinned_crown_heading_takes_small_steps_toward_exit():
+    """A 12° crown staircase becomes a 1° walk toward the settled heading."""
     b = np.array([40, 30, 18, 15, 13, 11, 9, 7, 5, 3, 3, 4, 6, 8], dtype=float)
     c = np.array(
         [-15, -12, -9, -3, 9, 21, 33, 45, 57, 69, 57, 49, 43, 42],
         dtype=float,
     )
-    _, c_out, catchups = collapse_pinned_crown_slew(
-        b, c, max_step_deg=12.0, b_upright_deg=20.0
+    _, c_out, catchups = walk_pinned_crown_heading(
+        b, c, max_step_deg=12.0, b_upright_deg=20.0, step_deg=1.0
     )
-    assert catchups == [13]
+    assert catchups == []
     assert c_out[2] == -9.0
-    assert np.allclose(c_out[3:13], -9.0)
-    assert c_out[13] == 42.0
-    jet_steps = [
-        _c_delta_deg(c_out[i - 1], c_out[i])
-        for i in range(1, len(c_out))
-        if i != 13
-    ]
-    assert max(jet_steps) < 4.0
+    assert c_out[-1] == pytest.approx(-9.0 + 11.0)
+    walked = [_c_delta_deg(c_out[i - 1], c_out[i]) for i in range(3, len(c_out))]
+    assert max(walked) <= 1.0 + 1e-9
+
+
+def test_retarget_normals_to_c_keeps_tilt_and_matches_c():
+    normal = np.array([[0.20, 0.10, 0.97]], dtype=float)
+    normal /= np.linalg.norm(normal)
+    b, c = compute_axis_angles(normal)
+    commanded = np.array([float(c[0]) + 8.0])
+    out = retarget_normals_to_c(normal, commanded, np.array([True]))
+    b2, c2 = compute_axis_angles(out)
+    assert b2[0] == pytest.approx(b[0])
+    assert _c_delta_deg(c2[0], commanded[0]) < 1e-6
 
 
 def test_limit_c_slew_caps_steps():
