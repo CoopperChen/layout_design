@@ -17,6 +17,7 @@ from app.postprocess.mesh_normals import (
 from ..kinematics.axis_angles import compute_axis_angles
 from ..kinematics.feed_rate import compute_print_feed_rates
 from ..kinematics.flip_correction import (
+    collapse_pinned_crown_slew,
     correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
@@ -89,6 +90,7 @@ def process_trace(
     b_angles, c_angles = correct_flip(b_angles, c_angles)
     b_angles, c_angles = enforce_axis_continuity(b_angles, c_angles)
     c_slew = float(pp.get("c_max_slew_deg", 12.0))
+    crown_catchups: list[int] = []
     if c_slew > 0.0:
         b_angles, c_angles = limit_c_slew(
             b_angles, c_angles, max_step_deg=c_slew
@@ -99,6 +101,14 @@ def process_trace(
     except ValueError as exc:
         label = channel_name or "trace"
         raise ValueError(f"{label}: {exc}") from exc
+    if c_slew > 0.0:
+        b_upright = float(pp.get("c_crown_hold_b_deg", 20.0))
+        b_angles, c_angles, crown_catchups = collapse_pinned_crown_slew(
+            b_angles,
+            c_angles,
+            max_step_deg=c_slew,
+            b_upright_deg=b_upright,
+        )
     offset_gap = 0.0 if coords_include_gap else None
     g = apply_tool_offset(g, en, c_angles, machine, gap_mm=offset_gap)
 
@@ -106,8 +116,35 @@ def process_trace(
     c_angles = np.round(c_angles, 2)
 
     feed = compute_print_feed_rates(g, b_angles, c_angles, machine)
+    rows = np.column_stack([g, b_angles, c_angles, feed, np.zeros(len(g))])
+    if crown_catchups:
+        rows = _jet_off_c_catchups(
+            rows, crown_catchups, travel=float(machine.transition_speed_mm_min)
+        )
+    return rows
 
-    return np.column_stack([g, b_angles, c_angles, feed, np.zeros(len(g))])
+
+def _jet_off_c_catchups(
+    rows: np.ndarray,
+    catchups: list[int],
+    *,
+    travel: float,
+) -> np.ndarray:
+    """Park the jet across each single crown heading change."""
+    out = rows
+    for index in sorted(catchups, reverse=True):
+        if index <= 0 or index >= len(out):
+            continue
+        before = out[index - 1].copy()
+        before[6] = 11
+        slew = out[index].copy()
+        slew[5] = travel
+        slew[6] = 0
+        after = out[index].copy()
+        after[5] = travel
+        after[6] = 10
+        out = np.vstack([out[:index], before, slew, after, out[index + 1 :]])
+    return out
 
 
 def process_all_traces(

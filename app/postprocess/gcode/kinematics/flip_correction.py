@@ -104,6 +104,82 @@ def limit_c_slew(
     return b, c
 
 
+def collapse_pinned_crown_slew(
+    b_angles: np.ndarray,
+    c_angles: np.ndarray,
+    *,
+    max_step_deg: float,
+    b_upright_deg: float = 20.0,
+    unwind_deg: float = 4.0,
+) -> tuple[np.ndarray, np.ndarray, list[int]]:
+    """Hold C across a crown slew-limit walk. Return catch-up sample indices.
+
+    ``limit_c_slew`` turns one crown heading change into a staircase of
+    ``max_step_deg`` jet-on moves. Each of those swings the arm while the
+    nozzle is already nearly vertical. A run pinned on that cap, with |B|
+    below ``b_upright_deg``, keeps the last heading from before the run.
+    The single remaining change is the step out of the run, once B is
+    rising and the exit heading is defined again.
+    """
+    b = np.asarray(b_angles, dtype=float).copy()
+    c = np.asarray(c_angles, dtype=float).copy()
+    catchups: list[int] = []
+    if len(c) <= 2 or max_step_deg <= 0.0:
+        return b, c, catchups
+
+    limit = float(max_step_deg) - 1e-2
+    upright = float(b_upright_deg)
+    unwind = float(unwind_deg)
+    pinned = np.zeros(len(c), dtype=bool)
+    for i in range(1, len(c)):
+        if c_step_deg(c[i - 1], c[i]) < limit:
+            continue
+        if min(abs(float(b[i - 1])), abs(float(b[i]))) <= upright:
+            pinned[i] = True
+
+    visited = np.zeros(len(c), dtype=bool)
+    for i in range(1, len(c)):
+        if not pinned[i] or visited[i]:
+            continue
+        start = i
+        end = i
+        while end + 1 < len(c) and pinned[end + 1]:
+            end += 1
+        # One upright sample between two pinned steps is still the same walk.
+        while (
+            end + 2 < len(c)
+            and not pinned[end + 1]
+            and pinned[end + 2]
+            and abs(float(b[end + 1])) <= upright
+        ):
+            end += 2
+            while end + 1 < len(c) and pinned[end + 1]:
+                end += 1
+        while end + 1 < len(c):
+            if abs(float(b[end + 1])) > upright:
+                break
+            if c_step_deg(c[end], c[end + 1]) < unwind:
+                break
+            end += 1
+        while start > 1:
+            if abs(float(b[start - 1])) > upright:
+                break
+            if c_step_deg(c[start - 2], c[start - 1]) < unwind:
+                break
+            start -= 1
+        n_pinned = int(np.count_nonzero(pinned[start : end + 1]))
+        if n_pinned < 2:
+            visited[start : end + 1] = True
+            continue
+        # Freeze the last heading that was still well defined. Catch up on
+        # the first sample after the run, where the exit heading has settled.
+        c[start : end + 1] = float(c[start - 1])
+        if end + 1 < len(c):
+            catchups.append(end + 1)
+        visited[start : end + 1] = True
+    return b, c, catchups
+
+
 def max_c_step_deg(c_angles: np.ndarray) -> float:
     if len(c_angles) <= 1:
         return 0.0

@@ -27,6 +27,17 @@ def _retract_feed(machine: MachineConfig) -> float:
     return float(machine.retract_speed_mm_min)
 
 
+def _reverse_trace_keeping_jet_cycles(trace: np.ndarray) -> np.ndarray:
+    """Reverse a trace and swap M10/M11 so a parked slew stays jet-off."""
+    out = np.flipud(_ensure7(trace)).copy()
+    markers = out[:, 6]
+    swapped = markers.copy()
+    swapped[markers == 10] = 11
+    swapped[markers == 11] = 10
+    out[:, 6] = swapped
+    return out
+
+
 def _ensure7(trace: np.ndarray) -> np.ndarray:
     if trace.ndim == 1:
         trace = trace.reshape(1, -1)
@@ -204,7 +215,7 @@ def merge_traces(
     if alternate_flip:
         for i in range(len(traces)):
             if (i + 1) % 2 == 0:
-                traces[i] = np.flipud(traces[i])
+                traces[i] = _reverse_trace_keeping_jet_cycles(traces[i])
 
     zsafe = round(mesh_z_max + machine.zsafe_margin_mm)
     engage_config = load_engage_clearance_config(machine)

@@ -9,6 +9,7 @@ from app import paths
 from app.postprocess.bundle.load import load_bundle
 from app.postprocess.gcode.config_loader import load_machine_config
 from app.postprocess.gcode.kinematics.flip_correction import (
+    collapse_pinned_crown_slew,
     correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
@@ -61,6 +62,28 @@ def test_validate_axis_continuity_raises_on_large_jump():
         validate_axis_continuity(b, c, max_c_step_deg=45.0)
 
 
+def test_collapse_pinned_crown_slew_holds_entry_c():
+    """A 12° crown staircase keeps the pre-crown C and catches up once at the exit."""
+    b = np.array([40, 30, 18, 15, 13, 11, 9, 7, 5, 3, 3, 4, 6, 8], dtype=float)
+    c = np.array(
+        [-15, -12, -9, -3, 9, 21, 33, 45, 57, 69, 57, 49, 43, 42],
+        dtype=float,
+    )
+    _, c_out, catchups = collapse_pinned_crown_slew(
+        b, c, max_step_deg=12.0, b_upright_deg=20.0
+    )
+    assert catchups == [13]
+    assert c_out[2] == -9.0
+    assert np.allclose(c_out[3:13], -9.0)
+    assert c_out[13] == 42.0
+    jet_steps = [
+        _c_delta_deg(c_out[i - 1], c_out[i])
+        for i in range(1, len(c_out))
+        if i != 13
+    ]
+    assert max(jet_steps) < 4.0
+
+
 def test_limit_c_slew_caps_steps():
     b = np.zeros(4)
     c = np.array([0.0, 40.0, 80.0, 120.0])
@@ -101,8 +124,18 @@ def test_process_trace_applies_correct_flip_on_subject_4():
         mesh_points=mesh_m,
         mesh_faces=bundle.mesh_faces,
     )
-    max_step = max(_c_delta_deg(rows[i, 4], rows[i - 1, 4]) for i in range(1, len(rows)))
-    assert max_step < 45.0
+    jet = True
+    steps: list[float] = []
+    for i in range(1, len(rows)):
+        if jet:
+            steps.append(_c_delta_deg(rows[i - 1, 4], rows[i, 4]))
+        marker = int(rows[i, 6])
+        if marker == 11:
+            jet = False
+        elif marker == 10:
+            jet = True
+    assert steps
+    assert max(steps) < 45.0
 
 
 def test_process_trace_o2_no_start_c_jump_on_subject_5():
@@ -170,5 +203,15 @@ def test_process_trace_slew_limits_c_on_subject_5_fz():
         mesh_faces=bundle.mesh_faces,
         channel_name="Fz",
     )
-    max_step = max(_c_delta_deg(rows[i, 4], rows[i - 1, 4]) for i in range(1, len(rows)))
-    assert max_step <= 12.0 + 1e-6
+    jet = True
+    steps: list[float] = []
+    for i in range(1, len(rows)):
+        if jet:
+            steps.append(_c_delta_deg(rows[i - 1, 4], rows[i, 4]))
+        marker = int(rows[i, 6])
+        if marker == 11:
+            jet = False
+        elif marker == 10:
+            jet = True
+    assert steps
+    assert max(steps) <= 12.0 + 1e-6

@@ -65,5 +65,6 @@ postprocess:
   normal_path_smooth_passes: 1
   c_pole_nxy_min: 0.2  # inherit prior XY heading when |n_xy| is below this
   c_max_slew_deg: 12  # max |ΔC| per sample while printing (anti-serpentine)
+  c_crown_hold_b_deg: 20  # if the 12° cap is pinned and |B| is below this, hold C
   terminal_min_points: 4
   matlab_folder: subject_optimized  # relative to data/output/matlab/
