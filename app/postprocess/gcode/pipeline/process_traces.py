@@ -17,8 +17,8 @@ from app.postprocess.mesh_normals import (
 from ..kinematics.axis_angles import compute_axis_angles, find_baxis_angle
 from ..kinematics.feed_rate import compute_print_feed_rates
 from ..kinematics.flip_correction import (
-    correct_flip,
     c_step_deg,
+    correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
     retarget_normals_to_c,
