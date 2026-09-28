@@ -21,9 +21,9 @@ from ..kinematics.flip_correction import (
     correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
+    plan_trace_heading,
     retarget_normals_to_c,
     validate_axis_continuity,
-    walk_pinned_crown_heading,
 )
 from ..kinematics.machine_zero import apply_machine_zero_offset
 from ..kinematics.tool_offset import apply_tool_offset
@@ -96,30 +96,31 @@ def process_trace(
         b_angles, c_angles = limit_c_slew(
             b_angles, c_angles, max_step_deg=c_slew
         )
+    c_before = c_angles.copy()
+    aim_deg = float(pp.get("c_aim_deg", 5.0))
+    b_angles, c_angles = plan_trace_heading(
+        b_angles,
+        c_angles,
+        a_mm=float(machine.a_mm),
+        d_mm=float(machine.d_mm),
+        sample_mm=float(pp.get("c_plan_sample_mm", 3.0)),
+        speed_mm_min=float(machine.speed_mm_min),
+        max_speed_mm_min=float(machine.max_speed_mm_min),
+        aim_deg=aim_deg,
+    )
     max_c_step = float(pp.get("axis_max_c_step_deg", 90.0))
     try:
         validate_axis_continuity(b_angles, c_angles, max_c_step_deg=max_c_step)
     except ValueError as exc:
         label = channel_name or "trace"
         raise ValueError(f"{label}: {exc}") from exc
-    if c_slew > 0.0:
-        c_before = c_angles.copy()
-        b_upright = float(pp.get("c_crown_hold_b_deg", 20.0))
-        crown_step = float(pp.get("c_crown_step_deg", 1.0))
-        b_angles, c_angles, _crown_catchups = walk_pinned_crown_heading(
-            b_angles,
-            c_angles,
-            max_step_deg=c_slew,
-            b_upright_deg=b_upright,
-            step_deg=crown_step,
-        )
-        changed = np.array(
-            [c_step_deg(c_before[i], c_angles[i]) > 1e-6 for i in range(len(c_angles))]
-        )
-        if np.any(changed):
-            en = retarget_normals_to_c(en, c_angles, changed)
-            for i in np.flatnonzero(changed):
-                b_angles[i] = find_baxis_angle(en, int(i))
+    changed = np.array(
+        [c_step_deg(c_before[i], c_angles[i]) > 1e-6 for i in range(len(c_angles))]
+    )
+    if np.any(changed):
+        en = retarget_normals_to_c(en, c_angles, changed)
+        for i in np.flatnonzero(changed):
+            b_angles[i] = find_baxis_angle(en, int(i))
     offset_gap = 0.0 if coords_include_gap else None
     g = apply_tool_offset(g, en, c_angles, machine, gap_mm=offset_gap)
 

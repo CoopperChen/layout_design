@@ -67,5 +67,7 @@ postprocess:
   c_max_slew_deg: 12  # max |ΔC| per sample while printing (anti-serpentine)
   c_crown_hold_b_deg: 20  # walk C only while a pinned slew has |B| below this
   c_crown_step_deg: 1  # max |ΔC| per sample while that walk follows the normal
+  c_aim_deg: 5  # whole-trace C plan keeps the tool axis within this of the normal
+  c_plan_sample_mm: 3  # path spacing used to budget C steps under the feed cap
   terminal_min_points: 4
   matlab_folder: subject_optimized  # relative to data/output/matlab/

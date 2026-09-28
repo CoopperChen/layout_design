@@ -14,9 +14,9 @@ from app.postprocess.gcode.kinematics.flip_correction import (
     enforce_axis_continuity,
     limit_c_slew,
     max_c_step_deg,
+    plan_trace_heading,
     retarget_normals_to_c,
     validate_axis_continuity,
-    walk_pinned_crown_heading,
 )
 from app.postprocess.gcode.kinematics.machine_fk import registration_to_machine_frame
 from app.postprocess.gcode.models import JobConfig
@@ -64,21 +64,26 @@ def test_validate_axis_continuity_raises_on_large_jump():
         validate_axis_continuity(b, c, max_c_step_deg=45.0)
 
 
-def test_walk_pinned_crown_heading_takes_small_steps_toward_exit():
-    """A 12° crown staircase becomes a 1° walk toward the settled heading."""
+def test_plan_trace_heading_holds_c_when_the_crown_would_swing_the_arm():
+    """Whole-trace plan keeps C still through an upright heading jump."""
     b = np.array([40, 30, 18, 15, 13, 11, 9, 7, 5, 3, 3, 4, 6, 8], dtype=float)
     c = np.array(
         [-15, -12, -9, -3, 9, 21, 33, 45, 57, 69, 57, 49, 43, 42],
         dtype=float,
     )
-    _, c_out, catchups = walk_pinned_crown_heading(
-        b, c, max_step_deg=12.0, b_upright_deg=20.0, step_deg=1.0
+    _, c_out = plan_trace_heading(
+        b,
+        c,
+        a_mm=180.7,
+        d_mm=57.59,
+        sample_mm=3.0,
+        speed_mm_min=1000.0,
+        max_speed_mm_min=2000.0,
+        aim_deg=5.0,
     )
-    assert catchups == []
-    assert c_out[2] == -9.0
-    assert c_out[-1] == pytest.approx(-9.0 + 11.0)
-    walked = [_c_delta_deg(c_out[i - 1], c_out[i]) for i in range(3, len(c_out))]
-    assert max(walked) <= 1.0 + 1e-9
+    steps = [_c_delta_deg(c_out[i - 1], c_out[i]) for i in range(1, len(c_out))]
+    assert max(steps) <= 1.0 + 1e-9
+    assert max(_c_delta_deg(c_out[i], c_out[0]) for i in range(len(c_out))) < 5.0
 
 
 def test_retarget_normals_to_c_keeps_tilt_and_matches_c():

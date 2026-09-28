@@ -199,6 +199,131 @@ def walk_pinned_crown_heading(
     return b, c, catchups
 
 
+def _unwrap_c(c_angles: np.ndarray) -> np.ndarray:
+    out = np.zeros(len(c_angles), dtype=float)
+    if len(c_angles) == 0:
+        return out
+    out[0] = float(c_angles[0])
+    for i in range(1, len(c_angles)):
+        out[i] = out[i - 1] + _signed_c_delta(c_angles[i - 1], c_angles[i])
+    return out
+
+
+def _aim_half_width_deg(tilt_deg: float, aim_deg: float) -> float:
+    """Largest |ΔC| whose tool axis stays within ``aim_deg`` of a normal at this tilt."""
+    beta = np.deg2rad(min(abs(float(tilt_deg)), 89.0))
+    aim = np.deg2rad(float(aim_deg))
+    s2 = float(np.sin(beta) ** 2)
+    if s2 < 1e-8:
+        return 180.0
+    cos_delta = (float(np.cos(aim)) - float(np.cos(beta) ** 2)) / s2
+    if cos_delta >= 1.0:
+        return 0.0
+    if cos_delta <= -1.0:
+        return 180.0
+    return float(np.rad2deg(np.arccos(cos_delta)))
+
+
+def _c_step_budget_deg(
+    delta_b_deg: float,
+    *,
+    a_mm: float,
+    d_mm: float,
+    sample_mm: float,
+    feed_ratio: float,
+) -> float:
+    """Largest |ΔC| that keeps pivot travel within ``feed_ratio`` times the tip step."""
+    extra_mm = float(sample_mm) * max(float(feed_ratio) - 1.0, 0.0)
+    b_mm = float(d_mm) * abs(float(delta_b_deg)) * np.pi / 180.0
+    room_mm = extra_mm - b_mm
+    if room_mm <= 0.0 or a_mm <= 0.0:
+        return 0.0
+    return float(np.rad2deg(room_mm / float(a_mm)))
+
+
+def plan_trace_heading(
+    b_angles: np.ndarray,
+    c_angles: np.ndarray,
+    *,
+    a_mm: float,
+    d_mm: float,
+    sample_mm: float,
+    speed_mm_min: float,
+    max_speed_mm_min: float,
+    aim_deg: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Choose C along one wire to minimize axis travel while matching the normal.
+
+    Each sample may only move as far as the feed cap allows. Within that limit
+    the path prefers the scalp heading, and where the nozzle is upright it
+    holds C because many headings still fit the normal.
+    """
+    b = np.asarray(b_angles, dtype=float).copy()
+    c = np.asarray(c_angles, dtype=float).copy()
+    n = len(c)
+    if n <= 1 or speed_mm_min <= 0.0:
+        return b, c
+
+    unwrapped = _unwrap_c(c)
+    ratio = float(max_speed_mm_min) / float(speed_mm_min)
+    lo = np.zeros(n)
+    hi = np.zeros(n)
+    step = np.zeros(n)
+    for i in range(n):
+        half = _aim_half_width_deg(b[i], aim_deg)
+        lo[i] = unwrapped[i] - half
+        hi[i] = unwrapped[i] + half
+        if i > 0:
+            step[i] = _c_step_budget_deg(
+                float(b[i] - b[i - 1]),
+                a_mm=a_mm,
+                d_mm=d_mm,
+                sample_mm=sample_mm,
+                feed_ratio=ratio,
+            )
+
+    grid_lo = int(np.floor(min(float(np.min(lo)), float(unwrapped[0])) - 1.0))
+    grid_hi = int(np.ceil(max(float(np.max(hi)), float(unwrapped[-1])) + 1.0))
+    grid = np.arange(grid_lo, grid_hi + 1, 1.0)
+    n_grid = len(grid)
+    outside = np.zeros((n, n_grid))
+    for i in range(n):
+        for j in range(n_grid):
+            gap = max(0.0, lo[i] - grid[j], grid[j] - hi[i])
+            outside[i, j] = gap * gap + 0.01 * abs(grid[j] - unwrapped[i])
+
+    inf = 1e18
+    cost = outside[0].copy()
+    back = np.zeros((n, n_grid), dtype=np.int32)
+    for i in range(1, n):
+        nxt = np.full(n_grid, inf)
+        span = int(np.floor(step[i] + 1e-6))
+        for j in range(n_grid):
+            k0 = max(0, j - span)
+            k1 = min(n_grid, j + span + 1)
+            best = inf
+            best_k = j
+            for k in range(k0, k1):
+                if abs(grid[k] - grid[j]) > step[i] + 1e-6:
+                    continue
+                val = cost[k] + abs(grid[k] - grid[j]) + outside[i, j]
+                if val < best:
+                    best = val
+                    best_k = k
+            nxt[j] = best
+            back[i, j] = best_k
+        cost = nxt
+
+    chosen = np.zeros(n)
+    j = int(np.argmin(cost))
+    for i in range(n - 1, -1, -1):
+        chosen[i] = grid[j]
+        if i > 0:
+            j = int(back[i, j])
+    c_out = np.array([_wrap_c(v) for v in chosen])
+    return b, c_out
+
+
 def retarget_normals_to_c(
     normals: np.ndarray,
     c_angles: np.ndarray,
