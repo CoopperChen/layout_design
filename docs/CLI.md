@@ -14,7 +14,7 @@ Console entry point (same interface): `layout <command> …`
 
 | Stage | Commands |
 |-------|----------|
-| Setup | `init-data`, `paths`, `gui` |
+| Setup | `init-data`, `paths` |
 | **Full pipeline** | **`run`** (PLY → preprocess → synthesize → … → gcode/simulate) |
 | A — Preprocess | `preprocess` |
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
@@ -546,28 +546,6 @@ python -m app export-matlab --input data/output/smooth/smooth_s2_final.json
 **Output:** `InterconnectElectrodePaths.mat`, `HeadMesh.mat`, `Landmarks.mat`, `LandmarkNames.mat`
 
 Prefer `export-bundle` → `convert-gcode` for the Python path.
-
----
-
-## Desktop control panel — `gui`
-
-```bash
-python -m app gui
-python -m app gui --subject 2
-```
-
-The window lists each `run` stage and whether its output is already on disk. **Run from here** starts `python -m app run --from <stage>` through `gcode` (or `simulate` when “End at simulate” is checked). **This stage** sets `--from` and `--to` to that one stage. Stop kills the child process. The log pane shows its stdout and stderr.
-
-Interactive stages still open the same PyVista windows as the CLI (Space/Enter/S confirm or save, Q discards). They run in the child process, so the plotter style is unchanged. CNC `load` / `start` stay on the CLI.
-
-| Control | Effect |
-|---------|--------|
-| Polish | On by default. Off passes `--no-polish` and marks the polish row skipped |
-| Visualize | On by default. Off passes `--no-visualize` (skip the 2D PNG and the interactive 3D view) |
-| Hub angle search | Passes `--rotate` |
-| End at simulate | **Run from here** uses `--to simulate` instead of `--to gcode` |
-
-The panel uses tkinter from the Python install. PyVista windows stay in the `run` child process.
 
 ---
 
