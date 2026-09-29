@@ -568,7 +568,11 @@ Interactive stages still open the same PyVista windows as the CLI (Space/Enter/S
 | Hub angle search | Passes `--rotate` |
 | End at simulate | **Run from here** uses `--to simulate` instead of `--to gcode` |
 
-PySide6 is an optional extra. Without it, `python -m app gui` exits 1 and prints the install command.
+PySide6 is an optional extra. If it fails to load, `gui` exits 1 and prints the Python executable that is running the command, plus the import error. Install into that same executable — `pip` from another environment leaves `layout gui` unchanged:
+
+```bash
+"<python-from-the-error>" -m pip install -e ".[gui]"
+```
 
 ---
 

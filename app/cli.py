@@ -34,15 +34,41 @@ from app.config_loader import default_assignments, resolve_assignments
 from app.preprocess import run as preprocess_run
 
 
+def _pyside6_origin() -> str | None:
+    """Path to PySide6/__init__.py when the package is installed for this interpreter."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("PySide6")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin:
+        return None
+    return str(Path(spec.origin).resolve())
+
+
+def gui_backend_message(exc: BaseException, *, installed_at: str | None) -> str:
+    """Explain a failed PySide6 import for the interpreter that is running `layout`."""
+    lines = [
+        "The control panel could not load PySide6.",
+        f"This command is using: {sys.executable}",
+    ]
+    if installed_at is None:
+        lines.append("PySide6 is not installed for this interpreter.")
+        lines.append("Install it with this exact interpreter:")
+        lines.append(f'  "{sys.executable}" -m pip install -e ".[gui]"')
+    else:
+        lines.append(f"PySide6 package location: {installed_at}")
+        lines.append("The package is installed, and the Qt libraries failed to load.")
+    lines.append(f"{type(exc).__name__}: {exc}")
+    return "\n".join(lines)
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     try:
         from PySide6.QtWidgets import QApplication  # noqa: F401
-    except ImportError:
-        print(
-            "PySide6 is required for the control panel.\n"
-            'Install it with: python -m pip install -e ".[gui]"',
-            file=sys.stderr,
-        )
+    except ImportError as exc:
+        print(gui_backend_message(exc, installed_at=_pyside6_origin()), file=sys.stderr)
         return 1
     from app.gui.window import launch
 
