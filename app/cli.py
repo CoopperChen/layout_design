@@ -21,6 +21,7 @@ Unified pipeline CLI.
   python -m app run --target 2 --ply data/raw/2.ply --from synthesize
   python -m app run --target 2 --to simulate
   python -m app run --target 2 --no-polish --from synthesize
+  python -m app gui --subject 2
 """
 from __future__ import annotations
 
@@ -31,6 +32,21 @@ from pathlib import Path
 from app import paths
 from app.config_loader import default_assignments, resolve_assignments
 from app.preprocess import run as preprocess_run
+
+
+def cmd_gui(args: argparse.Namespace) -> int:
+    try:
+        from PySide6.QtWidgets import QApplication  # noqa: F401
+    except ImportError:
+        print(
+            "PySide6 is required for the control panel.\n"
+            'Install it with: python -m pip install -e ".[gui]"',
+            file=sys.stderr,
+        )
+        return 1
+    from app.gui.window import launch
+
+    return launch(subject=args.subject)
 
 
 def cmd_init_data(_: argparse.Namespace) -> int:
@@ -427,6 +443,13 @@ def build_parser() -> argparse.ArgumentParser:
     pp = sub.add_parser("paths", help="Print canonical paths for a subject")
     pp.add_argument("--subject", type=int, required=True)
     pp.set_defaults(func=cmd_paths)
+
+    gui = sub.add_parser(
+        "gui",
+        help="Desktop control panel for the run pipeline",
+    )
+    gui.add_argument("--subject", type=int, default=2, help="Subject id (default: 2)")
+    gui.set_defaults(func=cmd_gui)
 
     pr = sub.add_parser("preprocess", help="Stage A")
     pr.add_argument("--subject", type=int, required=True)
