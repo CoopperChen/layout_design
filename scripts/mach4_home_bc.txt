@@ -1,0 +1,16 @@
+(Home work offsets for B and C)
+G92 C0 B0
+G28.1 C0
+G92 C0
+G0 C18.322
+G92 C0
+G0 C0
+
+G28.1 B0
+G92 B0
+G0 B-41.8275
+G92 B0
+G0 B0
+G0 C18.322
+G92 C0
+G0 C0

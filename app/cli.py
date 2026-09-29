@@ -14,6 +14,8 @@ Unified pipeline CLI.
   python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
   python -m app cnc load --gcode data/output/gcode/subject_{id}_post/allinterconnects.txt
   python -m app cnc start --confirm
+  python -m app cnc home --confirm
+  python -m app cnc scan --confirm
   python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
   python -m app run --target 2
   python -m app run --target 2 --ply data/raw/2.ply --from synthesize
@@ -320,6 +322,8 @@ def cmd_record_pm(args: argparse.Namespace) -> int:
 
 
 def cmd_cnc(args: argparse.Namespace) -> int:
+    import time
+
     from app.postprocess.cnc_control import CncControlClient, CncControlError
 
     client = CncControlClient(host=args.host, port=args.port)
@@ -328,6 +332,29 @@ def cmd_cnc(args: argparse.Namespace) -> int:
             ack = client.status()
         elif args.cnc_cmd == "load":
             ack = client.load(args.gcode)
+        elif args.cnc_cmd in ("home", "scan"):
+            bundled = {
+                "home": (
+                    client.home,
+                    "B/C home script",
+                    "layout cnc home --confirm",
+                ),
+                "scan": (
+                    client.scan,
+                    "3D head-scan script",
+                    "layout cnc scan --confirm",
+                ),
+            }
+            load_fn, label, hint = bundled[args.cnc_cmd]
+            ack = load_fn()
+            print(ack.format_line())
+            if not ack.ok:
+                return 1
+            if not getattr(args, "confirm", False):
+                print(f"Loaded {label}. Run it with: {hint}")
+                return 0
+            time.sleep(0.25)
+            ack = client.start()
         elif args.cnc_cmd == "start":
             ack = client.start()
         elif args.cnc_cmd == "hold":
@@ -686,6 +713,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="G-code .txt (relative paths resolve from repo root)",
     )
     cnc_load.set_defaults(func=cmd_cnc)
+    cnc_home = cnc_sub.add_parser(
+        "home",
+        parents=[cnc_opts],
+        help="Load bundled B/C home script; Cycle Start with --confirm",
+    )
+    cnc_home.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Cycle Start after load (required to actually run the home moves)",
+    )
+    cnc_home.set_defaults(func=cmd_cnc)
+    cnc_scan = cnc_sub.add_parser(
+        "scan",
+        parents=[cnc_opts],
+        help="Load bundled 3D head-scan script; Cycle Start with --confirm",
+    )
+    cnc_scan.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Cycle Start after load (required to actually run the scan path)",
+    )
+    cnc_scan.set_defaults(func=cmd_cnc)
     cnc_start = cnc_sub.add_parser(
         "start",
         parents=[cnc_opts],

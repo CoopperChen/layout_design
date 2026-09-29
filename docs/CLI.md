@@ -20,7 +20,7 @@ Console entry point (same interface): `layout <command> …`
 | B — Layout | `build-assignments`, `synthesize`, `visualize` |
 | C — Polish (optional) | `polish` |
 | D — Postprocess | `smooth`, `export-bundle`, `init-print-config`, `record-pm`, `list-electrodes`, `convert-gcode`, `simulate-gcode`, `export-matlab` (legacy) |
-| Machine (Mach4) | `cnc` (`status` / `load` / `start` / `hold` / `stop`) |
+| Machine (Mach4) | `cnc` (`status` / `load` / `home` / `scan` / `start` / `hold` / `stop`) |
 
 Typical end-to-end (recommended):
 
@@ -458,6 +458,8 @@ Load a convert-gcode file in Mach4 and Cycle Start / hold / stop. **Not** wired 
 
 ```bash
 python -m app cnc status
+python -m app cnc home --confirm
+python -m app cnc scan --confirm
 python -m app cnc load --gcode data/output/gcode/subject_2_post/allinterconnects.txt
 python -m app cnc start --confirm
 python -m app cnc hold
@@ -469,9 +471,11 @@ python -m app cnc stop
 | `--host` | `127.0.0.1` | Mach4 command UDP host |
 | `--port` | `62110` | Mach4 command UDP port |
 | `--gcode` | — | `load` only: G-code `.txt` (relative paths resolve from repo root) |
-| `--confirm` | required on `start` | Must be passed; Cycle Start is never automatic |
+| `--confirm` | required on `start`; optional on `home` / `scan` | Cycle Start; never automatic |
 
-`load`/`start` are refused unless Mach4 is enabled and idle. `hold`/`stop` are always sent (twice) and do not require `--confirm`. Pendant E-stop remains primary.
+`home` loads [`scripts/mach4_home_bc.txt`](../scripts/mach4_home_bc.txt) (B/C work-offset zeroing). `scan` loads [`scripts/mach4_scan_head.txt`](../scripts/mach4_scan_head.txt) (3D head-scan path). Without `--confirm` they only load; with `--confirm` they Cycle Start after load.
+
+`load`/`start`/`home --confirm`/`scan --confirm` are refused unless Mach4 is enabled and idle. `hold`/`stop` are always sent (twice) and do not require `--confirm`. Pendant E-stop remains primary.
 
 Setup: [config/postprocessor/README.md](../config/postprocessor/README.md).
 

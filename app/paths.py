@@ -184,6 +184,16 @@ def gcode_output_dir(subject_id: int | str | None = None) -> Path:
     return base / f"subject_{_subject_stem(subject_id)}_post"
 
 
+def mach4_home_bc_gcode() -> Path:
+    """Bundled Mach4 script to zero B/C work offsets (``cnc home``)."""
+    return REPO_ROOT / "scripts" / "mach4_home_bc.txt"
+
+
+def mach4_scan_head_gcode() -> Path:
+    """Bundled Mach4 3D head-scan path (``cnc scan``)."""
+    return REPO_ROOT / "scripts" / "mach4_scan_head.txt"
+
+
 # --- Legacy / reference archives ---
 
 def archive_run(run_id: str) -> Path:

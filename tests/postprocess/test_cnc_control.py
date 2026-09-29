@@ -119,6 +119,47 @@ def test_start_requires_confirm():
     assert args.confirm is True
 
 
+def test_home_cli_optional_confirm():
+    parser = build_parser()
+    args = parser.parse_args(["cnc", "home"])
+    assert args.cnc_cmd == "home"
+    assert args.confirm is False
+    args = parser.parse_args(["cnc", "home", "--confirm"])
+    assert args.confirm is True
+
+
+def test_scan_cli_optional_confirm():
+    parser = build_parser()
+    args = parser.parse_args(["cnc", "scan"])
+    assert args.cnc_cmd == "scan"
+    assert args.confirm is False
+    args = parser.parse_args(["cnc", "scan", "--confirm"])
+    assert args.confirm is True
+
+
+def test_home_bc_gcode_exists():
+    from app.paths import mach4_home_bc_gcode
+
+    path = mach4_home_bc_gcode()
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "G92 C0 B0" in text
+    assert "G28.1 C0" in text
+    assert "G28.1 B0" in text
+    assert resolve_gcode_path(path) == path.resolve()
+
+
+def test_scan_head_gcode_exists():
+    from app.paths import mach4_scan_head_gcode
+
+    path = mach4_scan_head_gcode()
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "G94 G1 C180 B21" in text
+    assert "Y67 C-180" in text
+    assert resolve_gcode_path(path) == path.resolve()
+
+
 def test_load_cli_keeps_gcode_path():
     parser = build_parser()
     args = parser.parse_args(["cnc", "load", "--gcode", "data/output/gcode/s.txt"])

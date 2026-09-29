@@ -57,13 +57,17 @@ Same Lua file also listens on **`127.0.0.1:62110`** for JSON commands from this 
 
 ```powershell
 python -m app cnc status
+python -m app cnc home --confirm
+python -m app cnc scan --confirm
 python -m app cnc load --gcode data/output/gcode/subject_4_post/allinterconnects.txt
 python -m app cnc start --confirm
 python -m app cnc hold
 python -m app cnc stop
 ```
 
-`start` requires `--confirm`. `load`/`start` run only when the machine is enabled and idle. This is **not** part of `python -m app run`.
+`start`, `home --confirm`, and `scan --confirm` require `--confirm`. `load`/`start`/`home --confirm`/`scan --confirm` run only when the machine is enabled and idle. This is **not** part of `python -m app run`.
+
+`home` loads [`scripts/mach4_home_bc.txt`](../../scripts/mach4_home_bc.txt) (B/C work-offset zeroing). `scan` loads [`scripts/mach4_scan_head.txt`](../../scripts/mach4_scan_head.txt) (3D head-scan path). Without `--confirm` they only load the file.
 
 Command packet (Python → Mach4):
 
@@ -71,7 +75,7 @@ Command packet (Python → Mach4):
 {"id":"…","cmd":"load","path":"D:\\Research\\layout_design\\data\\output\\gcode\\subject_4_post\\allinterconnects.txt"}
 ```
 
-`cmd` is `status`, `load`, `start`, `hold`, or `stop`. Mach4 replies with one JSON ACK (`ok`, `state`, `enabled`, `file`, work XYZBC).
+`home`/`scan` are Python helpers that `load` a bundled script (and `start` if `--confirm`).
 
 ### 2. Mount and jog
 

@@ -168,6 +168,14 @@ class CncControlClient:
         resolved = resolve_gcode_path(gcode)
         return self.request("load", path=str(resolved), **kwargs)
 
+    def home(self, **kwargs: Any) -> CncAck:
+        """Load the bundled B/C home script (does not Cycle Start)."""
+        return self.load(paths.mach4_home_bc_gcode(), **kwargs)
+
+    def scan(self, **kwargs: Any) -> CncAck:
+        """Load the bundled 3D head-scan script (does not Cycle Start)."""
+        return self.load(paths.mach4_scan_head_gcode(), **kwargs)
+
     def start(self, **kwargs: Any) -> CncAck:
         return self.request("start", **kwargs)
 
