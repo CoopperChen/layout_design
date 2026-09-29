@@ -1,29 +1,14 @@
-"""PySide6 control panel. Launches ``python -m app run`` via QProcess."""
+"""Tk control panel. Launches ``python -m app run`` in a child process."""
 
 from __future__ import annotations
 
-import sys
+import os
+import queue
+import subprocess
+import threading
+import tkinter as tk
 from pathlib import Path
-
-from PySide6.QtCore import QProcess, QProcessEnvironment
-from PySide6.QtGui import QColor, QFont, QTextCursor
-from PySide6.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QMainWindow,
-    QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QSpinBox,
-    QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-    QWidget,
-)
+from tkinter import messagebox, scrolledtext, ttk
 
 from app import paths
 from app.gui.status import StageStatus, run_argv, stage_statuses
@@ -37,143 +22,150 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
-class PipelineWindow(QMainWindow):
+class PipelineWindow:
     """Subject, stage readiness, and buttons that start ``run``."""
 
     def __init__(self, subject: int = 2) -> None:
-        super().__init__()
-        self.setWindowTitle("Layout pipeline")
-        self.resize(1100, 720)
+        self.root = tk.Tk()
+        self.root.title("Layout pipeline")
+        self.root.geometry("1100x720")
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._proc = QProcess(self)
-        self._proc.setWorkingDirectory(str(paths.REPO_ROOT))
-        self._proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        env = QProcessEnvironment.systemEnvironment()
-        env.insert("PYTHONUNBUFFERED", "1")
-        self._proc.setProcessEnvironment(env)
-        self._proc.readyReadStandardOutput.connect(self._append_output)
-        self._proc.finished.connect(self._on_finished)
-        self._proc.errorOccurred.connect(self._on_error)
+        self._proc: subprocess.Popen[str] | None = None
+        self._lines: queue.Queue[str | None] = queue.Queue()
+        self._reader: threading.Thread | None = None
 
-        root = QWidget()
-        self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-
-        intro = QLabel(
-            "Starts python -m app run in a separate process. "
-            "Align, fiducials, electrodes, and the 3D viewers stay the current PyVista windows."
+        intro = ttk.Label(
+            self.root,
+            wraplength=1060,
+            text=(
+                "Starts python -m app run in a separate process. "
+                "Align, fiducials, electrodes, and the 3D viewers stay the current PyVista windows."
+            ),
         )
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        intro.pack(fill="x", padx=8, pady=(8, 4))
 
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Subject"))
-        self._subject = QSpinBox()
-        self._subject.setRange(1, 9999)
-        self._subject.setValue(int(subject))
-        self._subject.valueChanged.connect(lambda _v: self.refresh())
-        controls.addWidget(self._subject)
-
-        self._polish = QCheckBox("Polish")
-        self._polish.setChecked(True)
-        self._polish.toggled.connect(lambda _v: self.refresh())
-        controls.addWidget(self._polish)
-
-        self._visualize = QCheckBox("Visualize")
-        self._visualize.setChecked(True)
-        self._visualize.setToolTip(
-            "After synthesize, polish, and smooth: 2D PNG and the interactive 3D view"
+        controls = ttk.Frame(self.root)
+        controls.pack(fill="x", padx=8, pady=4)
+        ttk.Label(controls, text="Subject").pack(side="left")
+        self._subject = tk.IntVar(value=int(subject))
+        spin = ttk.Spinbox(
+            controls,
+            from_=1,
+            to=9999,
+            width=6,
+            textvariable=self._subject,
+            command=self.refresh,
         )
-        controls.addWidget(self._visualize)
+        spin.pack(side="left", padx=(4, 12))
+        spin.bind("<FocusOut>", lambda _e: self.refresh())
+        spin.bind("<Return>", lambda _e: self.refresh())
 
-        self._rotate = QCheckBox("Hub angle search")
-        self._rotate.setToolTip("Synthesize: ±36° search around the fiducial hub clicks")
-        controls.addWidget(self._rotate)
+        self._polish = tk.BooleanVar(value=True)
+        self._visualize = tk.BooleanVar(value=True)
+        self._rotate = tk.BooleanVar(value=False)
+        self._simulate = tk.BooleanVar(value=False)
+        ttk.Checkbutton(controls, text="Polish", variable=self._polish, command=self.refresh).pack(
+            side="left", padx=4
+        )
+        ttk.Checkbutton(controls, text="Visualize", variable=self._visualize).pack(
+            side="left", padx=4
+        )
+        ttk.Checkbutton(controls, text="Hub angle search", variable=self._rotate).pack(
+            side="left", padx=4
+        )
+        ttk.Checkbutton(
+            controls,
+            text="End at simulate",
+            variable=self._simulate,
+            command=self.refresh,
+        ).pack(side="left", padx=4)
 
-        self._simulate = QCheckBox("End at simulate")
-        self._simulate.setToolTip("Run from here stops at simulate instead of gcode")
-        controls.addWidget(self._simulate)
+        self._stop_btn = ttk.Button(controls, text="Stop", command=self.stop)
+        self._stop_btn.pack(side="right")
+        ttk.Button(controls, text="Refresh", command=self.refresh).pack(side="right", padx=4)
 
-        controls.addStretch(1)
-        self._refresh_btn = QPushButton("Refresh")
-        self._refresh_btn.clicked.connect(self.refresh)
-        controls.addWidget(self._refresh_btn)
-        self._stop_btn = QPushButton("Stop")
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self.stop)
-        controls.addWidget(self._stop_btn)
-        layout.addLayout(controls)
+        paned = ttk.Panedwindow(self.root, orient="vertical")
+        paned.pack(fill="both", expand=True, padx=8, pady=4)
 
-        splitter = QSplitter()
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["Stage", "Kind", "Status", "Artifact", ""])
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        splitter.addWidget(self._table)
+        table_wrap = ttk.Frame(paned)
+        self._canvas = tk.Canvas(table_wrap, highlightthickness=0)
+        scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self._canvas.yview)
+        self._rows = ttk.Frame(self._canvas)
+        self._rows.bind(
+            "<Configure>",
+            lambda _e: self._canvas.configure(scrollregion=self._canvas.bbox("all")),
+        )
+        self._canvas_window = self._canvas.create_window((0, 0), window=self._rows, anchor="nw")
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.bind(
+            "<Configure>",
+            lambda event: self._canvas.itemconfigure(self._canvas_window, width=event.width),
+        )
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        paned.add(table_wrap, weight=3)
 
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setFont(QFont("monospace"))
-        self._log.setPlaceholderText("Pipeline log")
-        splitter.addWidget(self._log)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter, stretch=1)
+        self._log = scrolledtext.ScrolledText(paned, height=12, font=("Consolas", 10))
+        paned.add(self._log, weight=2)
 
-        self.statusBar().showMessage("Idle")
+        self._status = ttk.Label(self.root, text="Idle")
+        self._status.pack(fill="x", padx=8, pady=(0, 8))
         self.refresh()
 
     def subject(self) -> int:
-        return int(self._subject.value())
+        try:
+            value = int(self._subject.get())
+        except (tk.TclError, ValueError):
+            return 2
+        return min(9999, max(1, value))
 
     def end_stage(self) -> str:
-        return "simulate" if self._simulate.isChecked() else "gcode"
+        return "simulate" if self._simulate.get() else "gcode"
 
     def refresh(self) -> None:
-        rows = stage_statuses(self.subject(), polish=self._polish.isChecked())
+        for child in self._rows.winfo_children():
+            child.destroy()
         running = self._running()
-        self._table.setRowCount(len(rows))
-        for index, row in enumerate(rows):
-            self._set_text(index, 0, row.name)
-            self._set_text(index, 1, "interactive" if row.interactive else "automated")
-            status = QTableWidgetItem(row.label)
-            if row.skipped:
-                status.setForeground(QColor("#666666"))
-            elif row.ready:
-                status.setForeground(QColor("#1b7f3a"))
-            self._table.setItem(index, 2, status)
-            self._set_text(index, 3, _display_path(row.artifact))
-            self._table.setCellWidget(index, 4, self._actions(row, running))
-        self._subject.setEnabled(not running)
-        self._polish.setEnabled(not running)
-        self._simulate.setEnabled(not running)
-        self._stop_btn.setEnabled(running)
+        header = ttk.Frame(self._rows)
+        header.pack(fill="x", pady=(0, 4))
+        for text, width in (("Stage", 16), ("Kind", 14), ("Status", 10)):
+            ttk.Label(header, text=text, width=width).pack(side="left")
+        ttk.Label(header, text="Artifact").pack(side="left", fill="x", expand=True)
 
-    def _set_text(self, row: int, column: int, text: str) -> None:
-        self._table.setItem(row, column, QTableWidgetItem(text))
+        for row in stage_statuses(self.subject(), polish=self._polish.get()):
+            self._add_row(row, running)
 
-    def _actions(self, row: StageStatus, running: bool) -> QWidget:
-        box = QWidget()
-        layout = QHBoxLayout(box)
-        layout.setContentsMargins(4, 2, 4, 2)
-        from_here = QPushButton("Run from here")
-        this_stage = QPushButton("This stage")
+        self._stop_btn.state(["!disabled"] if running else ["disabled"])
+
+    def _add_row(self, row: StageStatus, running: bool) -> None:
+        line = ttk.Frame(self._rows)
+        line.pack(fill="x", pady=1)
+        ttk.Label(line, text=row.name, width=16).pack(side="left")
+        kind = "interactive" if row.interactive else "automated"
+        ttk.Label(line, text=kind, width=14).pack(side="left")
+        status = ttk.Label(line, text=row.label, width=10)
+        if row.skipped:
+            status.configure(foreground="#666666")
+        elif row.ready:
+            status.configure(foreground="#1b7f3a")
+        status.pack(side="left")
+        ttk.Label(line, text=_display_path(row.artifact)).pack(side="left", fill="x", expand=True)
+
         enabled = not running and not row.skipped
         from_ok = enabled and STAGES.index(row.name) <= STAGES.index(self.end_stage())
-        from_here.setEnabled(from_ok)
-        this_stage.setEnabled(enabled)
-        from_here.clicked.connect(lambda _checked=False, name=row.name: self.start_from(name))
-        this_stage.clicked.connect(lambda _checked=False, name=row.name: self.start_stage(name))
-        layout.addWidget(from_here)
-        layout.addWidget(this_stage)
-        return box
+        this_stage = ttk.Button(
+            line, text="This stage", command=lambda name=row.name: self.start_stage(name)
+        )
+        from_here = ttk.Button(
+            line, text="Run from here", command=lambda name=row.name: self.start_from(name)
+        )
+        this_stage.pack(side="right")
+        from_here.pack(side="right", padx=(0, 4))
+        if not enabled:
+            this_stage.state(["disabled"])
+        if not from_ok:
+            from_here.state(["disabled"])
 
     def start_from(self, stage: str) -> None:
         self._start(stage, self.end_stage())
@@ -189,49 +181,94 @@ class PipelineWindow(QMainWindow):
                 target=self.subject(),
                 from_stage=from_stage,
                 to_stage=to_stage,
-                polish=self._polish.isChecked(),
-                visualize=self._visualize.isChecked(),
-                rotate=self._rotate.isChecked(),
+                polish=bool(self._polish.get()),
+                visualize=bool(self._visualize.get()),
+                rotate=bool(self._rotate.get()),
             )
         except ValueError as exc:
-            QMessageBox.warning(self, "Cannot start", str(exc))
+            messagebox.showwarning("Cannot start", str(exc), parent=self.root)
             return
-        self._log.appendPlainText("$ " + " ".join(argv) + "\n")
-        self.statusBar().showMessage(f"Running {from_stage} → {to_stage}")
-        self._proc.start(argv[0], argv[1:])
+        self._append("$ " + " ".join(argv) + "\n\n")
+        self._status.configure(text=f"Running {from_stage} → {to_stage}")
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            self._proc = subprocess.Popen(
+                argv,
+                cwd=paths.REPO_ROOT,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as exc:
+            self._append(f"Failed to start: {exc}\n")
+            self._status.configure(text="Failed to start")
+            self._proc = None
+            self.refresh()
+            return
+        self._reader = threading.Thread(target=self._read_output, daemon=True)
+        self._reader.start()
+        self.root.after(100, self._drain)
         self.refresh()
+
+    def _read_output(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            self._lines.put(None)
+            return
+        for line in proc.stdout:
+            self._lines.put(line)
+        proc.wait()
+        self._lines.put(None)
+
+    def _drain(self) -> None:
+        finished = False
+        try:
+            while True:
+                item = self._lines.get_nowait()
+                if item is None:
+                    finished = True
+                    break
+                self._append(item)
+        except queue.Empty:
+            pass
+        if finished:
+            code = self._proc.returncode if self._proc is not None else 1
+            self._append(f"\nProcess exited {code}.\n")
+            self._status.configure(text=f"Exited {code}")
+            self._proc = None
+            self.refresh()
+            return
+        if self._running():
+            self.root.after(100, self._drain)
+
+    def _append(self, text: str) -> None:
+        self._log.insert("end", text)
+        self._log.see("end")
 
     def stop(self) -> None:
-        if self._running():
-            self._log.appendPlainText("\nStopping pipeline…\n")
-            self._proc.kill()
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            self._append("\nStopping pipeline…\n")
+            proc.kill()
 
     def _running(self) -> bool:
-        return self._proc.state() != QProcess.ProcessState.NotRunning
+        return self._proc is not None and self._proc.poll() is None
 
-    def _append_output(self) -> None:
-        data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", errors="replace")
-        if not data:
-            return
-        self._log.moveCursor(QTextCursor.MoveOperation.End)
-        self._log.insertPlainText(data)
-        self._log.moveCursor(QTextCursor.MoveOperation.End)
-
-    def _on_finished(self, exit_code: int, _status) -> None:
-        self._log.appendPlainText(f"\nProcess exited {exit_code}.\n")
-        self.statusBar().showMessage(f"Exited {exit_code}")
-        self.refresh()
-
-    def _on_error(self, error) -> None:
-        if error == QProcess.ProcessError.FailedToStart:
-            self._log.appendPlainText(f"Failed to start: {self._proc.errorString()}\n")
-            self.statusBar().showMessage("Failed to start")
-            self.refresh()
+    def _on_close(self) -> None:
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+        self.root.destroy()
 
 
 def launch(subject: int | None = None) -> int:
-    """Open the control panel. Returns the Qt application exit code."""
-    app = QApplication.instance() or QApplication(sys.argv)
+    """Open the control panel. Returns 0 when the window closes."""
     window = PipelineWindow(subject=2 if subject is None else subject)
-    window.show()
-    return int(app.exec())
+    window.root.mainloop()
+    return 0

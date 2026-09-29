@@ -135,25 +135,16 @@ def test_run_argv_rejects_inverted_range():
         run_argv(target=2, from_stage="gcode", to_stage="synthesize")
 
 
-def test_gui_backend_message_points_at_this_interpreter(monkeypatch):
-    from app.cli import gui_backend_message
-
-    monkeypatch.setattr(sys, "executable", r"D:\Research\layout_design\.venv\Scripts\python.exe")
-    missing = gui_backend_message(
-        ModuleNotFoundError("No module named 'PySide6'"),
-        installed_at=None,
+def test_gui_window_does_not_use_pyside():
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("app/gui/window.py")
+        .read_text(encoding="utf-8")
     )
-    assert r"D:\Research\layout_design\.venv\Scripts\python.exe" in missing
-    assert ' -m pip install -e ".[gui]"' in missing
-    assert "No module named 'PySide6'" in missing
-
-    loaded = gui_backend_message(
-        ImportError("DLL load failed while importing QtWidgets"),
-        installed_at=r"D:\Research\layout_design\.venv\Lib\site-packages\PySide6\__init__.py",
-    )
-    assert "package location" in loaded
-    assert "DLL load failed" in loaded
-    assert "pip install" not in loaded
+    assert "PySide6" not in source
+    assert "import tkinter" in source
 
 
 def test_gui_parser_accepts_subject():

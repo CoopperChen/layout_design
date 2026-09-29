@@ -26,7 +26,6 @@ include = ["app*"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]
-gui = ["PySide6>=6.6"]
 
 [tool.ruff]
 line-length = 100
