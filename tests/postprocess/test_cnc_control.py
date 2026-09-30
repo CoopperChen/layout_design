@@ -143,9 +143,13 @@ def test_home_bc_gcode_exists():
     path = mach4_home_bc_gcode()
     assert path.is_file()
     text = path.read_text(encoding="utf-8")
-    assert "G92 C0 B0" in text
     assert "G28.1 C0" in text
+    assert "G92 C0" in text
     assert "G28.1 B0" in text
+    assert "G92 B0" in text
+    assert "G53 G0 C18.322" in text
+    assert "G53 G0 B-41.8275" in text
+    assert "G92 B0 C0" in text
     assert resolve_gcode_path(path) == path.resolve()
 
 
