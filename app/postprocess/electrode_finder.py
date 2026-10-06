@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
-DEFAULT_ELECTRODE_AREA_CM2 = 1.0
+from app.postprocess.bundle.schema import ELECTRODE_AREA_CM2
+
+DEFAULT_ELECTRODE_AREA_CM2 = ELECTRODE_AREA_CM2
 DEFAULT_NLINES = 10
 _COPLANAR_TOL_MM = 1e-6
 
