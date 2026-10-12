@@ -83,8 +83,9 @@ PHASE2_MAXIMIN_RANDOM_ATTEMPTS = 4
 PHASE2_ADJ_METRIC_SAMPLE_STEP = 1.0
 # Slide a trace toward its looser slot-neighbor when the other side is tighter.
 PHASE2_SLACK_MIN_IMBALANCE_MM = 1.0
-PHASE2_SLACK_SHIFT_FRACTIONS = (0.9, 0.6, 0.35)
-PHASE2_SLACK_BUMP_WIDTH = 0.4
+PHASE2_SLACK_SHIFT_FRACTIONS = (1.6, 1.2, 0.9)
+PHASE2_SLACK_BUMP_WIDTH = 0.65
+PHASE2_SLACK_APPROACH_CAP = 0.7
 # Minimum centerline clearance between any two traces along their full route (fitness).
 TRACE_SEPARATION_MIN = 4.0
 TRACE_SEPARATION_SAMPLE_STEP = 0.25
@@ -5361,7 +5362,12 @@ def _bump_weight(t, center, width):
     if abs(u) >= 1.0:
         return 0.0
     lobe = 0.5 * (1.0 + np.cos(np.pi * u))
-    return float(lobe * np.sin(np.pi * t))
+    # Full shift at the pinch; fade only so the pinned ends stay put.
+    end = float(np.sin(np.pi * t))
+    end_at_pinch = float(np.sin(np.pi * np.clip(center, 1e-3, 1.0 - 1e-3)))
+    if end_at_pinch < 1e-6:
+        return float(lobe)
+    return float(lobe * end / end_at_pinch)
 
 
 def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
@@ -5385,7 +5391,7 @@ def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
         dist = float(np.linalg.norm(direction))
         if dist < 1e-6:
             continue
-        step = min(float(shift_mm) * weight, 0.45 * dist)
+        step = min(float(shift_mm) * weight, PHASE2_SLACK_APPROACH_CAP * dist)
         out[i] = path[i] + direction / dist * step
     return out
 
