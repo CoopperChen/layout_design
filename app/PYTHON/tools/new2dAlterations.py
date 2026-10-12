@@ -63,12 +63,12 @@ TERMINAL_ENTRY_SLOT_SPACING = _load_terminal_slot_spacing()
 # Phase 1 greedy: accept per-trace improvement when global count is flat (oscillation caps).
 PHASE1_LOCAL_ACCEPT_MAX_PER_ROUND = 5
 PHASE1_LOCAL_ACCEPT_MAX_PER_ELECTRODE = 1
-# Phase 1 electrode-clearance pass: inflation on foreign electrode discs in greedy forbidden region.
-PHASE1_GREEDY_ELECTRODE_CLEARANCE_MULTIPLIER = 1.05
+# Greedy obstacle inflation on foreign electrode discs (both clearance and spacing passes).
+PHASE1_GREEDY_ELECTRODE_CLEARANCE_MULTIPLIER = 1.5
 # Phase 2: minimum clearance when checking against inner (fixed) traces.
 PHASE2_INNER_TRACE_SEPARATION = 4.0
-# Phase 2 spacing greedy: inflated electrode keep-outs and trace half-width buffer.
-PHASE2_GREEDY_SPACING_ELECTRODE_MULTIPLIER = 1.35
+# Phase 2 spacing greedy: same electrode inflation as phase 1, plus a trace half-width buffer.
+PHASE2_GREEDY_SPACING_ELECTRODE_MULTIPLIER = 1.5
 PHASE2_GREEDY_TRACE_HALF_SEPARATION = MIN_PATH_SEPARATION / 2.0
 PHASE2_SPACING_MAX_DETOUR_RATIO = 1.8
 PHASE2_PAIR_RESOLUTION_MAX_ROUNDS = 4

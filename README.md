@@ -221,9 +221,9 @@ synthesize:
 polish:
   mode: gentle
   min_trace_separation_mm: 6.0
-  phase2_max_rounds: 20
-  ga_generations: 20
-  ga_population: 20
+  phase2_max_rounds: 100
+  ga_generations: 100
+  ga_population: 100
   visualize: true
 
 postprocess:
