@@ -45,6 +45,9 @@ def test_slack_move_targets_the_loose_side_of_the_pinch():
     move_idx, toward_idx, away_idx, tight_gap, loose_gap = toward_c[0]
     assert (move_idx, toward_idx, away_idx) == (2, 3, 1)
     assert tight_gap + 1.0 < loose_gap
+    loose_gaps = [m[4] for m in moves]
+    assert loose_gaps == sorted(loose_gaps, reverse=True)
+    assert moves[0][0] == 2
 
 
 def test_slack_trial_opens_the_pinched_gap():

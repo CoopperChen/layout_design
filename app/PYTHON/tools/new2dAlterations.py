@@ -5280,7 +5280,8 @@ def _slack_transfer_moves(
 ):
     """Traces that should slide toward a loose neighbor to open a tighter side.
 
-    Each item is (move_idx, toward_idx, away_idx, tight_gap, loose_gap).
+    Each item is (move_idx, toward_idx, away_idx, tight_gap, loose_gap),
+    furthest loose neighbor first.
     """
     moves = []
     step = PHASE2_ADJ_METRIC_SAMPLE_STEP
@@ -5314,7 +5315,7 @@ def _slack_transfer_moves(
                 moves.append(
                     (move_idx, chain[pos - 1], chain[pos + 1], right_gap, left_gap)
                 )
-    moves.sort(key=lambda item: (item[3], -item[4]))
+    moves.sort(key=lambda item: (-item[4], item[3]))
     return moves
 
 
@@ -5409,6 +5410,7 @@ def _slack_transfer_trials(
     """
     if not baseline_adjacent_metrics:
         return []
+    # Furthest loose neighbors only; the list is already sorted that way.
     moves = _slack_transfer_moves(
         paths,
         path_electrodes,
