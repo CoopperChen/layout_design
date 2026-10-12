@@ -81,6 +81,10 @@ PHASE2_MIN_ADJ_GAP_EPS = 0.05
 PHASE2_MAXIMIN_TOP_PAIRS = 4
 PHASE2_MAXIMIN_RANDOM_ATTEMPTS = 4
 PHASE2_ADJ_METRIC_SAMPLE_STEP = 1.0
+# Slide a trace toward its looser slot-neighbor when the other side is tighter.
+PHASE2_SLACK_MIN_IMBALANCE_MM = 1.0
+PHASE2_SLACK_SHIFT_FRACTIONS = (0.9, 0.6, 0.35)
+PHASE2_SLACK_BUMP_WIDTH = 0.4
 # Minimum centerline clearance between any two traces along their full route (fitness).
 TRACE_SEPARATION_MIN = 4.0
 TRACE_SEPARATION_SAMPLE_STEP = 0.25
@@ -5250,6 +5254,291 @@ def _find_conflict_path_pairs(
     )
 
 
+def _slot_chains_by_terminal(path_electrodes, path_terminals, slot_index_by_electrode):
+    """Per-hub path indices in strip slot order."""
+    if not slot_index_by_electrode or not path_electrodes or not path_terminals:
+        return []
+    by_terminal = {}
+    for idx, (name, terminal) in enumerate(zip(path_electrodes, path_terminals)):
+        slot = slot_index_by_electrode.get(name)
+        if slot is None:
+            continue
+        by_terminal.setdefault(terminal, []).append((int(slot), idx))
+    chains = []
+    for items in by_terminal.values():
+        items.sort(key=lambda item: item[0])
+        chains.append([idx for _slot, idx in items])
+    return chains
+
+
+def _slack_transfer_moves(
+    paths,
+    path_electrodes,
+    path_terminals,
+    electrode_zones,
+    slot_index_by_electrode,
+):
+    """Traces that should slide toward a loose neighbor to open a tighter side.
+
+    Each item is (move_idx, toward_idx, away_idx, tight_gap, loose_gap).
+    """
+    moves = []
+    step = PHASE2_ADJ_METRIC_SAMPLE_STEP
+    for chain in _slot_chains_by_terminal(
+        path_electrodes, path_terminals, slot_index_by_electrode
+    ):
+        if len(chain) < 3:
+            continue
+        gaps = []
+        for left_idx, right_idx in zip(chain, chain[1:]):
+            gaps.append(
+                _pair_centerline_min_distance(
+                    paths[left_idx],
+                    paths[right_idx],
+                    path_terminals[left_idx],
+                    path_terminals[right_idx],
+                    electrode_zones,
+                    sample_step=step,
+                )
+            )
+        for pos, move_idx in enumerate(chain):
+            left_gap = gaps[pos - 1] if pos > 0 else None
+            right_gap = gaps[pos] if pos < len(gaps) else None
+            if left_gap is None or right_gap is None:
+                continue
+            if left_gap + PHASE2_SLACK_MIN_IMBALANCE_MM < right_gap:
+                moves.append(
+                    (move_idx, chain[pos + 1], chain[pos - 1], left_gap, right_gap)
+                )
+            elif right_gap + PHASE2_SLACK_MIN_IMBALANCE_MM < left_gap:
+                moves.append(
+                    (move_idx, chain[pos - 1], chain[pos + 1], right_gap, left_gap)
+                )
+    moves.sort(key=lambda item: (item[3], -item[4]))
+    return moves
+
+
+def _resample_polyline(path, n=48):
+    line = _path_to_linestring(path)
+    if line is None or float(line.length) < 1e-9:
+        return np.asarray(path, dtype=float).copy()
+    count = max(int(n), 2)
+    pts = []
+    for arc in np.linspace(0.0, float(line.length), count):
+        pt = line.interpolate(float(arc))
+        pts.append([pt.x, pt.y])
+    return np.asarray(pts, dtype=float)
+
+
+def _closest_arc_fraction(path, other):
+    """Arc fraction on ``path`` where it comes closest to ``other``."""
+    line = _path_to_linestring(path)
+    other_line = _path_to_linestring(other)
+    if line is None or other_line is None or float(line.length) < 1e-9:
+        return 0.5
+    length = float(line.length)
+    best_s = 0.5 * length
+    best_d = float("inf")
+    n = max(8, int(length / max(PHASE2_ADJ_METRIC_SAMPLE_STEP, 1e-6)))
+    for arc in np.linspace(0.0, length, n):
+        pt = line.interpolate(float(arc))
+        dist = float(other_line.distance(pt))
+        if dist < best_d:
+            best_d = dist
+            best_s = float(arc)
+    return best_s / length
+
+
+def _bump_weight(t, center, width):
+    """Cosine lobe around ``center`` that is zero at the path ends."""
+    t = float(t)
+    if t <= 0.0 or t >= 1.0:
+        return 0.0
+    if width <= 1e-9:
+        return 0.0
+    u = (t - float(center)) / float(width)
+    if abs(u) >= 1.0:
+        return 0.0
+    lobe = 0.5 * (1.0 + np.cos(np.pi * u))
+    return float(lobe * np.sin(np.pi * t))
+
+
+def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
+    """Push the interior of ``path`` toward ``toward_path``. Endpoints stay put."""
+    path = _resample_polyline(path)
+    toward = _path_to_linestring(toward_path)
+    if toward is None or float(toward.length) < 1e-9 or len(path) < 3:
+        return path
+    seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    total = float(cum[-1])
+    out = path.copy()
+    toward_len = float(toward.length)
+    for i in range(1, len(path) - 1):
+        t = float(cum[i] / total) if total > 1e-9 else i / (len(path) - 1)
+        weight = _bump_weight(t, center_t, PHASE2_SLACK_BUMP_WIDTH)
+        if weight < 1e-6:
+            continue
+        target = toward.interpolate(float(np.clip(t, 0.0, 1.0)) * toward_len)
+        direction = np.array([target.x, target.y], dtype=float) - path[i]
+        dist = float(np.linalg.norm(direction))
+        if dist < 1e-6:
+            continue
+        step = min(float(shift_mm) * weight, 0.45 * dist)
+        out[i] = path[i] + direction / dist * step
+    return out
+
+
+def _slack_transfer_trials(
+    paths,
+    path_electrodes,
+    path_terminals,
+    electrode_zones,
+    terminal_zones,
+    electrodes_2d,
+    terminals_2d,
+    entry_points_2d,
+    slot_index_by_electrode,
+    baseline_adjacent_metrics,
+    min_separation=PHASE2_INNER_TRACE_SEPARATION,
+    max_crossing_count: int | None = None,
+):
+    """Legal bows that open a tight side by spending slack on the other side.
+
+    Returns a list of (rank_key, paths, message, adjacent_metrics).
+    """
+    if not baseline_adjacent_metrics:
+        return []
+    moves = _slack_transfer_moves(
+        paths,
+        path_electrodes,
+        path_terminals,
+        electrode_zones,
+        slot_index_by_electrode,
+    )[:PHASE2_MAXIMIN_TOP_PAIRS]
+    if not moves:
+        return []
+
+    baseline_key = _adjacent_gap_rank_key(baseline_adjacent_metrics)
+    baseline_min = float(baseline_adjacent_metrics.get("min_adjacent_gap", float("inf")))
+    crossing_cache = None
+    crossings_by_idx = {}
+    if max_crossing_count is not None:
+        crossing_cache = _build_crossing_detection_path_cache(
+            paths, path_terminals, electrode_zones
+        )
+
+    accepted = []
+    step = PHASE2_ADJ_METRIC_SAMPLE_STEP
+    for move_idx, toward_idx, away_idx, tight_gap, loose_gap in moves:
+        half_slack = 0.5 * max(0.0, float(loose_gap) - float(tight_gap))
+        if half_slack < 0.2:
+            continue
+        center_t = _closest_arc_fraction(paths[move_idx], paths[away_idx])
+        electrode_name = path_electrodes[move_idx]
+        terminal_name = path_terminals[move_idx]
+        start = np.asarray(electrodes_2d[electrode_name], dtype=float)
+        end = np.asarray(
+            entry_points_2d.get(electrode_name, terminals_2d[terminal_name]),
+            dtype=float,
+        )
+        if max_crossing_count is not None and move_idx not in crossings_by_idx:
+            crossings_by_idx[move_idx] = _count_crossings_among_other_paths(
+                move_idx,
+                paths,
+                path_terminals,
+                terminal_zones,
+                electrode_zones,
+                dense_path_cache=crossing_cache,
+            )
+        for frac in PHASE2_SLACK_SHIFT_FRACTIONS:
+            shift = float(frac) * half_slack
+            trial_path = _bow_path_toward_neighbor(
+                paths[move_idx], paths[toward_idx], shift, center_t
+            )
+            trial_path = pin_path_endpoints_2d(trial_path, start, end)
+            if count_single_trace_electrode_violations(
+                trial_path, electrode_name, electrode_zones
+            ) > 0:
+                continue
+            if _path_chord_detour_ratio(trial_path, start, end) > PHASE2_SPACING_MAX_DETOUR_RATIO:
+                continue
+            if max_crossing_count is not None:
+                trial_cross = _layout_crossing_count_if_replaced(
+                    move_idx,
+                    trial_path,
+                    paths,
+                    path_terminals,
+                    terminal_zones,
+                    electrode_zones,
+                    crossings_by_idx[move_idx],
+                    dense_path_cache=crossing_cache,
+                )
+                if int(trial_cross) > int(max_crossing_count):
+                    continue
+            new_tight = _pair_centerline_min_distance(
+                trial_path,
+                paths[away_idx],
+                terminal_name,
+                path_terminals[away_idx],
+                electrode_zones,
+                sample_step=step,
+            )
+            if new_tight <= float(tight_gap) + PHASE2_MIN_ADJ_GAP_EPS:
+                continue
+            trial_paths = [p.copy() for p in paths]
+            trial_paths[move_idx] = trial_path
+            if slot_index_by_electrode and introduces_coterminal_ordered_crossings(
+                paths,
+                trial_paths,
+                path_electrodes,
+                path_terminals,
+                slot_index_by_electrode,
+                electrode_zones,
+                terminal_zones=terminal_zones,
+                changed_path_indices=(move_idx,),
+            ):
+                continue
+            if path_has_trace_reentry(
+                trial_path,
+                electrode_name,
+                terminal_name,
+                electrode_zones,
+                terminal_zones,
+            ):
+                continue
+            zone = terminal_zones.get(terminal_name) if terminal_zones else None
+            if zone is not None and path_has_terminal_zone_reentry(trial_path, zone):
+                continue
+            trial_adj = compute_adjacent_slot_gap_metrics(
+                trial_paths,
+                path_electrodes,
+                path_terminals,
+                electrode_zones,
+                slot_index_by_electrode,
+                sample_step=step,
+            )
+            trial_min = float(trial_adj.get("min_adjacent_gap", float("inf")))
+            if np.isfinite(baseline_min) and trial_min + PHASE2_MIN_ADJ_GAP_EPS < baseline_min:
+                continue
+            rank_key = (
+                *_adjacent_gap_rank_key(trial_adj),
+                0.0,
+            )
+            if not (rank_key < (*baseline_key, 0.0)):
+                continue
+            msg = (
+                f"  slack {path_electrodes[move_idx]} toward "
+                f"{path_electrodes[toward_idx]} "
+                f"(away from {path_electrodes[away_idx]}): "
+                f"tight {float(tight_gap):.2f}->{new_tight:.2f}, "
+                f"min_adj {baseline_min:.2f}->{trial_min:.2f}"
+            )
+            accepted.append((rank_key, trial_paths, msg, trial_adj))
+            break
+    return accepted
+
+
 def _path_chord_detour_ratio(path, start, end):
     path = np.asarray(path, dtype=float)
     start = np.asarray(start, dtype=float)
@@ -5601,7 +5890,8 @@ def _resolve_phase2_ordered_trace_resolution(
     random moves on BOTH traces (electrode-safe, detour-capped).
 
     With focus_separation + slots: one accept per round, choosing the trial that best
-    improves (min adjacent gap, then hub-gap fairness).
+    improves (min adjacent gap, then hub-gap fairness). Before the local nudges,
+    try sliding a trace toward its looser slot-neighbor to open a tighter side.
     """
     del max_attempts_per_trace  # pair-based pass uses fixed caps
 
@@ -5694,6 +5984,24 @@ def _resolve_phase2_ordered_trace_resolution(
 
         best_candidate = None  # (rank_key, paths, msg, trial_adj)
         round_improved = False
+        if use_maximin and baseline_adj is not None:
+            with profile_step("slack_transfer"):
+                for packed in _slack_transfer_trials(
+                    best_paths,
+                    path_electrodes,
+                    path_terminals,
+                    electrode_zones,
+                    terminal_zones,
+                    electrodes_2d,
+                    terminals_2d,
+                    entry_points_2d,
+                    slot_index_by_electrode,
+                    baseline_adj,
+                    min_separation=min_separation,
+                    max_crossing_count=max_crossing_count,
+                ):
+                    if best_candidate is None or packed[0] < best_candidate[0]:
+                        best_candidate = packed
         for i, j, pair_penalty in conflict_pairs:
             pair_side_done = False
             for path_idx, partner_idx in ((i, j), (j, i)):
