@@ -180,7 +180,7 @@ python -m app preprocess --subject 2 --step fiducials
 | `--no-rotate-head` | off | `align-obj`: skip textured OBJ head-rotation UI |
 | `--no-align-head` | off | Skip legacy reconstruct head-rotation UI |
 | `--depth` | `12` | Poisson octree depth (`reconstruct`) |
-| `--spacing` | `4.5` | Electrode spacing (`electrodes`) |
+| `--spacing` | `6.0` | Strip slot pitch in mm (`entry-capacity`; config `synthesize.terminal_slot_spacing_mm`) |
 | `--full-circle` | off | Full 10–20 circle (`electrodes`) |
 
 **Steps:**

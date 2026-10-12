@@ -26,6 +26,13 @@ def load_defaults() -> dict[str, Any]:
     return _DEFAULTS
 
 
+def terminal_slot_spacing_mm() -> float:
+    """Arc pitch between adjacent strip entry slots (mm)."""
+    cfg = load_defaults().get("synthesize", {})
+    raw = cfg.get("terminal_slot_spacing_mm", 6.0)
+    return float(raw)
+
+
 def default_assignments() -> str:
     """Canonical terminal-assignment preset name (data/presets/{name}.json)."""
     cfg = load_defaults()

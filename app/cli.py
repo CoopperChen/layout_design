@@ -29,7 +29,11 @@ import sys
 from pathlib import Path
 
 from app import paths
-from app.config_loader import default_assignments, resolve_assignments
+from app.config_loader import (
+    default_assignments,
+    resolve_assignments,
+    terminal_slot_spacing_mm,
+)
 from app.preprocess import run as preprocess_run
 
 
@@ -78,7 +82,7 @@ def cmd_paths(args: argparse.Namespace) -> int:
 
 def cmd_preprocess(args: argparse.Namespace) -> int:
     extra: list[str] = []
-    if args.spacing != 4.5:
+    if args.spacing != terminal_slot_spacing_mm():
         extra.extend(["--spacing", str(args.spacing)])
     if args.full_circle:
         extra.append("--full-circle")
@@ -468,7 +472,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="align-obj: skip textured OBJ head-rotation UI",
     )
-    pr.add_argument("--spacing", type=float, default=4.5)
+    pr.add_argument(
+        "--spacing",
+        type=float,
+        default=terminal_slot_spacing_mm(),
+        help="Strip slot pitch in mm (entry-capacity)",
+    )
     pr.add_argument("--full-circle", action="store_true")
     pr.set_defaults(func=cmd_preprocess)
 

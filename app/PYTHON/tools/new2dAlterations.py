@@ -50,7 +50,16 @@ TERMINAL_ZONE_ENTRY_MIN_SEPARATION = MIN_PATH_SEPARATION
 TERMINAL_ENTRY_CLOSEST_MIN = 3.0
 TERMINAL_ENTRY_CLOSEST_MAX = 5.0
 # Fixed arc spacing between assigned entry slots on the terminal boundary (init).
-TERMINAL_ENTRY_SLOT_SPACING = 4.5
+def _load_terminal_slot_spacing() -> float:
+    try:
+        from app.config_loader import terminal_slot_spacing_mm
+
+        return float(terminal_slot_spacing_mm())
+    except Exception:
+        return 6.0
+
+
+TERMINAL_ENTRY_SLOT_SPACING = _load_terminal_slot_spacing()
 # Phase 1 greedy: accept per-trace improvement when global count is flat (oscillation caps).
 PHASE1_LOCAL_ACCEPT_MAX_PER_ROUND = 5
 PHASE1_LOCAL_ACCEPT_MAX_PER_ELECTRODE = 1
@@ -3540,7 +3549,7 @@ def create_and_save_new_2D_alteration(SUBJECT_ID: int, original_paths: list = No
     path_terminals = ctx['path_terminals']
     original_paths_2d = ctx['original_paths_2d']
 
-    # Initialization: straight chords for ordering, then fixed 4.5-spaced entry slots.
+    # Initialization: straight chords for ordering, then fixed-pitch entry slots.
     chord_to_terminal = straighten_paths_to_chords(
         original_paths_2d,
         path_electrodes,

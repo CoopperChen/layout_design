@@ -215,6 +215,7 @@ synthesize:
   preserve_entry_order: false
   uv_resolution: 100
   terminal_stop_mm: 20.0
+  terminal_slot_spacing_mm: 6.0         # arc pitch between adjacent strip slots
   visualize: true
 
 polish:
@@ -300,7 +301,7 @@ python -m app preprocess --subject 2 --step entry-capacity
 | `--no-rotate-head` | off | `align-obj`: skip textured OBJ head-rotation UI |
 | `--no-align-head` | off | Skip rotation UI |
 | `--depth` | `12` | Poisson depth |
-| `--spacing` | `4.5` | Electrode spacing (`entry-capacity`) |
+| `--spacing` | `6.0` | Strip slot pitch in mm (`entry-capacity`) |
 | `--full-circle` | off | Full 10–20 circle |
 
 ### Stage B — layout

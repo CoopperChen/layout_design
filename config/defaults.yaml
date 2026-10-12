@@ -25,6 +25,7 @@ synthesize:
   preserve_entry_order: false
   uv_resolution: 100
   terminal_stop_mm: 20.0  # shorten each wire before strip entry (0 = off)
+  terminal_slot_spacing_mm: 6.0  # arc pitch between adjacent strip slots
   terminal_min_points: 4
   visualize: true  # 2D PNG + 3D view after synthesize (CLI: --no-visualize)
 

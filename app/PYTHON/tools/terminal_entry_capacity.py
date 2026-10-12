@@ -18,7 +18,16 @@ from collections import Counter
 
 import numpy as np
 
-DEFAULT_SPACING = 4.5
+def _default_spacing() -> float:
+    try:
+        from app.config_loader import terminal_slot_spacing_mm
+
+        return float(terminal_slot_spacing_mm())
+    except Exception:
+        return 6.0
+
+
+DEFAULT_SPACING = _default_spacing()
 TERMINAL_ZONE_FACTOR = 0.15
 
 
@@ -225,7 +234,7 @@ def main():
         "--spacing",
         type=float,
         default=DEFAULT_SPACING,
-        help="Fixed arc spacing between adjacent entry slots (default: 5.0).",
+        help="Fixed arc spacing between adjacent entry slots (mm).",
     )
     parser.add_argument(
         "--full-circle",

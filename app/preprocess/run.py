@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app import paths
+from app.config_loader import terminal_slot_spacing_mm
 from app.runtime import setup_runtime
 
 _PREP_SCRIPTS = {
@@ -153,12 +154,18 @@ def run_assignments(subject_id: int) -> int:
     return 0
 
 
-def run_entry_capacity(subject_id: int, spacing: float = 4.5, full_circle: bool = False) -> int:
+def run_entry_capacity(
+    subject_id: int,
+    spacing: float | None = None,
+    full_circle: bool = False,
+) -> int:
     setup_runtime()
     from PYTHON.tools import terminal_entry_capacity as tec
 
+    if spacing is None:
+        spacing = terminal_slot_spacing_mm()
     argv = [str(subject_id)]
-    if spacing != 4.5:
+    if spacing != terminal_slot_spacing_mm():
         argv.extend(["--spacing", str(spacing)])
     if full_circle:
         argv.append("--full-circle")
@@ -173,7 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[*_PREP_SCRIPTS, "assignments", "entry-capacity"],
         required=True,
     )
-    p.add_argument("--spacing", type=float, default=4.5)
+    p.add_argument("--spacing", type=float, default=terminal_slot_spacing_mm())
     p.add_argument("--full-circle", action="store_true")
     p.add_argument("--ply", type=Path, default=None, help="Input .ply (reconstruct step)")
     p.add_argument("--no-align-head", action="store_true", help="Skip head rotation (reconstruct)")
