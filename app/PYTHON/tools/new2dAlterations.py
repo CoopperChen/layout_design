@@ -777,6 +777,7 @@ def _empty_path_metrics(electrode_violations=0):
         'trace_reentry_count': 0,
         'min_pairwise_distance': float('inf'),
         'min_adjacent_gap': float('inf'),
+        'max_adjacent_gap': float('inf'),
         'hub_gap_variance': 0.0,
         'hub_gap_spread': 0.0,
         'n_adjacent_slot_pairs': 0,
@@ -2466,6 +2467,7 @@ def analyze_path_collisions(
         slot_index_by_electrode,
     )
     result["min_adjacent_gap"] = adj_metrics["min_adjacent_gap"]
+    result["max_adjacent_gap"] = adj_metrics["max_adjacent_gap"]
     result["hub_gap_variance"] = adj_metrics["hub_gap_variance"]
     result["hub_gap_spread"] = adj_metrics["hub_gap_spread"]
     result["n_adjacent_slot_pairs"] = adj_metrics["n_adjacent_slot_pairs"]
@@ -5004,6 +5006,7 @@ def compute_adjacent_slot_gap_metrics(
     if not pairs:
         return {
             "min_adjacent_gap": float("inf"),
+            "max_adjacent_gap": float("inf"),
             "hub_gap_variance": 0.0,
             "hub_gap_spread": 0.0,
             "n_adjacent_slot_pairs": 0,
@@ -5052,8 +5055,10 @@ def compute_adjacent_slot_gap_metrics(
 
     finite_gaps = [g for g in gaps if np.isfinite(g)]
     min_gap = float(min(finite_gaps)) if finite_gaps else float("inf")
+    max_gap = float(max(finite_gaps)) if finite_gaps else float("inf")
     return {
         "min_adjacent_gap": min_gap,
+        "max_adjacent_gap": max_gap,
         "hub_gap_variance": hub_var,
         "hub_gap_spread": hub_spread,
         "n_adjacent_slot_pairs": len(pairs),
@@ -5061,6 +5066,17 @@ def compute_adjacent_slot_gap_metrics(
         "hub_adjacent_gaps": hub_gaps,
         "adjacent_pairs": pairs,
     }
+
+
+def _max_adjacent_gap_difference(metrics) -> float:
+    """Widest slot-neighbor gap minus the tightest one."""
+    if not metrics:
+        return float("inf")
+    hi = float(metrics.get("max_adjacent_gap", float("inf")))
+    lo = float(metrics.get("min_adjacent_gap", float("inf")))
+    if not np.isfinite(hi) or not np.isfinite(lo):
+        return float("inf")
+    return hi - lo
 
 
 def _adjacent_gap_rank_key(metrics):
@@ -6082,6 +6098,12 @@ def _resolve_phase2_ordered_trace_resolution(
 
         if use_maximin:
             if best_candidate is None:
+                if baseline_adj is not None:
+                    print(
+                        f"Phase 2 round {round_idx + 1} after search: "
+                        f"max_adj_gap={baseline_adj['max_adjacent_gap']:.2f}, "
+                        f"max_adj_gap_diff={_max_adjacent_gap_difference(baseline_adj):.2f}"
+                    )
                 print(
                     f"Phase 2 pair resolution stopped "
                     f"(round {round_idx + 1}, no gain)"
@@ -6100,6 +6122,11 @@ def _resolve_phase2_ordered_trace_resolution(
                     slot_index_by_electrode,
                     sample_step=PHASE2_ADJ_METRIC_SAMPLE_STEP,
                 )
+            print(
+                f"Phase 2 round {round_idx + 1} after search: "
+                f"max_adj_gap={after['max_adjacent_gap']:.2f}, "
+                f"max_adj_gap_diff={_max_adjacent_gap_difference(after):.2f}"
+            )
             if (
                 after["min_adjacent_gap"] >= min_separation - 1e-6
                 and after["hub_gap_spread"] <= max(0.5, 0.15 * min_separation)
@@ -6134,6 +6161,8 @@ def _resolve_phase2_ordered_trace_resolution(
         f"overlap={final['overlap_length']:.2f}, "
         f"trace_sep_norm={final['trace_separation_deficit_normalized']:.2f}, "
         f"min_adj_gap={final.get('min_adjacent_gap', float('inf')):.2f}, "
+        f"max_adj_gap={final.get('max_adjacent_gap', float('inf')):.2f}, "
+        f"max_adj_gap_diff={_max_adjacent_gap_difference(final):.2f}, "
         f"hub_var={final.get('hub_gap_variance', 0.0):.2f}, "
         f"layout_score={final.get('layout_score', final['collision_score']):.2f}"
     )

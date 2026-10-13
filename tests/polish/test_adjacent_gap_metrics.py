@@ -10,6 +10,7 @@ setup_runtime()
 
 from PYTHON.tools.new2dAlterations import (  # noqa: E402
     _adjacent_gap_rank_key,
+    _max_adjacent_gap_difference,
     _slot_adjacent_path_index_pairs,
     compute_adjacent_slot_gap_metrics,
 )
@@ -43,6 +44,10 @@ def test_adjacent_gap_metrics_min_and_hub_variance():
     )
     assert m["n_adjacent_slot_pairs"] == 2
     assert m["min_adjacent_gap"] < 8.0
+    assert m["max_adjacent_gap"] > m["min_adjacent_gap"]
+    assert _max_adjacent_gap_difference(m) == (
+        m["max_adjacent_gap"] - m["min_adjacent_gap"]
+    )
     # Hub gaps near y=0: A–B ~2mm, B–C ~18mm → high variance / spread
     assert m["hub_gap_spread"] > 5.0
 
