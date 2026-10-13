@@ -61,8 +61,11 @@ def test_neighbor_evenness_uses_gap_difference_not_widest_minus_tightest():
     terminals = ["TERMINAL_LEFT"] * 4
     slots = {"A": 0, "B": 1, "C": 2, "D": 3}
     report = _format_adjacent_neighbor_gaps(metrics, electrodes, terminals, slots)
-    assert "B A-B 4.00/B-C 4.20 diff=0.20 even" in report
-    assert "C B-C 4.20/C-D 8.00 diff=3.80 uneven" in report
+    lines = report.splitlines()
+    assert lines == [
+        "LEFT: C B-C 4.20/C-D 8.00 diff=3.80 uneven",
+        "LEFT: B A-B 4.00/B-C 4.20 diff=0.20 even",
+    ]
     assert "max_adj_gap_diff" not in report
 
 
@@ -76,6 +79,7 @@ def test_neighbor_log_keeps_four_largest_gap_differences():
     slots = {name: i for i, name in enumerate(electrodes)}
     report = _format_adjacent_neighbor_gaps(metrics, electrodes, terminals, slots)
     # Diffs: B 1.00, C 1.00, D 6.00, E 1.00, F 1.00. Only D exceeds the next tier.
+    assert len(report.splitlines()) == 4
     assert report.count("diff=") == 4
     assert "D C-D 3.00/D-E 9.00 diff=6.00 uneven" in report
     assert report.index("diff=6.00") < report.index("diff=1.00")

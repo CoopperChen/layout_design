@@ -73,3 +73,30 @@ def test_slack_trial_opens_the_pinched_gap():
     best = min(trials, key=lambda item: item[0])
     assert best[0] < (*_adjacent_gap_rank_key(baseline), 0.0)
     assert best[3]["min_adjacent_gap"] > baseline["min_adjacent_gap"] + 0.05
+
+
+def test_slack_drop_prints_why(capsys):
+    paths, electrodes, terminals, slots, electrodes_2d, entries, zones = _sandwich_layout()
+    baseline = compute_adjacent_slot_gap_metrics(
+        paths, electrodes, terminals, zones, slots, sample_step=1.0
+    )
+    reported_min = float(baseline["min_adjacent_gap"])
+    baseline["min_adjacent_gap"] = reported_min + 50.0
+    trials = _slack_transfer_trials(
+        paths,
+        electrodes,
+        terminals,
+        zones,
+        {},
+        electrodes_2d,
+        {"T": np.array([100.0, 20.0])},
+        entries,
+        slots,
+        baseline,
+        min_separation=4.0,
+        max_crossing_count=0,
+    )
+    assert trials == []
+    log = capsys.readouterr().out
+    assert "slack drop C toward D (away from B):" in log
+    assert "would lower the minimum adjacent gap" in log

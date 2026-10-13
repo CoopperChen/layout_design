@@ -70,7 +70,6 @@ PHASE2_INNER_TRACE_SEPARATION = 4.0
 # Phase 2 spacing greedy: same electrode inflation as phase 1, plus a trace half-width buffer.
 PHASE2_GREEDY_SPACING_ELECTRODE_MULTIPLIER = 1.5
 PHASE2_GREEDY_TRACE_HALF_SEPARATION = MIN_PATH_SEPARATION / 2.0
-PHASE2_SPACING_MAX_DETOUR_RATIO = 2.5
 PHASE2_PAIR_RESOLUTION_MAX_ROUNDS = 4
 PHASE2_RANDOM_ATTEMPTS_PER_TRACE = 4
 PHASE2_SEPARATION_FOCUS_RANDOM_ATTEMPTS = 12
@@ -5074,7 +5073,7 @@ def _format_adjacent_neighbor_gaps(
     path_terminals=None,
     slot_index_by_electrode=None,
 ) -> str:
-    """Per interior trace, only the four with the largest neighbor-gap difference."""
+    """Four interior traces with the largest neighbor-gap difference, one per line."""
     if not metrics:
         return "none"
     pairs = list(metrics.get("adjacent_pairs") or [])
@@ -5122,7 +5121,29 @@ def _format_adjacent_neighbor_gaps(
     if not grouped:
         return "none"
     grouped.sort(key=lambda item: -item[0])
-    return "; ".join(label for _gap, label in grouped[:PHASE2_MAXIMIN_TOP_PAIRS])
+    return "\n".join(label for _gap, label in grouped[:PHASE2_MAXIMIN_TOP_PAIRS])
+
+
+def _print_adjacent_neighbor_gaps(
+    header,
+    metrics,
+    path_electrodes,
+    path_terminals,
+    slot_index_by_electrode,
+):
+    """Print the even/uneven neighbor report with one trace per line."""
+    print(header)
+    report = _format_adjacent_neighbor_gaps(
+        metrics,
+        path_electrodes,
+        path_terminals,
+        slot_index_by_electrode,
+    )
+    if not report or report == "none":
+        print("  none")
+        return
+    for line in report.splitlines():
+        print(f"  {line}")
 
 
 def _adjacent_gap_rank_key(metrics):
@@ -5458,6 +5479,13 @@ def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
     return out
 
 
+def _prefer_slack_drop(drop, priority, reason):
+    """Keep the rejection that passed the most checks. Larger bows win ties."""
+    if drop is None or priority > drop[0]:
+        return (priority, reason)
+    return drop
+
+
 def _slack_transfer_trials(
     paths,
     path_electrodes,
@@ -5491,6 +5519,7 @@ def _slack_transfer_trials(
 
     baseline_key = _adjacent_gap_rank_key(baseline_adjacent_metrics)
     baseline_min = float(baseline_adjacent_metrics.get("min_adjacent_gap", float("inf")))
+    baseline_hub_var = float(baseline_adjacent_metrics.get("hub_gap_variance", 0.0))
     crossing_cache = None
     crossings_by_idx = {}
     if max_crossing_count is not None:
@@ -5502,7 +5531,14 @@ def _slack_transfer_trials(
     step = PHASE2_ADJ_METRIC_SAMPLE_STEP
     for move_idx, toward_idx, away_idx, tight_gap, loose_gap in moves:
         half_slack = 0.5 * max(0.0, float(loose_gap) - float(tight_gap))
+        drop_prefix = (
+            f"  slack drop {path_electrodes[move_idx]} toward "
+            f"{path_electrodes[toward_idx]} "
+            f"(away from {path_electrodes[away_idx]}): "
+        )
         if half_slack < 0.2:
+            gap_diff = float(loose_gap) - float(tight_gap)
+            print(drop_prefix + f"gap difference {gap_diff:.2f} mm is too small to bow")
             continue
         center_t = _closest_arc_fraction(paths[move_idx], paths[away_idx])
         electrode_name = path_electrodes[move_idx]
@@ -5521,6 +5557,8 @@ def _slack_transfer_trials(
                 electrode_zones,
                 dense_path_cache=crossing_cache,
             )
+        drop = None
+        kept = False
         for frac in PHASE2_SLACK_SHIFT_FRACTIONS:
             shift = float(frac) * half_slack
             trial_path = _bow_path_toward_neighbor(
@@ -5530,8 +5568,7 @@ def _slack_transfer_trials(
             if count_single_trace_electrode_violations(
                 trial_path, electrode_name, electrode_zones
             ) > 0:
-                continue
-            if _path_chord_detour_ratio(trial_path, start, end) > PHASE2_SPACING_MAX_DETOUR_RATIO:
+                drop = _prefer_slack_drop(drop, 1, "hits a foreign electrode")
                 continue
             if max_crossing_count is not None:
                 trial_cross = _layout_crossing_count_if_replaced(
@@ -5545,6 +5582,11 @@ def _slack_transfer_trials(
                     dense_path_cache=crossing_cache,
                 )
                 if int(trial_cross) > int(max_crossing_count):
+                    drop = _prefer_slack_drop(
+                        drop,
+                        2,
+                        f"crossings would rise above {int(max_crossing_count)}",
+                    )
                     continue
             new_tight = _pair_centerline_min_distance(
                 trial_path,
@@ -5555,6 +5597,11 @@ def _slack_transfer_trials(
                 sample_step=step,
             )
             if new_tight <= float(tight_gap) + PHASE2_MIN_ADJ_GAP_EPS:
+                drop = _prefer_slack_drop(
+                    drop,
+                    3,
+                    f"tight gap did not open ({float(tight_gap):.2f}->{new_tight:.2f})",
+                )
                 continue
             trial_paths = [p.copy() for p in paths]
             trial_paths[move_idx] = trial_path
@@ -5568,6 +5615,9 @@ def _slack_transfer_trials(
                 terminal_zones=terminal_zones,
                 changed_path_indices=(move_idx,),
             ):
+                drop = _prefer_slack_drop(
+                    drop, 4, "would add a same-hub ordered crossing"
+                )
                 continue
             if path_has_trace_reentry(
                 trial_path,
@@ -5576,9 +5626,11 @@ def _slack_transfer_trials(
                 electrode_zones,
                 terminal_zones,
             ):
+                drop = _prefer_slack_drop(drop, 5, "path re-enters itself")
                 continue
             zone = terminal_zones.get(terminal_name) if terminal_zones else None
             if zone is not None and path_has_terminal_zone_reentry(trial_path, zone):
+                drop = _prefer_slack_drop(drop, 5, "path re-enters the terminal zone")
                 continue
             trial_adj = compute_adjacent_slot_gap_metrics(
                 trial_paths,
@@ -5590,12 +5642,26 @@ def _slack_transfer_trials(
             )
             trial_min = float(trial_adj.get("min_adjacent_gap", float("inf")))
             if np.isfinite(baseline_min) and trial_min + PHASE2_MIN_ADJ_GAP_EPS < baseline_min:
+                drop = _prefer_slack_drop(
+                    drop,
+                    6,
+                    "would lower the minimum adjacent gap "
+                    f"{baseline_min:.2f}->{trial_min:.2f}",
+                )
                 continue
             rank_key = (
                 *_adjacent_gap_rank_key(trial_adj),
                 0.0,
             )
             if not (rank_key < (*baseline_key, 0.0)):
+                trial_hub_var = float(trial_adj.get("hub_gap_variance", 0.0))
+                drop = _prefer_slack_drop(
+                    drop,
+                    7,
+                    "rank did not improve "
+                    f"(min_adj {baseline_min:.2f}->{trial_min:.2f}, "
+                    f"hub_var {baseline_hub_var:.2f}->{trial_hub_var:.2f})",
+                )
                 continue
             msg = (
                 f"  slack {path_electrodes[move_idx]} toward "
@@ -5605,19 +5671,11 @@ def _slack_transfer_trials(
                 f"min_adj {baseline_min:.2f}->{trial_min:.2f}"
             )
             accepted.append((rank_key, trial_paths, msg, trial_adj))
+            kept = True
             break
+        if not kept and drop is not None:
+            print(drop_prefix + drop[1])
     return accepted
-
-
-def _path_chord_detour_ratio(path, start, end):
-    path = np.asarray(path, dtype=float)
-    start = np.asarray(start, dtype=float)
-    end = np.asarray(end, dtype=float)
-    chord = float(np.linalg.norm(end - start))
-    if chord < 1e-6:
-        return 1.0
-    path_length = float(np.sum(np.linalg.norm(np.diff(path, axis=0), axis=1)))
-    return path_length / chord
 
 
 def _try_gentle_pair_trace_adjustment(
@@ -5643,9 +5701,9 @@ def _try_gentle_pair_trace_adjustment(
     """
     Gently adjust one trace in a conflicting pair (spacing greedy, then small random nudge).
     Terminal-zone tails are locked; only the outside segment may change.
-    Rejects trials that cross foreign electrode discs, exceed detour limit, add
-    co-terminal ordered crossings (same hub, different slot, outside merge tail),
-    or re-enter the trace (self-intersection / electrode or terminal zone re-entry).
+    Rejects trials that cross foreign electrode discs, add co-terminal ordered
+    crossings (same hub, different slot, outside merge tail), or re-enter the
+    trace (self-intersection / electrode or terminal zone re-entry).
 
     With focus_separation + slots: never shrink global min adjacent gap; prefer
     maximin / hub-fairness rank improvement over pair-local over-separation.
@@ -5740,8 +5798,6 @@ def _try_gentle_pair_trace_adjustment(
                 if count_single_trace_electrode_violations(
                     trial_path, electrode_name, electrode_zones
                 ) > 0:
-                    return None
-                if _path_chord_detour_ratio(trial_path, start, end) > PHASE2_SPACING_MAX_DETOUR_RATIO:
                     return None
             if max_crossing_count is not None:
                 crossings_among_others, crossing_dense_cache = crossing_cap_context
@@ -5957,7 +6013,7 @@ def _resolve_phase2_ordered_trace_resolution(
 ):
     """
     Phase 2 gentle resolution: for each conflicting pair, try spacing-greedy and small
-    random moves on BOTH traces (electrode-safe, detour-capped).
+    random moves on BOTH traces (electrode-safe).
 
     With focus_separation + slots: one accept per round, choosing the trial that best
     improves (min adjacent gap, then hub-gap fairness). Before the local nudges,
@@ -6145,14 +6201,12 @@ def _resolve_phase2_ordered_trace_resolution(
         if use_maximin:
             if best_candidate is None:
                 if baseline_adj is not None:
-                    print(
-                        f"Phase 2 round {round_idx + 1} after search: "
-                        + _format_adjacent_neighbor_gaps(
-                            baseline_adj,
-                            path_electrodes,
-                            path_terminals,
-                            slot_index_by_electrode,
-                        )
+                    _print_adjacent_neighbor_gaps(
+                        f"Phase 2 round {round_idx + 1} after search:",
+                        baseline_adj,
+                        path_electrodes,
+                        path_terminals,
+                        slot_index_by_electrode,
                     )
                 print(
                     f"Phase 2 pair resolution stopped "
@@ -6172,15 +6226,12 @@ def _resolve_phase2_ordered_trace_resolution(
                     slot_index_by_electrode,
                     sample_step=PHASE2_ADJ_METRIC_SAMPLE_STEP,
                 )
-            print(
-                "Phase 2 round "
-                f"{round_idx + 1} after search: "
-                + _format_adjacent_neighbor_gaps(
-                    after,
-                    path_electrodes,
-                    path_terminals,
-                    slot_index_by_electrode,
-                )
+            _print_adjacent_neighbor_gaps(
+                f"Phase 2 round {round_idx + 1} after search:",
+                after,
+                path_electrodes,
+                path_terminals,
+                slot_index_by_electrode,
             )
             if (
                 after["min_adjacent_gap"] >= min_separation - 1e-6
@@ -6224,9 +6275,15 @@ def _resolve_phase2_ordered_trace_resolution(
         f"overlap={final['overlap_length']:.2f}, "
         f"trace_sep_norm={final['trace_separation_deficit_normalized']:.2f}, "
         f"min_adj_gap={final.get('min_adjacent_gap', float('inf')):.2f}, "
-        f"adj_gaps={_format_adjacent_neighbor_gaps(final_adj, path_electrodes, path_terminals, slot_index_by_electrode)}, "
         f"hub_var={final.get('hub_gap_variance', 0.0):.2f}, "
         f"layout_score={final.get('layout_score', final['collision_score']):.2f}"
+    )
+    _print_adjacent_neighbor_gaps(
+        "Phase 2 pair final neighbor gaps:",
+        final_adj,
+        path_electrodes,
+        path_terminals,
+        slot_index_by_electrode,
     )
     return best_paths
 
