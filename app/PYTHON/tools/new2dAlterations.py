@@ -5068,15 +5068,61 @@ def compute_adjacent_slot_gap_metrics(
     }
 
 
-def _max_adjacent_gap_difference(metrics) -> float:
-    """Widest slot-neighbor gap minus the tightest one."""
+def _format_adjacent_neighbor_gaps(
+    metrics,
+    path_electrodes,
+    path_terminals=None,
+    slot_index_by_electrode=None,
+) -> str:
+    """Per interior trace, only the four with the largest neighbor-gap difference."""
     if not metrics:
-        return float("inf")
-    hi = float(metrics.get("max_adjacent_gap", float("inf")))
-    lo = float(metrics.get("min_adjacent_gap", float("inf")))
-    if not np.isfinite(hi) or not np.isfinite(lo):
-        return float("inf")
-    return hi - lo
+        return "none"
+    pairs = list(metrics.get("adjacent_pairs") or [])
+    gaps = list(metrics.get("adjacent_gaps") or [])
+    slots = slot_index_by_electrode or {}
+    rows = []
+    for (i, j), gap in zip(pairs, gaps):
+        name_a = path_electrodes[i]
+        name_b = path_electrodes[j]
+        slot_a = int(slots.get(name_a, 0))
+        slot_b = int(slots.get(name_b, 0))
+        if slot_a > slot_b:
+            name_a, name_b = name_b, name_a
+            slot_a = slot_b
+        terminal = path_terminals[i] if path_terminals is not None else ""
+        hub = str(terminal)
+        if hub.endswith("LEFT"):
+            hub = "LEFT"
+        elif hub.endswith("RIGHT"):
+            hub = "RIGHT"
+        rows.append((hub, slot_a, name_a, name_b, float(gap)))
+    if not rows:
+        return "none"
+    rows.sort(key=lambda row: (row[0], row[1]))
+    by_hub: dict[str, list] = {}
+    for hub, slot_a, name_a, name_b, gap in rows:
+        by_hub.setdefault(hub, []).append((slot_a, name_a, name_b, gap))
+
+    grouped: list[tuple[float, str]] = []
+    limit = float(PHASE2_SLACK_MIN_IMBALANCE_MM)
+    for hub, chain in by_hub.items():
+        for prev, nxt in zip(chain, chain[1:]):
+            _slot_a, left_a, mid, left_gap = prev
+            _slot_b, mid_b, right_b, right_gap = nxt
+            if mid != mid_b:
+                continue
+            diff = abs(right_gap - left_gap)
+            state = "even" if diff <= limit + 1e-9 else "uneven"
+            label = (
+                f"{mid} {left_a}-{mid} {left_gap:.2f}/{mid}-{right_b} {right_gap:.2f} "
+                f"diff={diff:.2f} {state}"
+            )
+            prefix = f"{hub}: " if hub else ""
+            grouped.append((diff, prefix + label))
+    if not grouped:
+        return "none"
+    grouped.sort(key=lambda item: -item[0])
+    return "; ".join(label for _gap, label in grouped[:PHASE2_MAXIMIN_TOP_PAIRS])
 
 
 def _adjacent_gap_rank_key(metrics):
@@ -6101,8 +6147,12 @@ def _resolve_phase2_ordered_trace_resolution(
                 if baseline_adj is not None:
                     print(
                         f"Phase 2 round {round_idx + 1} after search: "
-                        f"max_adj_gap={baseline_adj['max_adjacent_gap']:.2f}, "
-                        f"max_adj_gap_diff={_max_adjacent_gap_difference(baseline_adj):.2f}"
+                        + _format_adjacent_neighbor_gaps(
+                            baseline_adj,
+                            path_electrodes,
+                            path_terminals,
+                            slot_index_by_electrode,
+                        )
                     )
                 print(
                     f"Phase 2 pair resolution stopped "
@@ -6123,9 +6173,14 @@ def _resolve_phase2_ordered_trace_resolution(
                     sample_step=PHASE2_ADJ_METRIC_SAMPLE_STEP,
                 )
             print(
-                f"Phase 2 round {round_idx + 1} after search: "
-                f"max_adj_gap={after['max_adjacent_gap']:.2f}, "
-                f"max_adj_gap_diff={_max_adjacent_gap_difference(after):.2f}"
+                "Phase 2 round "
+                f"{round_idx + 1} after search: "
+                + _format_adjacent_neighbor_gaps(
+                    after,
+                    path_electrodes,
+                    path_terminals,
+                    slot_index_by_electrode,
+                )
             )
             if (
                 after["min_adjacent_gap"] >= min_separation - 1e-6
@@ -6156,13 +6211,20 @@ def _resolve_phase2_ordered_trace_resolution(
             min_separation=min_separation,
             slot_index_by_electrode=slot_index_by_electrode,
         )
+    final_adj = compute_adjacent_slot_gap_metrics(
+        best_paths,
+        path_electrodes,
+        path_terminals,
+        electrode_zones,
+        slot_index_by_electrode,
+        sample_step=PHASE2_ADJ_METRIC_SAMPLE_STEP,
+    )
     print(
         f"Phase 2 pair final: crossings={final['crossing_count']}, "
         f"overlap={final['overlap_length']:.2f}, "
         f"trace_sep_norm={final['trace_separation_deficit_normalized']:.2f}, "
         f"min_adj_gap={final.get('min_adjacent_gap', float('inf')):.2f}, "
-        f"max_adj_gap={final.get('max_adjacent_gap', float('inf')):.2f}, "
-        f"max_adj_gap_diff={_max_adjacent_gap_difference(final):.2f}, "
+        f"adj_gaps={_format_adjacent_neighbor_gaps(final_adj, path_electrodes, path_terminals, slot_index_by_electrode)}, "
         f"hub_var={final.get('hub_gap_variance', 0.0):.2f}, "
         f"layout_score={final.get('layout_score', final['collision_score']):.2f}"
     )
