@@ -83,6 +83,7 @@ PHASE2_ADJ_METRIC_SAMPLE_STEP = 1.0
 # Slide a trace toward its looser slot-neighbor when the other side is tighter.
 PHASE2_SLACK_MIN_IMBALANCE_MM = 0.4
 PHASE2_SLACK_SHIFT_FRACTIONS = (1.6, 1.2, 0.9)
+# Longest fraction of a wire a quintic flare may cover.
 PHASE2_SLACK_BUMP_WIDTH = 0.65
 PHASE2_SLACK_APPROACH_CAP = 0.7
 # Minimum centerline clearance between any two traces along their full route (fitness).
@@ -5434,31 +5435,84 @@ def _closest_arc_fraction(path, other):
     return best_s / length
 
 
-def _bump_weight(t, center, width):
-    """Cosine lobe around ``center`` that is zero at the path ends."""
+def _quintic_blend(u):
+    """Smoothstep with zero slope and curvature at both ends. ``u`` in [0, 1]."""
+    u = float(np.clip(u, 0.0, 1.0))
+    return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+
+
+def _quintic_flare_weight(t, s0, peak, s1):
+    """Offset weight that is 1 at ``peak`` and 0 at the window edges."""
     t = float(t)
-    if t <= 0.0 or t >= 1.0:
+    peak = float(peak)
+    if t <= s0 or t >= s1:
         return 0.0
-    if width <= 1e-9:
+    if t <= peak:
+        span = peak - s0
+        if span < 1e-6:
+            return 0.0
+        return _quintic_blend((t - s0) / span)
+    span = s1 - peak
+    if span < 1e-6:
         return 0.0
-    u = (t - float(center)) / float(width)
-    if abs(u) >= 1.0:
-        return 0.0
-    lobe = 0.5 * (1.0 + np.cos(np.pi * u))
-    # Full shift at the pinch; fade only so the pinned ends stay put.
-    end = float(np.sin(np.pi * t))
-    end_at_pinch = float(np.sin(np.pi * np.clip(center, 1e-3, 1.0 - 1e-3)))
-    if end_at_pinch < 1e-6:
-        return float(lobe)
-    return float(lobe * end / end_at_pinch)
+    return _quintic_blend((s1 - t) / span)
 
 
-def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
-    """Push the interior of ``path`` toward ``toward_path``. Endpoints stay put."""
+def _flare_window(path, away_path, peak_t, tight_gap, loose_gap):
+    """Arc-fraction window around the pinch, capped so the flare stays local."""
+    line = _path_to_linestring(path)
+    away = _path_to_linestring(away_path)
+    if line is None or away is None or float(line.length) < 1e-9:
+        return 0.0, 0.5, 1.0
+    length = float(line.length)
+    threshold = 0.5 * (float(tight_gap) + float(loose_gap))
+    n = max(8, int(length / max(PHASE2_ADJ_METRIC_SAMPLE_STEP, 1e-6)))
+    ts = np.linspace(0.0, 1.0, n)
+    dists = [float(away.distance(line.interpolate(float(t) * length))) for t in ts]
+    peak_i = int(np.argmin(np.abs(ts - float(peak_t))))
+    lo = hi = peak_i
+    while lo > 0 and dists[lo - 1] <= threshold:
+        lo -= 1
+    while hi < n - 1 and dists[hi + 1] <= threshold:
+        hi += 1
+    peak = float(np.clip(peak_t, 0.02, 0.98))
+    min_frac = min(0.08, 8.0 / length)
+    s0 = min(float(ts[lo]), peak - min_frac)
+    s1 = max(float(ts[hi]), peak + min_frac)
+    max_width = float(PHASE2_SLACK_BUMP_WIDTH)
+    if s1 - s0 > max_width:
+        s0 = peak - 0.5 * max_width
+        s1 = peak + 0.5 * max_width
+    s0 = max(0.0, s0)
+    s1 = min(1.0, s1)
+    if s1 - s0 < 2.0 * min_frac:
+        s0 = max(0.0, peak - min_frac)
+        s1 = min(1.0, peak + min_frac)
+    if peak <= s0 or peak >= s1:
+        peak = 0.5 * (s0 + s1)
+    return s0, peak, s1
+
+
+def _bow_path_toward_neighbor(
+    path,
+    toward_path,
+    shift_mm,
+    center_t,
+    away_path=None,
+    tight_gap=None,
+    loose_gap=None,
+):
+    """Sideways quintic flare toward ``toward_path``. Endpoints stay put."""
     path = _resample_polyline(path)
     toward = _path_to_linestring(toward_path)
     if toward is None or float(toward.length) < 1e-9 or len(path) < 3:
         return path
+    if away_path is None or tight_gap is None or loose_gap is None:
+        s0 = max(0.0, float(center_t) - 0.5 * PHASE2_SLACK_BUMP_WIDTH)
+        s1 = min(1.0, float(center_t) + 0.5 * PHASE2_SLACK_BUMP_WIDTH)
+        peak = float(np.clip(center_t, s0 + 1e-3, s1 - 1e-3))
+    else:
+        s0, peak, s1 = _flare_window(path, away_path, center_t, tight_gap, loose_gap)
     seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
     cum = np.concatenate([[0.0], np.cumsum(seg)])
     total = float(cum[-1])
@@ -5466,16 +5520,24 @@ def _bow_path_toward_neighbor(path, toward_path, shift_mm, center_t):
     toward_len = float(toward.length)
     for i in range(1, len(path) - 1):
         t = float(cum[i] / total) if total > 1e-9 else i / (len(path) - 1)
-        weight = _bump_weight(t, center_t, PHASE2_SLACK_BUMP_WIDTH)
+        weight = _quintic_flare_weight(t, s0, peak, s1)
         if weight < 1e-6:
             continue
+        tangent = path[i + 1] - path[i - 1]
+        tangent_norm = float(np.linalg.norm(tangent))
+        if tangent_norm < 1e-9:
+            continue
+        tangent = tangent / tangent_norm
         target = toward.interpolate(float(np.clip(t, 0.0, 1.0)) * toward_len)
-        direction = np.array([target.x, target.y], dtype=float) - path[i]
-        dist = float(np.linalg.norm(direction))
+        to_target = np.array([target.x, target.y], dtype=float) - path[i]
+        dist = float(np.linalg.norm(to_target))
         if dist < 1e-6:
             continue
+        left = np.array([-tangent[1], tangent[0]], dtype=float)
+        cross = float(tangent[0] * to_target[1] - tangent[1] * to_target[0])
+        direction = left if cross >= 0.0 else -left
         step = min(float(shift_mm) * weight, PHASE2_SLACK_APPROACH_CAP * dist)
-        out[i] = path[i] + direction / dist * step
+        out[i] = path[i] + direction * step
     return out
 
 
@@ -5502,6 +5564,8 @@ def _slack_transfer_trials(
 ):
     """Legal bows that open a tight side by spending slack on the other side.
 
+    A bow is kept when its tight gap grows, the two neighbor gaps become more
+    even, and no adjacent gap falls below the current layout-wide minimum.
     Returns a list of (rank_key, paths, message, adjacent_metrics).
     """
     if not baseline_adjacent_metrics:
@@ -5517,9 +5581,7 @@ def _slack_transfer_trials(
     if not moves:
         return []
 
-    baseline_key = _adjacent_gap_rank_key(baseline_adjacent_metrics)
     baseline_min = float(baseline_adjacent_metrics.get("min_adjacent_gap", float("inf")))
-    baseline_hub_var = float(baseline_adjacent_metrics.get("hub_gap_variance", 0.0))
     crossing_cache = None
     crossings_by_idx = {}
     if max_crossing_count is not None:
@@ -5562,7 +5624,13 @@ def _slack_transfer_trials(
         for frac in PHASE2_SLACK_SHIFT_FRACTIONS:
             shift = float(frac) * half_slack
             trial_path = _bow_path_toward_neighbor(
-                paths[move_idx], paths[toward_idx], shift, center_t
+                paths[move_idx],
+                paths[toward_idx],
+                shift,
+                center_t,
+                away_path=paths[away_idx],
+                tight_gap=tight_gap,
+                loose_gap=loose_gap,
             )
             trial_path = pin_path_endpoints_2d(trial_path, start, end)
             if count_single_trace_electrode_violations(
@@ -5649,25 +5717,39 @@ def _slack_transfer_trials(
                     f"{baseline_min:.2f}->{trial_min:.2f}",
                 )
                 continue
-            rank_key = (
-                *_adjacent_gap_rank_key(trial_adj),
-                0.0,
+            new_loose = _pair_centerline_min_distance(
+                trial_path,
+                paths[toward_idx],
+                terminal_name,
+                path_terminals[toward_idx],
+                electrode_zones,
+                sample_step=step,
             )
-            if not (rank_key < (*baseline_key, 0.0)):
-                trial_hub_var = float(trial_adj.get("hub_gap_variance", 0.0))
+            old_diff = abs(float(loose_gap) - float(tight_gap))
+            new_diff = abs(float(new_loose) - float(new_tight))
+            if new_diff + PHASE2_MIN_ADJ_GAP_EPS >= old_diff:
                 drop = _prefer_slack_drop(
                     drop,
                     7,
-                    "rank did not improve "
-                    f"(min_adj {baseline_min:.2f}->{trial_min:.2f}, "
-                    f"hub_var {baseline_hub_var:.2f}->{trial_hub_var:.2f})",
+                    "gap difference did not shrink "
+                    f"({old_diff:.2f}->{new_diff:.2f})",
                 )
                 continue
+            # Credit the imbalance removed so an evenness gain can win the round
+            # without raising the layout-wide minimum gap.
+            reduction = old_diff - new_diff
+            rank_key = (
+                -trial_min - reduction,
+                float(trial_adj.get("hub_gap_variance", 0.0)),
+                float(trial_adj.get("hub_gap_spread", 0.0)),
+                0.0,
+            )
             msg = (
                 f"  slack {path_electrodes[move_idx]} toward "
                 f"{path_electrodes[toward_idx]} "
                 f"(away from {path_electrodes[away_idx]}): "
                 f"tight {float(tight_gap):.2f}->{new_tight:.2f}, "
+                f"diff {old_diff:.2f}->{new_diff:.2f}, "
                 f"min_adj {baseline_min:.2f}->{trial_min:.2f}"
             )
             accepted.append((rank_key, trial_paths, msg, trial_adj))
@@ -6015,9 +6097,9 @@ def _resolve_phase2_ordered_trace_resolution(
     Phase 2 gentle resolution: for each conflicting pair, try spacing-greedy and small
     random moves on BOTH traces (electrode-safe).
 
-    With focus_separation + slots: one accept per round, choosing the trial that best
-    improves (min adjacent gap, then hub-gap fairness). Before the local nudges,
-    try sliding a trace toward its looser slot-neighbor to open a tighter side.
+    With focus_separation + slots: one accept per round. A slack bow is kept when
+    the bowed trace's neighbor gaps get more even and the layout-wide minimum
+    does not fall. Gentle nudges still compete on minimum gap, then hub fairness.
     """
     del max_attempts_per_trace  # pair-based pass uses fixed caps
 
