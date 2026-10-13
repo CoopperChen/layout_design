@@ -9,9 +9,10 @@ from app.runtime import setup_runtime
 setup_runtime()
 from PYTHON.tools.new2dAlterations import (  # noqa: E402
     _adjacent_gap_rank_key,
+    _plateau_flare_weight,
+    _power_mean,
     _quadratic_rise,
     _quintic_blend,
-    _quintic_flare_weight,
     _slack_transfer_moves,
     _slack_transfer_trials,
     compute_adjacent_slot_gap_metrics,
@@ -116,14 +117,20 @@ def test_slack_keeps_a_bow_that_evens_a_trace_without_raising_global_min():
     assert best[3]["min_adjacent_gap"] + 0.05 >= baseline["min_adjacent_gap"]
 
 
-def test_electrode_side_of_flare_leaves_the_old_tangent():
-    u = 0.05
-    t = 0.2 + u * (0.5 - 0.2)
-    weight = _quintic_flare_weight(t, 0.2, 0.5, 0.8)
-    assert abs(weight - _quadratic_rise(u)) < 1e-9
-    assert weight > _quintic_blend(u)
-    assert abs(_quintic_flare_weight(0.5, 0.2, 0.5, 0.8) - 1.0) < 1e-9
-    assert abs(_quintic_flare_weight(0.65, 0.2, 0.5, 0.8) - _quintic_blend(0.5)) < 1e-9
+def test_plateau_flare_holds_the_shift_across_the_pinch():
+    assert abs(_plateau_flare_weight(0.5, 0.2, 0.8, 0.1) - 1.0) < 1e-9
+    u = 0.5
+    t = 0.2 + u * 0.1
+    assert abs(_plateau_flare_weight(t, 0.2, 0.8, 0.1) - _quadratic_rise(u)) < 1e-9
+    assert abs(_plateau_flare_weight(0.75, 0.2, 0.8, 0.1) - _quintic_blend(0.5)) < 1e-9
+
+
+def test_power_mean_gap_penalizes_a_long_pinch_more_than_a_touch():
+    touch = _power_mean([4.0] + [12.0] * 99)
+    pinch = _power_mean([4.0] * 10 + [12.0] * 90)
+    assert abs(_power_mean([4.0] * 20) - 4.0) < 1e-6
+    assert pinch > 4.0
+    assert touch > pinch
 
 
 def test_slack_drop_prints_why(capsys):

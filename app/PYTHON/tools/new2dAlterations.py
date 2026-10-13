@@ -80,6 +80,11 @@ PHASE2_MIN_ADJ_GAP_EPS = 0.05
 PHASE2_MAXIMIN_TOP_PAIRS = 4
 PHASE2_MAXIMIN_RANDOM_ATTEMPTS = 4
 PHASE2_ADJ_METRIC_SAMPLE_STEP = 1.0
+# Negative power mean of the sampled gaps. Near the minimum, but a long
+# pinch scores tighter than a one-point touch.
+PHASE2_GAP_POWER = -8.0
+# Distances within this multiple of the minimum still dominate that mean.
+PHASE2_GAP_BAND = 1.5
 # Slide a trace toward its looser slot-neighbor when the other side is tighter.
 PHASE2_SLACK_MIN_IMBALANCE_MM = 0.4
 PHASE2_SLACK_SHIFT_FRACTIONS = (1.6, 1.2, 0.9)
@@ -4994,9 +4999,9 @@ def compute_adjacent_slot_gap_metrics(
     sample_step=None,
 ):
     """
-    Slot-adjacent same-hub spacing: global min gap + near-hub fairness.
-
-    Used by gentle polish to prefer maximin / equal fan over sum-of-shortfalls.
+    Slot-adjacent same-hub spacing. ``adjacent_gaps`` is a power mean of the
+    centerline samples (the pinch dominates, and a long close stretch scores
+    tighter). ``min_adjacent_gap`` remains the true closest approach.
     """
     if sample_step is None:
         sample_step = TRACE_SEPARATION_SAMPLE_STEP
@@ -5016,20 +5021,19 @@ def compute_adjacent_slot_gap_metrics(
         }
 
     gaps = []
+    true_mins = []
     hub_gaps = []
     for i, j in pairs:
-        gaps.append(
-            float(
-                _pair_centerline_min_distance(
-                    paths_2d[i],
-                    paths_2d[j],
-                    path_terminals[i],
-                    path_terminals[j],
-                    electrode_zones,
-                    sample_step=sample_step,
-                )
-            )
+        dists = _pair_centerline_sample_distances(
+            paths_2d[i],
+            paths_2d[j],
+            path_terminals[i],
+            path_terminals[j],
+            electrode_zones,
+            sample_step=sample_step,
         )
+        true_mins.append(float(min(dists)) if dists else float("inf"))
+        gaps.append(_power_mean(dists))
         hub_gaps.append(
             float(
                 _pair_near_hub_min_distance(
@@ -5053,8 +5057,9 @@ def compute_adjacent_slot_gap_metrics(
         hub_var = 0.0
         hub_spread = 0.0
 
+    finite_mins = [g for g in true_mins if np.isfinite(g)]
+    min_gap = float(min(finite_mins)) if finite_mins else float("inf")
     finite_gaps = [g for g in gaps if np.isfinite(g)]
-    min_gap = float(min(finite_gaps)) if finite_gaps else float("inf")
     max_gap = float(max(finite_gaps)) if finite_gaps else float("inf")
     return {
         "min_adjacent_gap": min_gap,
@@ -5159,6 +5164,46 @@ def _adjacent_gap_rank_key(metrics):
     )
 
 
+def _power_mean(values, power=PHASE2_GAP_POWER):
+    """Power mean of positive distances. A large negative power stays near the min."""
+    arr = np.asarray(list(values), dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size == 0:
+        return float("inf")
+    arr = np.maximum(arr, 1e-3)
+    p = float(power)
+    acc = float(np.mean(np.exp(p * np.log(arr))))
+    if not np.isfinite(acc) or acc <= 0.0:
+        return float(np.min(arr))
+    return float(np.exp(np.log(acc) / p))
+
+
+def _pair_centerline_sample_distances(
+    path_a,
+    path_b,
+    terminal_a,
+    terminal_b,
+    electrode_zones,
+    *,
+    sample_step=TRACE_SEPARATION_SAMPLE_STEP,
+):
+    """Centerline distances from ``path_a`` to ``path_b`` outside merge tails."""
+    line_a = _path_to_linestring(path_a)
+    line_b = _path_to_linestring(path_b)
+    if line_a is None or line_b is None:
+        return []
+    merge_tail_length = _terminal_merge_tail_length(electrode_zones)
+    pair_merge_union = _build_pair_merge_union(
+        path_a, path_b, terminal_a, terminal_b, merge_tail_length
+    )
+    return [
+        float(line_b.distance(pt))
+        for pt in _linestring_sample_points(
+            line_a, pair_merge_union, sample_step=sample_step
+        )
+    ]
+
+
 def _pair_centerline_min_distance(
     path_a,
     path_b,
@@ -5169,21 +5214,39 @@ def _pair_centerline_min_distance(
     sample_step=TRACE_SEPARATION_SAMPLE_STEP,
 ):
     """Minimum centerline distance between two paths outside terminal merge tails."""
-    line_a = _path_to_linestring(path_a)
-    line_b = _path_to_linestring(path_b)
-    if line_a is None or line_b is None:
-        return float("inf")
-
-    merge_tail_length = _terminal_merge_tail_length(electrode_zones)
-    pair_merge_union = _build_pair_merge_union(
-        path_a, path_b, terminal_a, terminal_b, merge_tail_length
+    dists = _pair_centerline_sample_distances(
+        path_a,
+        path_b,
+        terminal_a,
+        terminal_b,
+        electrode_zones,
+        sample_step=sample_step,
     )
-    min_dist = float("inf")
-    for pt in _linestring_sample_points(
-        line_a, pair_merge_union, sample_step=sample_step
-    ):
-        min_dist = min(min_dist, float(line_b.distance(pt)))
-    return min_dist
+    if not dists:
+        return float("inf")
+    return float(min(dists))
+
+
+def _pair_centerline_power_gap(
+    path_a,
+    path_b,
+    terminal_a,
+    terminal_b,
+    electrode_zones,
+    *,
+    sample_step=TRACE_SEPARATION_SAMPLE_STEP,
+):
+    """Power-mean gap. The closest samples dominate; the rest of the wire still counts."""
+    return _power_mean(
+        _pair_centerline_sample_distances(
+            path_a,
+            path_b,
+            terminal_a,
+            terminal_b,
+            electrode_zones,
+            sample_step=sample_step,
+        )
+    )
 
 
 def _pair_layout_penalty(
@@ -5378,7 +5441,7 @@ def _slack_transfer_moves(
         gaps = []
         for left_idx, right_idx in zip(chain, chain[1:]):
             gaps.append(
-                _pair_centerline_min_distance(
+                _pair_centerline_power_gap(
                     paths[left_idx],
                     paths[right_idx],
                     path_terminals[left_idx],
@@ -5447,38 +5510,42 @@ def _quadratic_rise(u):
     return u * (2.0 - u)
 
 
-def _quintic_flare_weight(t, s0, peak, s1):
-    """Offset weight that is 1 at ``peak`` and 0 at the window edges.
-
-    The electrode side rises on a quadratic, so the wire leaves its old tangent
-    immediately. The terminal side stays a quintic with zero slope at the entry.
-    """
+def _plateau_flare_weight(t, s0, s1, fillet):
+    """Full shift across the pinch, quadratic entry, quintic drop at the terminal side."""
     t = float(t)
-    peak = float(peak)
-    if t <= s0 or t >= s1:
+    s0 = float(s0)
+    s1 = float(s1)
+    if t <= s0 or t >= s1 or s1 - s0 < 1e-6:
         return 0.0
-    if t <= peak:
-        span = peak - s0
-        if span < 1e-6:
-            return 0.0
+    fillet = float(max(fillet, 0.0))
+    rise_end = min(s0 + fillet, 0.5 * (s0 + s1))
+    fall_start = max(s1 - fillet, rise_end)
+    if t < rise_end:
+        span = rise_end - s0
+        if span < 1e-9:
+            return 1.0
         return _quadratic_rise((t - s0) / span)
-    span = s1 - peak
-    if span < 1e-6:
-        return 0.0
-    return _quintic_blend((s1 - t) / span)
+    if t > fall_start:
+        span = s1 - fall_start
+        if span < 1e-9:
+            return 1.0
+        return _quintic_blend((s1 - t) / span)
+    return 1.0
 
 
 def _flare_window(path, away_path, peak_t, tight_gap, loose_gap):
-    """Arc-fraction window around the pinch, capped so the flare stays local."""
+    """Arc-fraction window where the wire is still near its closest approach."""
+    del tight_gap, loose_gap
     line = _path_to_linestring(path)
     away = _path_to_linestring(away_path)
     if line is None or away is None or float(line.length) < 1e-9:
         return 0.0, 0.5, 1.0
     length = float(line.length)
-    threshold = 0.5 * (float(tight_gap) + float(loose_gap))
     n = max(8, int(length / max(PHASE2_ADJ_METRIC_SAMPLE_STEP, 1e-6)))
     ts = np.linspace(0.0, 1.0, n)
     dists = [float(away.distance(line.interpolate(float(t) * length))) for t in ts]
+    d_min = float(min(dists)) if dists else 0.0
+    threshold = d_min * float(PHASE2_GAP_BAND)
     peak_i = int(np.argmin(np.abs(ts - float(peak_t))))
     lo = hi = peak_i
     while lo > 0 and dists[lo - 1] <= threshold:
@@ -5530,7 +5597,7 @@ def _bow_path_toward_neighbor(
     toward_len = float(toward.length)
     for i in range(1, len(path) - 1):
         t = float(cum[i] / total) if total > 1e-9 else i / (len(path) - 1)
-        weight = _quintic_flare_weight(t, s0, peak, s1)
+        weight = _plateau_flare_weight(t, s0, s1, min(0.08, 8.0 / total) if total > 1.0 else 0.08)
         if weight < 1e-6:
             continue
         tangent = path[i + 1] - path[i - 1]
@@ -5574,8 +5641,9 @@ def _slack_transfer_trials(
 ):
     """Legal bows that open a tight side by spending slack on the other side.
 
-    A bow is kept when its tight gap grows, the two neighbor gaps become more
-    even, and no adjacent gap falls below the current layout-wide minimum.
+    A bow is kept when its power-mean tight gap grows, the two neighbor gaps
+    become more even, and the true closest approach does not fall below the
+    current layout-wide minimum.
     Returns a list of (rank_key, paths, message, adjacent_metrics).
     """
     if not baseline_adjacent_metrics:
@@ -5666,7 +5734,7 @@ def _slack_transfer_trials(
                         f"crossings would rise above {int(max_crossing_count)}",
                     )
                     continue
-            new_tight = _pair_centerline_min_distance(
+            new_tight = _pair_centerline_power_gap(
                 trial_path,
                 paths[away_idx],
                 terminal_name,
@@ -5727,7 +5795,7 @@ def _slack_transfer_trials(
                     f"{baseline_min:.2f}->{trial_min:.2f}",
                 )
                 continue
-            new_loose = _pair_centerline_min_distance(
+            new_loose = _pair_centerline_power_gap(
                 trial_path,
                 paths[toward_idx],
                 terminal_name,
