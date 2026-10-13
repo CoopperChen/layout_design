@@ -5441,8 +5441,18 @@ def _quintic_blend(u):
     return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
 
 
+def _quadratic_rise(u):
+    """0 at the electrode side with a free slope, 1 at the peak with zero slope."""
+    u = float(np.clip(u, 0.0, 1.0))
+    return u * (2.0 - u)
+
+
 def _quintic_flare_weight(t, s0, peak, s1):
-    """Offset weight that is 1 at ``peak`` and 0 at the window edges."""
+    """Offset weight that is 1 at ``peak`` and 0 at the window edges.
+
+    The electrode side rises on a quadratic, so the wire leaves its old tangent
+    immediately. The terminal side stays a quintic with zero slope at the entry.
+    """
     t = float(t)
     peak = float(peak)
     if t <= s0 or t >= s1:
@@ -5451,7 +5461,7 @@ def _quintic_flare_weight(t, s0, peak, s1):
         span = peak - s0
         if span < 1e-6:
             return 0.0
-        return _quintic_blend((t - s0) / span)
+        return _quadratic_rise((t - s0) / span)
     span = s1 - peak
     if span < 1e-6:
         return 0.0
@@ -5502,7 +5512,7 @@ def _bow_path_toward_neighbor(
     tight_gap=None,
     loose_gap=None,
 ):
-    """Sideways quintic flare toward ``toward_path``. Endpoints stay put."""
+    """Sideways flare toward ``toward_path``. Endpoints stay put."""
     path = _resample_polyline(path)
     toward = _path_to_linestring(toward_path)
     if toward is None or float(toward.length) < 1e-9 or len(path) < 3:

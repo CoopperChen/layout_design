@@ -9,6 +9,9 @@ from app.runtime import setup_runtime
 setup_runtime()
 from PYTHON.tools.new2dAlterations import (  # noqa: E402
     _adjacent_gap_rank_key,
+    _quadratic_rise,
+    _quintic_blend,
+    _quintic_flare_weight,
     _slack_transfer_moves,
     _slack_transfer_trials,
     compute_adjacent_slot_gap_metrics,
@@ -80,8 +83,8 @@ def test_slack_keeps_a_bow_that_evens_a_trace_without_raising_global_min():
     paths = [
         _poly((0.0, 0.0), (50.0, 0.0), (100.0, 0.0)),
         _poly((0.0, 2.0), (50.0, 2.0), (100.0, 2.0)),
-        _poly((0.0, 24.0), (50.0, 6.0), (100.0, 24.0)),
-        _poly((0.0, 60.0), (50.0, 60.0), (100.0, 60.0)),
+        _poly((0.0, 20.0), (40.0, 10.0), (50.0, 8.0), (60.0, 10.0), (100.0, 20.0)),
+        _poly((0.0, 40.0), (50.0, 40.0), (100.0, 40.0)),
     ]
     electrodes = ["A", "B", "C", "D"]
     terminals = ["T"] * 4
@@ -111,6 +114,16 @@ def test_slack_keeps_a_bow_that_evens_a_trace_without_raising_global_min():
     assert "diff" in best[2]
     assert best[3]["min_adjacent_gap"] <= baseline["min_adjacent_gap"] + 0.05
     assert best[3]["min_adjacent_gap"] + 0.05 >= baseline["min_adjacent_gap"]
+
+
+def test_electrode_side_of_flare_leaves_the_old_tangent():
+    u = 0.05
+    t = 0.2 + u * (0.5 - 0.2)
+    weight = _quintic_flare_weight(t, 0.2, 0.5, 0.8)
+    assert abs(weight - _quadratic_rise(u)) < 1e-9
+    assert weight > _quintic_blend(u)
+    assert abs(_quintic_flare_weight(0.5, 0.2, 0.5, 0.8) - 1.0) < 1e-9
+    assert abs(_quintic_flare_weight(0.65, 0.2, 0.5, 0.8) - _quintic_blend(0.5)) < 1e-9
 
 
 def test_slack_drop_prints_why(capsys):
