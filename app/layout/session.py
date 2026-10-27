@@ -13,6 +13,7 @@ from app.interact import KEYS_HELP, bind_accept_cancel
 from app.layout.place import compute_cz, project_electrodes
 from app.layout.template import CHANNEL_PAIRS, CHANNELS, SINGLE_CHANNELS
 from app.mesh.io import load_head_mesh
+from app.mesh.texture import visible_surface
 from app.subject import ANATOMY_KEYS, CALIBRATION_KEYS, Layout
 
 PICK_SEQUENCE: list[tuple[str, str]] = [
@@ -186,8 +187,10 @@ def review_electrodes(
         "saved": False,
     }
     plotter = pv.Plotter(window_size=(1600, 1600))
-    plotter.add_mesh(mesh, color="white", opacity=0.88, name="head")
-    radius = float(mesh.length) * 0.008
+    plotter.set_background("white")
+    _add_head(plotter, mesh)
+    # A few millimetres on the scalp, from the face extent.
+    radius = max(_sphere_radius(mesh) * 6.0, 1.5)
 
     def color_for(index: int, count: int, sat: float) -> str:
         r, g, b = colorsys.hsv_to_rgb(index / max(count, 1), sat, 0.9)
@@ -204,11 +207,32 @@ def review_electrodes(
     def redraw(adjustment: float) -> None:
         positions = project_electrodes(mesh, anatomy, cz, adjustment=adjustment)
         state["positions"] = positions
+        label_pts = []
         for name in CHANNELS:
             if name in plotter.actors:
                 plotter.remove_actor(name)
             center = positions[name] + _outward(mesh, positions[name]) * radius
-            plotter.add_mesh(pv.Sphere(center=center, radius=radius), color=colors[name], name=name)
+            label_pts.append(center)
+            plotter.add_mesh(
+                pv.Sphere(center=center, radius=radius),
+                color=colors[name],
+                smooth_shading=True,
+                name=name,
+            )
+        try:
+            plotter.remove_actor("electrode_labels")
+        except Exception:
+            pass
+        plotter.add_point_labels(
+            np.asarray(label_pts, dtype=float),
+            list(CHANNELS),
+            font_size=14,
+            text_color="black",
+            point_size=0,
+            shape_opacity=0.75,
+            always_visible=True,
+            name="electrode_labels",
+        )
         if "size_text" in plotter.actors:
             plotter.remove_actor("size_text")
         plotter.add_text(
@@ -229,15 +253,29 @@ def review_electrodes(
         state["discard"] = True
         plotter.close()
 
+    landmark_colors = {"nasion": "orange", "lpa": "green", "rpa": "blue", "inion": "yellow"}
+    for key, color in landmark_colors.items():
+        plotter.add_mesh(
+            pv.Sphere(center=np.asarray(anatomy[key], dtype=float), radius=radius * 0.7),
+            color=color,
+            smooth_shading=True,
+            name=f"landmark_{key}",
+        )
     plotter.add_slider_widget(
         on_slide,
         [cfg["scale_min"], cfg["scale_max"]],
         value=cfg["scale"],
-        title="Size",
+        title="Cap size",
+        pointa=(0.25, 0.06),
+        pointb=(0.75, 0.06),
+        interaction_event="always",
     )
     bind_accept_cancel(plotter, accept, discard)
     redraw(cfg["scale"])
-    print(f"Electrode review: drag the size slider. {KEYS_HELP}. Closing the window saves.")
+    print(
+        "Electrode review: sites sit on the textured scalp. "
+        f"Drag Cap size to scale the 10–20 set. {KEYS_HELP}. Closing the window saves."
+    )
     plotter.show()
     if state["discard"]:
         return None
@@ -256,7 +294,7 @@ def layout_from_picks(mesh: pv.PolyData, picks: dict[str, np.ndarray]) -> Layout
 
 
 def run_layout_session(obj_path) -> Layout | None:
-    mesh = load_head_mesh(obj_path)
+    mesh = visible_surface(load_head_mesh(obj_path))
     picks = pick_landmarks(mesh)
     if picks is None:
         return None

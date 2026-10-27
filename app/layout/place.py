@@ -8,8 +8,40 @@ import pyvista as pv
 from app.layout.template import CHANNELS, template_xyz
 
 
-def compute_cz(mesh: pv.PolyData, anatomy: dict[str, np.ndarray]) -> np.ndarray:
+def _surface_points(mesh: pv.PolyData) -> np.ndarray:
+    """Vertices that belong to a face. Unused OBJ rows are not the scalp."""
     pts = np.asarray(mesh.points, dtype=float)
+    if int(getattr(mesh, "n_cells", 0)) <= 0 or not bool(getattr(mesh, "is_all_triangles", False)):
+        return pts
+    ids = np.unique(np.asarray(mesh.faces, dtype=np.int64).reshape(-1, 4)[:, 1:])
+    return pts[ids]
+
+
+def _snap_to_surface(mesh: pv.PolyData, points: np.ndarray) -> np.ndarray:
+    """Closest point on a triangle. Ignores vertices that no face uses."""
+    import vtk
+
+    query_pts = np.asarray(points, dtype=np.float64)
+    single = query_pts.ndim == 1
+    if single:
+        query_pts = query_pts.reshape(1, 3)
+    surface = mesh if bool(getattr(mesh, "is_all_triangles", False)) else mesh.triangulate()
+    locator = vtk.vtkCellLocator()
+    locator.SetDataSet(surface)
+    locator.BuildLocator()
+    closest = np.empty_like(query_pts)
+    cell_id = vtk.mutable(0)
+    sub_id = vtk.mutable(0)
+    dist2 = vtk.mutable(0.0)
+    found = [0.0, 0.0, 0.0]
+    for i, point in enumerate(query_pts):
+        locator.FindClosestPoint(point, found, cell_id, sub_id, dist2)
+        closest[i] = found
+    return closest[0] if single else closest
+
+
+def compute_cz(mesh: pv.PolyData, anatomy: dict[str, np.ndarray]) -> np.ndarray:
+    pts = _surface_points(mesh)
     if pts.shape[0] == 0:
         raise ValueError("Head mesh has no points.")
     crown = pts[int(np.argmax(pts[:, 2]))]
@@ -81,6 +113,6 @@ def project_electrodes(
     for name in CHANNELS:
         local = (template_xyz(name) - template_xyz("Cz")) * scale
         guess = cz + local[0] * lr_axis + local[1] * ap_axis + local[2] * si_axis
-        idx = mesh.find_closest_point(guess)
-        positions[name] = np.asarray(mesh.points[idx], dtype=float)
-    return positions
+        positions[name] = guess
+    snapped = _snap_to_surface(mesh, np.vstack([positions[name] for name in CHANNELS]))
+    return {name: np.asarray(snapped[i], dtype=float) for i, name in enumerate(CHANNELS)}

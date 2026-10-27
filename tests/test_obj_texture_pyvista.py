@@ -85,6 +85,32 @@ def test_stl_transform_rejects_empty_file(tmp_path: Path):
         apply_transform_to_triangle_mesh_file(empty, np.eye(4))
 
 
+def test_visible_surface_drops_unused_vertices():
+    pytest.importorskip("pyvista")
+    import pyvista as pv
+
+    from app.mesh.texture import visible_surface
+
+    verts = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.5, 0.5, 100.0],
+        ],
+        dtype=float,
+    )
+    faces = np.hstack([[3, 0, 1, 2], [3, 0, 2, 3]])
+    mesh = pv.PolyData(verts, faces)
+    pv.set_new_attribute(mesh, "texture", "atlas")
+    surface = visible_surface(mesh)
+    assert surface.n_points == 4
+    assert surface.n_cells == 2
+    assert getattr(surface, "texture", None) == "atlas"
+    assert float(surface.length) < 2.0
+
+
 def test_polydata_surface_centroid_ignores_unused_verts():
     """Unused OBJ verts must not pull the pivot to the crown."""
     pytest.importorskip("pyvista")

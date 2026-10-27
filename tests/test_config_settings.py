@@ -9,7 +9,7 @@ def test_shipped_layout_and_mesh_defaults():
     reset_defaults_cache()
     layout = layout_config()
     mesh = mesh_config()
-    assert layout == {"scale": 0.8, "scale_min": 0.5, "scale_max": 1.5}
+    assert layout == {"scale": 0.7, "scale_min": 0.5, "scale_max": 1.5}
     assert mesh["poisson_depth"] == 12
     assert mesh["scale_to_mm"] == 1000.0
     assert mesh["poisson_density_quantile"] == 0.02

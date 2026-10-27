@@ -68,11 +68,54 @@ def load_pyvista_textured_obj(obj_path: Path):
 
     # PyVista forbids arbitrary attrs; set_new_attribute is the supported hook.
     pv.set_new_attribute(mesh, "texture", tex)
+    mesh = visible_surface(mesh)
     print(
         f"Loaded textured OBJ {obj_path.name}: "
         f"{mesh.n_points} pts, {mesh.n_cells} cells, texture={images[0].name}"
     )
     return mesh, tex
+
+
+def visible_surface(mesh):
+    """Drop vertices that no face uses.
+
+    Scanner OBJs often keep UV-atlas ``v`` rows that no triangle references.
+    Those points stretch the camera to an empty box and pull closest-point
+    queries off the scalp, so electrode markers appear to float in space.
+    """
+    import pyvista as pv
+
+    n_points = int(getattr(mesh, "n_points", 0))
+    n_cells = int(getattr(mesh, "n_cells", 0))
+    if n_points == 0 or n_cells == 0:
+        return mesh
+
+    used = np.zeros(n_points, dtype=bool)
+    if bool(getattr(mesh, "is_all_triangles", False)):
+        tris = np.asarray(mesh.faces, dtype=np.int64).reshape(-1, 4)[:, 1:]
+        used[np.unique(tris)] = True
+    else:
+        faces = np.asarray(mesh.faces)
+        cursor = 0
+        n_faces = len(faces)
+        while cursor < n_faces:
+            count = int(faces[cursor])
+            used[faces[cursor + 1 : cursor + 1 + count]] = True
+            cursor += 1 + count
+    if int(used.sum()) == n_points:
+        return mesh
+
+    grid = mesh.extract_cells(np.arange(n_cells))
+    if isinstance(grid, pv.PolyData):
+        surface = grid
+    else:
+        surface = grid.extract_surface(algorithm="dataset_surface")
+    texture = getattr(mesh, "texture", None)
+    if texture is not None:
+        pv.set_new_attribute(surface, "texture", texture)
+    dropped = n_points - int(surface.n_points)
+    print(f"Ignoring {dropped} unused vertices; visible surface has {surface.n_points} points")
+    return surface
 
 
 def rotation_about_point_matrix(R: np.ndarray, center: np.ndarray) -> np.ndarray:

@@ -96,7 +96,7 @@ One textured view, seven picks, in this order:
 
 Right-click the surface, then Space, Enter, or S places that landmark. Keys `1` through `7` jump back to a landmark to place it again. `N` and `P` move forward and back in the list. After all seven are placed, Space, Enter, or S continues. Q or Esc discards the set.
 
-The next window projects the 10–20 sites. Drag the size slider (default 0.8, range 0.5–1.5). Space, Enter, or S writes `layout.json`. Q or Esc discards it. Cz is the intersection of the nasion–inion and LPA–RPA slices through the crown, and each site is snapped to the nearest mesh vertex.
+The next window projects the 10–20 sites onto the textured scalp. Drag the Cap size slider along the bottom (default 0.7, range 0.5–1.5). Space, Enter, or S writes `layout.json`. Q or Esc discards it. Cz is the intersection of the nasion–inion and LPA–RPA slices through the crown, and each site is snapped onto the scalp surface.
 
 The three calibration clicks are the digital triangle. Touch those same three marks on the machine in the next step. They are not electrode sites.
 

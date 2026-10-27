@@ -5,7 +5,7 @@ electrode:
   nlines: 10      # zigzag rows across the disk
 
 layout:
-  scale: 0.8        # initial 10–20 size; 1.0 is the measured nasion–inion arc
+  scale: 0.7        # initial 10–20 size; 1.0 is the measured nasion–inion arc
   scale_min: 0.5    # slider lower end
   scale_max: 1.5    # slider upper end
 
