@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.postprocess.gcode.kinematics.tool_offset import apply_tool_offset
-from app.postprocess.gcode.models import MachineConfig
+from app.gcode.kinematics.tool_offset import apply_tool_offset
+from app.gcode.models import MachineConfig
 from app.simulator.kinematics.inverse import undo_tool_offset
 
 

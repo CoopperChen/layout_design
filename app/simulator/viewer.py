@@ -193,7 +193,7 @@ def _add_machine_origin(plotter, scene: SimulationScene, *, scale: float) -> lis
     """Machine-zero reference markers (same frame as mesh and G-code)."""
     import pyvista as pv
 
-    from app.postprocess.gcode.kinematics.machine_fk import machine_zero_head_frame
+    from app.gcode.kinematics.machine_fk import machine_zero_head_frame
 
     actors: list = []
     central, tip_mz, c_mz, _b_mz = machine_zero_head_frame(

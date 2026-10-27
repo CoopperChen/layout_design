@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.preprocess.mesh_io import (
+from app.mesh.io import (
     _colors_look_valid,
     attach_vertex_colors,
     color_ref_path,

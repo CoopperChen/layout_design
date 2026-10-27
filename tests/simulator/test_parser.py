@@ -43,10 +43,10 @@ def test_parse_strips_comments():
 def test_parse_subject_4_gcode_header():
     gcode_path = (
         paths.REPO_ROOT
-        / "data/output/gcode/subject_4_post/allinterconnects.txt"
+        / "data/subjects/4/electrodes.gcode"
     )
     if not gcode_path.is_file():
-        pytest.skip("subject_4 gcode not present")
+        pytest.skip("data/subjects/4/electrodes.gcode not present")
     rows = parse_gcode_file(gcode_path)
     assert rows.shape[0] > 100
     assert np.all(np.isfinite(rows[:, :6]))

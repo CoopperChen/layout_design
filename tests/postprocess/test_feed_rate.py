@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.postprocess.gcode.kinematics.feed_rate import (
+from app.gcode.kinematics.feed_rate import (
     compute_feed_rates,
     compute_print_feed_rates,
     tip_positions_from_poses,
 )
-from app.postprocess.gcode.models import MachineConfig
+from app.gcode.models import MachineConfig
 
 
 def _machine() -> MachineConfig:

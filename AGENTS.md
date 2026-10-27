@@ -2,43 +2,36 @@
 
 ## Goal
 
-**Generate** wire path layouts per subject. **Preset** in this repo means **terminal assignment only** (electrode → LEFT/RIGHT), not path transfer from a reference head.
+Place 10–20 electrodes on a head scan and write electrode G-code. Do not plan interconnects.
 
 ## Working directory
 
-Repository root `layout_design/`. Paths via `app.paths`.
+Repository root `layout_design/`. Paths via `app.paths`. One subject is `data/subjects/{id}/`.
 
 ## Pipeline
 
-1. **A** Preprocess target subject (STL mesh, align textured OBJ, fiducials with TERMINAL_*, electrodes)
-2. **B** `synthesize` — **create** paths from assignment map + target geometry (default)
-3. **C** Polish optional (paths only, not hub discovery)
-4. **D** Smooth → export-bundle → convert-gcode → simulate-gcode
-
-**Entry-order swap rule:** When two same-hub traces cross, swap their strip slots and replan those two. Primary goal: drive same-hub **odd-mutual pair count to 0** (slot parity); while odd pairs remain, accept only swaps that reduce `#odd_pairs` (total crossings may rise). After `#odd_pairs == 0`, accept count↓ or even-mutual residuals **only if odd stays 0** (never accept odd↑). Tried-pair memory clears on odd↓. After swap, synthesize runs an **even-mutual uncross** pass (fixed-end bends) before generic detour uncross: single-wire straight/knee/double-knee/S-curve, then coordinated both-wire shapes; bends must not raise `#odd_pairs`. Crossing counts use the densified terminal-tail metric (same as full layout analysis).
-
-Do not treat `export-v4` / chord replay / `--inherit-preset-terminals` as the primary workflow.
-
-## Commands
-
-```bash
-python -m app build-assignments --reference 1 --id s1_assignments
-python -m app synthesize --assignments s1_assignments --target 2
-python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
-python -m app smooth --applied data/output/layouts/synth_s2.json
-python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
-python -m app convert-gcode --bundle data/output/bundles/subject_2
-python -m app simulate-gcode --gcode data/output/gcode/subject_2_post/allinterconnects.txt --bundle data/output/bundles/subject_2
+```text
+mesh → layout → record-pm → gcode
 ```
 
-`--preset` is an alias for `--assignments`. `--inherit-preset-terminals` is legacy hub map only.
+```bash
+python -m app run --subject 2
+python -m app paths --subject 2
+python -m app simulate --subject 2
+```
 
-**Simulator:** `app/simulator/` — forward FK (X,Y,Z = C pivot), mesh in machine frame. Kinematics: [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md).
+- `mesh` reads `source/scan.ply` and `source/head.obj` (+ `.mtl`, `.jpg`) and writes `head.stl` and `head.obj`.
+- `layout` writes `layout.json` (anatomy, Cz, three calibration points, electrode xyz).
+- `record-pm` writes `pm.yaml`. Skip it when that file is already measured.
+- `gcode` writes `electrodes.gcode`. Pads are computed at this step.
+
+Printer constants: `config/machine.yaml`. Motion tuning: `config/defaults.yaml`.
 
 ## Key docs
 
 - [docs/GOAL.md](docs/GOAL.md)
 - [docs/CLI.md](docs/CLI.md)
-- [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md)
+- [docs/PIPELINE.md](docs/PIPELINE.md)
 - [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md)
-- `.cursor/skills/layout-synth-pipeline/SKILL.md`
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md)

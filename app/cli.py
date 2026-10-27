@@ -1,308 +1,62 @@
-"""
-Unified pipeline CLI.
+"""Electrode layout commands: mesh, layout, record-pm, gcode."""
 
-  python -m app init-data
-  python -m app paths --subject 2
-  python -m app preprocess --subject 1 --step clear-islands
-  python -m app build-assignments --reference 1 --id s1_assignments
-  python -m app synthesize --target 2
-  python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
-  python -m app smooth --applied data/output/layouts/synth_s2.json
-  python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json
-  python -m app init-print-config --subject {id}
-  python -m app record-pm --subject {id}
-  python -m app convert-gcode --bundle data/output/bundles/subject_{id} --electrode C3
-  python -m app cnc load --gcode data/output/gcode/subject_{id}_post/allinterconnects.txt
-  python -m app cnc start --confirm
-  python -m app cnc home --confirm
-  python -m app cnc scan --confirm
-  python -m app simulate-gcode --gcode data/output/gcode/subject_4_post/allinterconnects.txt --bundle data/output/bundles/subject_4
-  python -m app run --target 2
-  python -m app run --target 2 --ply data/raw/2.ply --from synthesize
-  python -m app run --target 2 --to simulate
-  python -m app run --target 2 --no-polish --from synthesize
-"""
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from app import paths
-from app.config_loader import (
-    default_assignments,
-    resolve_assignments,
-    terminal_slot_spacing_mm,
-)
-from app.preprocess import run as preprocess_run
 
 
-def cmd_init_data(_: argparse.Namespace) -> int:
+def _chdir_repo() -> None:
+    os.chdir(paths.REPO_ROOT)
     paths.ensure_data_tree()
-    print(f"Data tree ready under {paths.DATA_DIR}")
-    return 0
 
 
 def cmd_paths(args: argparse.Namespace) -> int:
-    sid = args.subject
-    print("Repository root:", paths.REPO_ROOT)
-    print()
-    print("A — Preprocess")
-    print("  raw PLY:       ", paths.raw_point_cloud(sid))
-    print("  raw STL:       ", paths.raw_scan(sid))
-    imported = paths.imported_textured_obj(sid)
-    aligned = paths.aligned_textured_obj(sid)
-    print(
-        "  import OBJ:    ",
-        imported,
-        "" if imported.is_file() else "(place before align-obj; never overwritten)",
-    )
-    print(
-        "  aligned OBJ:   ",
-        aligned,
-        "" if aligned.is_file() else "(written by align-obj; used by fiducials)",
-    )
-    print("  cleaned STL:   ", paths.cleaned_scan(sid))
-    print("  fiducials:     ", paths.fiducials_json(sid))
-    print("  electrodes:    ", paths.electrode_positions_json(sid))
-    print("  assignments:   ", paths.terminal_assignments_json(sid))
-    print()
-    print("B — Synthesize")
-    print("  layout out:    ", paths.synth_layout(sid))
-    print("  assignments:   ", paths.preset_path(default_assignments()))
-    print()
-    print("D — Postprocess")
-    print("  smooth:        ", paths.smooth_json(sid))
-    print("  bundle:        ", paths.bundle_export_dir(sid))
-    print("  gcode:         ", paths.gcode_output_dir(sid))
-    print("  pm config:     ", paths.postprocessor_subject_pm(sid))
-    print("  matlab:        ", paths.matlab_export_dir(sid), "(legacy)")
+    print(f"subject {args.subject}")
+    for label, path in paths.subject_artifacts(args.subject):
+        flag = "ok" if path.is_file() else "missing"
+        print(f"  {flag:7}  {label:12}  {path}")
+    machine = paths.machine_config()
+    flag = "ok" if machine.is_file() else "missing"
+    print(f"  {flag:7}  {'machine':12}  {machine}")
     return 0
 
 
-def cmd_preprocess(args: argparse.Namespace) -> int:
-    extra: list[str] = []
-    if args.spacing != terminal_slot_spacing_mm():
-        extra.extend(["--spacing", str(args.spacing)])
-    if args.full_circle:
-        extra.append("--full-circle")
-    if getattr(args, "ply", None):
-        extra.extend(["--ply", str(args.ply)])
-    if getattr(args, "no_align_head", False):
-        extra.append("--no-align-head")
-    if getattr(args, "depth", 12) != 12:
-        extra.extend(["--depth", str(args.depth)])
-    if getattr(args, "obj", None):
-        extra.extend(["--obj", str(args.obj)])
-    if getattr(args, "no_scale", False):
-        extra.append("--no-scale")
-    if getattr(args, "no_preview", False):
-        extra.append("--no-preview")
-    if getattr(args, "no_rotate_head", False):
-        extra.append("--no-rotate-head")
-    return preprocess_run.main(
-        ["--subject", str(args.subject), "--step", args.step, *extra]
-    )
-
-
-def _assignments_arg(args: argparse.Namespace) -> str:
-    return resolve_assignments(getattr(args, "assignments", None))
-
-
-def cmd_synthesize(args: argparse.Namespace) -> int:
-    from app.layout import synthesize as syn
+def cmd_mesh(args: argparse.Namespace) -> int:
+    from app.mesh.run import run_mesh
 
     try:
-        syn.run_synthesize(
-            _assignments_arg(args),
-            args.target,
-            output=args.out,
-            preserve_entry_order=args.preserve_entry_order,
-            use_target_terminals=not args.inherit_preset_terminals,
-            optimize_terminals=args.rotate,
-            uv_resolution=args.uv_resolution,
-            terminal_stop_mm=args.terminal_stop_mm,
+        return run_mesh(
+            args.subject,
+            ply_path=args.ply,
+            obj_path=args.obj,
+            zip_path=getattr(args, "zip_path", None),
+            poisson_depth=args.depth,
+            preview=not args.no_preview,
+            rotate_head=not args.no_rotate_head,
+            match_scale=not args.no_scale,
         )
-        if args.visualize:
-            out = args.out or paths.synth_layout(args.target)
-            from app.layout.visualize import visualize_after_stage
-
-            visualize_after_stage(
-                out,
-                enabled=True,
-                show=args.show,
-                show_3d=not args.no_show,
-                skip_collisions=args.skip_collisions,
-            )
-        return 0
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"synthesize failed: {e}", file=sys.stderr)
+    except (FileNotFoundError, ValueError, ImportError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
         return 1
 
 
-def cmd_build_assignments(args: argparse.Namespace) -> int:
-    from app.layout import synthesize as syn
+def cmd_layout(args: argparse.Namespace) -> int:
+    from app.layout.run import run_layout
 
     try:
-        syn.build_assignment_map(
-            args.reference,
-            args.id or args.preset_id,
-            args.out,
-        )
-        return 0
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_visualize(args: argparse.Namespace) -> int:
-    from app.layout.visualize import visualize_layout
-
-    try:
-        visualize_layout(
-            args.applied,
-            mode=args.mode,
-            save_2d=args.save,
-            save_3d=args.save_3d,
-            show=args.show_2d,
-            show_3d=not args.no_show,
-            skip_collisions=args.skip_collisions,
-        )
-        return 0
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
-        return 1
-    except (KeyError, ValueError) as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_polish(args: argparse.Namespace) -> int:
-    from app.polish import run as polish
-
-    try:
-        polish.run_polish_mode(
-            args.applied,
-            args.mode,
-            output=args.out,
-            visualize=args.visualize,
-            subject=args.subject,
-            generations=args.generations,
-            population=args.population,
-            clear_logs=not args.no_clear_logs,
-            no_mutate_gen0=args.no_mutate_gen0,
-            electrodes_only=args.electrodes_only,
-            profile_phase2=args.profile,
-        )
-        return 0
-    except (FileNotFoundError, ValueError) as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_smooth(args: argparse.Namespace) -> int:
-    from app.postprocess import smooth as smooth_mod
-
-    try:
-        out = smooth_mod.smooth_from_applied(
-            args.applied,
-            output=args.out,
-            tag=args.tag,
-            smoothing_strength=args.strength,
-        )
-        if args.visualize:
-            from app.layout.visualize import visualize_after_stage
-
-            visualize_after_stage(
-                out,
-                enabled=True,
-                show_3d=not getattr(args, "no_show", False),
-                skip_collisions=getattr(args, "skip_collisions", False),
-            )
-        return 0
-    except (FileNotFoundError, ValueError, OSError) as e:
-        print(e, file=sys.stderr)
-        if "Invalid argument" in str(e) and getattr(args, "applied", None):
-            print(
-                "Hint: pass --applied and --out as separate quoted arguments, e.g.\n"
-                '  python -m app smooth --applied "data/output/layouts/synth_s2.json" '
-                '--out "data/output/smooth/smooth_s2_final.json"',
-                file=sys.stderr,
-            )
-        return 1
-
-
-def cmd_validate(args: argparse.Namespace) -> int:
-    from app.postprocess.validate_export import ExportValidationError, validate_smooth_file
-
-    try:
-        validate_smooth_file(
-            args.input,
-            require_collision_free=not args.allow_collisions,
-        )
-        print(f"OK: {args.input} is ready for export")
-        return 0
-    except (FileNotFoundError, ExportValidationError) as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_export_matlab(args: argparse.Namespace) -> int:
-    from app.postprocess import export_matlab as em
-    from app.postprocess.bundle.emit import CalibrationLandmarksMissingError
-    from app.postprocess.validate_export import ExportValidationError
-
-    try:
-        em.export_matlab(
-            args.input,
-            args.output,
-            strict_landmarks=not args.allow_terminal_landmarks,
-            skip_validation=args.skip_validation,
-            quiet=args.quiet,
-        )
-        return 0
-    except (FileNotFoundError, ExportValidationError, CalibrationLandmarksMissingError) as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_export_bundle(args: argparse.Namespace) -> int:
-    from app.postprocess import export_bundle as eb
-    from app.postprocess.bundle.emit import CalibrationLandmarksMissingError
-    from app.postprocess.validate_export import ExportValidationError
-
-    try:
-        eb.export_bundle(
-            args.input,
-            args.output,
-            strict_landmarks=not args.allow_terminal_landmarks,
-            skip_validation=args.skip_validation,
-            quiet=args.quiet,
-        )
-        return 0
-    except (FileNotFoundError, ExportValidationError, CalibrationLandmarksMissingError) as e:
-        print(e, file=sys.stderr)
-        return 1
-
-
-def cmd_init_print_config(args: argparse.Namespace) -> int:
-    from app.postprocess.print_config import init_print_config
-
-    try:
-        out = init_print_config(args.subject, force=args.force)
-        print(f"Wrote print config: {out}")
-        print("Edit physical_landmarks_mm, or run: python -m app record-pm --subject", args.subject)
-        return 0
-    except FileExistsError as e:
-        print(e, file=sys.stderr)
+        return run_layout(args.subject)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
         return 1
 
 
 def cmd_record_pm(args: argparse.Namespace) -> int:
-    from app.postprocess.record_pm import record_physical_landmarks
+    from app.machine.record_pm import record_physical_landmarks
 
     try:
         out = record_physical_landmarks(
@@ -311,43 +65,83 @@ def cmd_record_pm(args: argparse.Namespace) -> int:
             port=args.port,
             stale_sec=args.stale_ms / 1000.0,
             force=args.force,
-            output=args.output,
         )
-        print(f"Saved physical landmarks: {out}")
+        print(f"Wrote {out}")
         return 0
-    except FileExistsError as e:
-        print(e, file=sys.stderr)
+    except SystemExit as exc:
+        code = exc.code
+        return 0 if code in (None, 0) else (code if isinstance(code, int) else 1)
+    except (FileExistsError, FileNotFoundError, ValueError, OSError) as exc:
+        print(exc, file=sys.stderr)
         return 1
-    except OSError as e:
-        print(f"UDP bind failed: {e}", file=sys.stderr)
+
+
+def cmd_gcode(args: argparse.Namespace) -> int:
+    from app.gcode.convert import write_electrodes_gcode
+
+    electrode: str | int = args.electrode
+    if isinstance(electrode, str) and electrode.isdigit():
+        electrode = int(electrode)
+    try:
+        out = write_electrodes_gcode(
+            args.subject,
+            machine=args.machine,
+            electrode=electrode,
+            rot0y_deg=args.rot0y,
+            rot0z_deg=args.rot0z,
+        )
+        print(f"Wrote {out}")
+        return 0
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
         return 1
-    except SystemExit as e:
-        return int(e.code) if isinstance(e.code, int) else 1
+
+
+def cmd_simulate(args: argparse.Namespace) -> int:
+    from app.simulator.cli import _parse_layers, simulate_gcode
+
+    try:
+        simulate_gcode(
+            args.subject,
+            args.gcode,
+            pm_file=args.pm_file,
+            machine_config=args.machine,
+            rot0y_deg=args.rot0y,
+            rot0z_deg=args.rot0z,
+            layers=_parse_layers(args.layers),
+            animate=args.animate,
+            verbose=args.verbose,
+        )
+        return 0
+    except ImportError as exc:
+        print(f"{exc}\nInstall PyVista and Open3D.", file=sys.stderr)
+        return 1
+    except (FileNotFoundError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
 
 
 def cmd_cnc(args: argparse.Namespace) -> int:
     import time
 
-    from app.postprocess.cnc_control import CncControlClient, CncControlError
+    from app.machine.cnc_control import CncControlClient, CncControlError
 
     client = CncControlClient(host=args.host, port=args.port)
     try:
         if args.cnc_cmd == "status":
             ack = client.status()
         elif args.cnc_cmd == "load":
-            ack = client.load(args.gcode)
+            gcode = args.gcode
+            if gcode is None:
+                if args.subject is None:
+                    print("cnc load needs --subject or --gcode", file=sys.stderr)
+                    return 1
+                gcode = paths.electrodes_gcode(args.subject)
+            ack = client.load(gcode)
         elif args.cnc_cmd in ("home", "scan"):
             bundled = {
-                "home": (
-                    client.home,
-                    "B/C home script",
-                    "layout cnc home --confirm",
-                ),
-                "scan": (
-                    client.scan,
-                    "3D head-scan script",
-                    "layout cnc scan --confirm",
-                ),
+                "home": (client.home, "B/C home script", "layout cnc home --confirm"),
+                "scan": (client.scan, "3D head-scan script", "layout cnc scan --confirm"),
             }
             load_fn, label, hint = bundled[args.cnc_cmd]
             ack = load_fn()
@@ -368,467 +162,140 @@ def cmd_cnc(args: argparse.Namespace) -> int:
         else:
             print(f"unknown cnc command {args.cnc_cmd}", file=sys.stderr)
             return 2
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
+    except FileNotFoundError as exc:
+        print(exc, file=sys.stderr)
         return 1
-    except CncControlError as e:
-        print(e, file=sys.stderr)
+    except CncControlError as exc:
+        print(exc, file=sys.stderr)
         return 1
     print(ack.format_line())
     return 0 if ack.ok else 1
 
 
-def cmd_convert_gcode(args: argparse.Namespace) -> int:
-    from app.postprocess import convert_gcode as cg
+def cmd_run(args: argparse.Namespace) -> int:
+    from app.pipeline.run import run_pipeline
 
-    try:
-        out = cg.convert_gcode(
-            args.bundle,
-            args.config,
-            pm_file=args.pm_file,
-            machine=args.machine,
-            output=args.output,
-            trace=args.trace,
-            electrode=args.electrode,
-            rot0y_deg=args.rot0y,
-            rot0z_deg=args.rot0z,
-            subject=args.subject,
-        )
-        paths = out if isinstance(out, list) else [out]
-        for p in paths:
-            print(f"Wrote G-code to {p}")
-        return 0
-    except (FileNotFoundError, ValueError) as e:
-        print(e, file=sys.stderr)
-        return 1
+    return run_pipeline(args)
 
 
-def cmd_list_electrodes(args: argparse.Namespace) -> int:
-    from app.postprocess import convert_gcode as cg
+def _add_cnc(sub: argparse._SubParsersAction) -> None:
+    from app.machine.cnc_control import DEFAULT_CNC_HOST, DEFAULT_CNC_PORT
 
-    try:
-        names = cg.list_electrodes(args.bundle)
-        for i, name in enumerate(names, 1):
-            print(f"{i:3d}  {name}")
-        return 0
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
-        return 1
+    opts = argparse.ArgumentParser(add_help=False)
+    opts.add_argument("--host", default=DEFAULT_CNC_HOST)
+    opts.add_argument("--port", type=int, default=DEFAULT_CNC_PORT)
+    cnc = sub.add_parser("cnc", help="Load or run G-code on Mach4")
+    commands = cnc.add_subparsers(dest="cnc_cmd", required=True)
+    commands.add_parser("status", parents=[opts]).set_defaults(func=cmd_cnc)
+    load = commands.add_parser("load", parents=[opts])
+    load.add_argument("--subject", type=int, default=None)
+    load.add_argument("--gcode", type=Path, default=None)
+    load.set_defaults(func=cmd_cnc)
+    for name, help_text in (
+        ("home", "Load the B/C home script"),
+        ("scan", "Load the head-scan script"),
+    ):
+        parser = commands.add_parser(name, parents=[opts], help=help_text)
+        parser.add_argument("--confirm", action="store_true")
+        parser.set_defaults(func=cmd_cnc)
+    start = commands.add_parser("start", parents=[opts])
+    start.add_argument("--confirm", action="store_true", required=True)
+    start.set_defaults(func=cmd_cnc)
+    commands.add_parser("hold", parents=[opts]).set_defaults(func=cmd_cnc)
+    commands.add_parser("stop", parents=[opts]).set_defaults(func=cmd_cnc)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="layout",
-        description=(
-            "Generate per-subject wire layouts. "
-            "Assignment map = LEFT/RIGHT per electrode only; paths are synthesized on each target."
-        ),
+        description="Place 10–20 electrodes on a scan and write electrode G-code.",
     )
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init-data").set_defaults(func=cmd_init_data)
+    paths_cmd = sub.add_parser("paths", help="Show subject files")
+    paths_cmd.add_argument("--subject", type=int, required=True)
+    paths_cmd.set_defaults(func=cmd_paths)
 
-    pp = sub.add_parser("paths", help="Print canonical paths for a subject")
-    pp.add_argument("--subject", type=int, required=True)
-    pp.set_defaults(func=cmd_paths)
-
-    pr = sub.add_parser("preprocess", help="Stage A")
-    pr.add_argument("--subject", type=int, required=True)
-    pr.add_argument(
-        "--step",
-        required=True,
-        choices=[
-            "reconstruct",
-            "clear-islands",
-            "align-obj",
-            "fiducials",
-            "cz",
-            "electrodes",
-            "assignments",
-            "entry-capacity",
-        ],
-    )
-    pr.add_argument("--ply", type=Path, default=None, help="Input .ply for reconstruct step")
-    pr.add_argument("--no-align-head", action="store_true", help="Skip head rotation UI")
-    pr.add_argument("--depth", type=int, default=12, help="Poisson octree depth")
-    pr.add_argument(
-        "--obj",
-        type=Path,
-        default=None,
-        help="Imported textured OBJ for align-obj (default: data/raw/{id}.obj)",
-    )
-    pr.add_argument(
-        "--no-scale",
-        action="store_true",
-        help="align-obj: skip isotropic scale matching before ICP",
-    )
-    pr.add_argument(
-        "--no-preview",
-        action="store_true",
-        help="align-obj: skip interactive overlay confirmation",
-    )
-    pr.add_argument(
-        "--no-rotate-head",
-        action="store_true",
-        help="align-obj: skip textured OBJ head-rotation UI",
-    )
-    pr.add_argument(
-        "--spacing",
-        type=float,
-        default=terminal_slot_spacing_mm(),
-        help="Strip slot pitch in mm (entry-capacity)",
-    )
-    pr.add_argument("--full-circle", action="store_true")
-    pr.set_defaults(func=cmd_preprocess)
-
-    sy = sub.add_parser(
-        "synthesize",
-        help="Stage B: generate layout on target (paths + slots; not preset path replay)",
-    )
-    sy.add_argument("--target", type=int, required=True)
-    sy.add_argument("--out")
-    sy.add_argument("--preserve-entry-order", action="store_true")
-    sy.add_argument(
-        "--inherit-preset-terminals",
-        action="store_true",
-        help="Map TERMINAL_LEFT/RIGHT from preset via rigid landmarks (legacy S1→S2)",
-    )
-    sy.add_argument(
-        "--rotate",
-        action="store_true",
-        help="Search ±36° hub angle around fiducial clicks for fewer crossings",
-    )
-    sy.add_argument(
-        "--terminal-stop-mm",
-        type=float,
-        default=None,
-        help="Shorten each wire from strip entry (default: synthesize.terminal_stop_mm in config)",
-    )
-    sy.add_argument("--uv-resolution", type=int, default=100)
-    sy.add_argument(
-        "--visualize",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="After synthesize: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
-    )
-    sy.add_argument("--show", action="store_true", help="Also open interactive 2D matplotlib window")
-    sy.add_argument(
-        "--no-show",
-        action="store_true",
-        help="With visualize: save 2D PNG only, skip 3D window",
-    )
-    sy.add_argument(
-        "--skip-collisions",
-        action="store_true",
-        help="Skip 2D collision markers (faster visualize)",
-    )
-    sy.set_defaults(func=cmd_synthesize)
-
-    ba = sub.add_parser(
-        "build-assignments",
-        help="Write assignment-only map from reference subject initial_terminal_assignments",
-    )
-    ba.add_argument("--reference", type=int, required=True)
-    ba.add_argument("--id", "--preset-id", dest="id", required=True, metavar="ID")
-    ba.add_argument("--out")
-    ba.set_defaults(func=cmd_build_assignments)
-
-    viz = sub.add_parser("visualize", help="2D PNG and/or interactive 3D layout view")
-    viz.add_argument("--applied", required=True)
-    viz.add_argument(
-        "--mode",
-        choices=("2d", "3d", "both"),
-        default="both",
-        help="2d=polar PNG; 3d=interactive PyVista; both (default)",
-    )
-    viz.add_argument("--save", help="Override 2D PNG path")
-    viz.add_argument(
-        "--save-3d",
-        default=None,
-        help="Optional: also save a 3D screenshot to this path",
-    )
-    viz.add_argument(
-        "--no-show",
-        action="store_true",
-        help="Do not open 3D window (2d mode still saves PNG when applicable)",
-    )
-    viz.add_argument(
-        "--show-2d",
-        action="store_true",
-        help="Open interactive 2D matplotlib window in addition to saving PNG",
-    )
-    viz.add_argument(
-        "--skip-collisions",
-        action="store_true",
-        help="Skip 2D Shapely collision markers (faster)",
-    )
-    viz.set_defaults(func=cmd_visualize)
-
-    po = sub.add_parser("polish", help="Stage C: fixed-endpoint separation polish")
-    po.add_argument("--applied", required=True)
-    po.add_argument(
-        "--mode",
-        default="gentle",
-        choices=["gentle", "repair", "refine", "ga-short"],
-    )
-    po.add_argument("--out")
-    po.add_argument("--subject", type=int)
-    po.add_argument("--generations", type=int)
-    po.add_argument("--population", type=int)
-    po.add_argument("--no-clear-logs", action="store_true")
-    po.add_argument("--no-mutate-gen0", action="store_true")
-    po.add_argument("--electrodes-only", action="store_true")
-    po.add_argument(
-        "--visualize",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="After polish: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
-    )
-    po.add_argument(
-        "--profile",
-        action="store_true",
-        help="Print per-round phase-2 timing breakdown (find pairs, greedy, accept, …)",
-    )
-    po.set_defaults(func=cmd_polish)
-
-    sm = sub.add_parser("smooth", help="Stage D: B-spline smooth")
-    sm.add_argument("--applied", required=True)
-    sm.add_argument("--out")
-    sm.add_argument("--tag", default="final")
-    sm.add_argument("--strength", type=float)
-    sm.add_argument(
-        "--visualize",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="After smooth: save 2D PNG and open interactive 3D (default: on; --no-visualize to skip)",
-    )
-    sm.add_argument(
-        "--no-show",
-        action="store_true",
-        help="With visualize: save 2D PNG only, skip 3D window",
-    )
-    sm.add_argument(
-        "--skip-collisions",
-        action="store_true",
-        help="Skip 2D collision markers (faster visualize)",
-    )
-    sm.set_defaults(func=cmd_smooth)
-
-    eb = sub.add_parser(
-        "export-bundle",
-        help="Stage D: write eeg_subject_bundle/1.0.0 (manifest + NPZ)",
-    )
-    eb.add_argument("--input", required=True, help="Smooth JSON (e.g. smooth_s2_final.json)")
-    eb.add_argument("--output", help="Output folder (default: data/output/bundles/subject_{id}/)")
-    eb.add_argument(
-        "--allow-terminal-landmarks",
-        action="store_true",
-        help="Allow export without calibration landmarks (not recommended)",
-    )
-    eb.add_argument(
-        "--skip-validation",
-        action="store_true",
-        help="Skip collision-free and path readiness checks (not recommended)",
-    )
-    eb.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress per-channel progress output",
-    )
-    eb.set_defaults(func=cmd_export_bundle)
-
-    val = sub.add_parser(
-        "validate",
-        help="Check smooth JSON export readiness (paths, collision metrics)",
-    )
-    val.add_argument("--input", required=True, help="Smooth JSON to validate")
-    val.add_argument(
-        "--allow-collisions",
-        action="store_true",
-        help="Do not require layout_collision_free",
-    )
-    val.set_defaults(func=cmd_validate)
-
-    ipc = sub.add_parser(
-        "init-print-config",
-        help="Create pm-only YAML for a subject (physical landmarks at print time)",
-    )
-    ipc.add_argument("--subject", type=int, required=True)
-    ipc.add_argument("--force", action="store_true", help="Overwrite existing file")
-    ipc.set_defaults(func=cmd_init_print_config)
-
-    rpm = sub.add_parser(
-        "record-pm",
-        help="Capture physical landmarks from live CNC work pose (UDP) with keyboard confirm",
-    )
-    rpm.add_argument("--subject", type=int, required=True)
-    rpm.add_argument(
-        "--port",
+    mesh = sub.add_parser("mesh", help="PLY + OBJ/MTL/JPG → upright head mesh")
+    mesh.add_argument("--subject", type=int, required=True)
+    mesh.add_argument("--ply", type=Path, default=None, help="Scan .ply; copied to source/scan.ply")
+    mesh.add_argument("--obj", type=Path, default=None, help="Loose textured .obj (mtl and image beside it)")
+    mesh.add_argument("--zip", dest="zip_path", type=Path, default=None, help="Zip of obj, mtl, and jpg")
+    mesh.add_argument(
+        "--depth",
         type=int,
-        default=62101,
-        help="Mach4 work-pose UDP port (default: 62101; Orbbec uses 62100)",
+        default=None,
+        help="Poisson octree depth (default: mesh.poisson_depth in config/defaults.yaml)",
     )
-    rpm.add_argument(
-        "--bind-ip",
-        default="0.0.0.0",
-        help="UDP bind address (default: 0.0.0.0)",
-    )
-    rpm.add_argument(
-        "--stale-ms",
-        type=float,
-        default=500.0,
-        help="Ignore work pose older than this many ms (default: 500)",
-    )
-    rpm.add_argument(
-        "--output",
-        help="Output YAML (default: config/postprocessor/subjects/subject_{id}.yaml)",
-    )
-    rpm.add_argument("--force", action="store_true", help="Overwrite existing file")
-    rpm.set_defaults(func=cmd_record_pm)
+    mesh.add_argument("--no-preview", action="store_true")
+    mesh.add_argument("--no-rotate-head", action="store_true")
+    mesh.add_argument("--no-scale", action="store_true")
+    mesh.set_defaults(func=cmd_mesh)
 
-    from app.postprocess.cnc_control import DEFAULT_CNC_HOST, DEFAULT_CNC_PORT
+    layout = sub.add_parser("layout", help="Pick landmarks and place 10–20 electrodes")
+    layout.add_argument("--subject", type=int, required=True)
+    layout.set_defaults(func=cmd_layout)
 
-    cnc_opts = argparse.ArgumentParser(add_help=False)
-    cnc_opts.add_argument(
-        "--host",
-        default=DEFAULT_CNC_HOST,
-        help=f"Mach4 command UDP host (default: {DEFAULT_CNC_HOST})",
-    )
-    cnc_opts.add_argument(
-        "--port",
+    record = sub.add_parser("record-pm", help="Measure three landmarks on the CNC")
+    record.add_argument("--subject", type=int, required=True)
+    record.add_argument("--force", action="store_true")
+    record.add_argument("--port", type=int, default=62101)
+    record.add_argument("--bind-ip", default="0.0.0.0")
+    record.add_argument("--stale-ms", type=float, default=500.0)
+    record.set_defaults(func=cmd_record_pm)
+
+    gcode = sub.add_parser("gcode", help="Write electrodes.gcode")
+    gcode.add_argument("--subject", type=int, required=True)
+    gcode.add_argument("--electrode", default="all")
+    gcode.add_argument("--machine", default=None)
+    gcode.add_argument("--rot0y", type=float, default=0.0)
+    gcode.add_argument("--rot0z", type=float, default=0.0)
+    gcode.set_defaults(func=cmd_gcode)
+
+    run = sub.add_parser("run", help="mesh → layout → record-pm → gcode")
+    run.add_argument("--subject", type=int, required=True)
+    run.add_argument("--ply", type=Path, default=None, help="Scan .ply; copied to source/scan.ply")
+    run.add_argument("--obj", type=Path, default=None, help="Loose textured .obj (mtl and image beside it)")
+    run.add_argument("--zip", dest="zip_path", type=Path, default=None, help="Zip of obj, mtl, and jpg")
+    run.add_argument("--from", dest="from_stage", default="mesh", choices=["mesh", "layout", "record-pm", "gcode"])
+    run.add_argument("--to", dest="to_stage", default="gcode", choices=["mesh", "layout", "record-pm", "gcode"])
+    run.add_argument(
+        "--depth",
         type=int,
-        default=DEFAULT_CNC_PORT,
-        help=f"Mach4 command UDP port (default: {DEFAULT_CNC_PORT})",
+        default=None,
+        help="Poisson octree depth (default: mesh.poisson_depth in config/defaults.yaml)",
     )
-    cnc = sub.add_parser(
-        "cnc",
-        help="Load/run G-code on Mach4 (localhost UDP; not wired into run)",
-    )
-    cnc_sub = cnc.add_subparsers(dest="cnc_cmd", required=True)
-    cnc_sub.add_parser(
-        "status",
-        parents=[cnc_opts],
-        help="Query Mach4 idle/enabled/file/DRO",
-    ).set_defaults(func=cmd_cnc)
-    cnc_load = cnc_sub.add_parser(
-        "load",
-        parents=[cnc_opts],
-        help="Load a G-code file (absolute path sent to Mach4)",
-    )
-    cnc_load.add_argument(
-        "--gcode",
-        required=True,
-        type=Path,
-        help="G-code .txt (relative paths resolve from repo root)",
-    )
-    cnc_load.set_defaults(func=cmd_cnc)
-    cnc_home = cnc_sub.add_parser(
-        "home",
-        parents=[cnc_opts],
-        help="Load bundled B/C home script; Cycle Start with --confirm",
-    )
-    cnc_home.add_argument(
-        "--confirm",
-        action="store_true",
-        help="Cycle Start after load (required to actually run the home moves)",
-    )
-    cnc_home.set_defaults(func=cmd_cnc)
-    cnc_scan = cnc_sub.add_parser(
-        "scan",
-        parents=[cnc_opts],
-        help="Load bundled 3D head-scan script; Cycle Start with --confirm",
-    )
-    cnc_scan.add_argument(
-        "--confirm",
-        action="store_true",
-        help="Cycle Start after load (required to actually run the scan path)",
-    )
-    cnc_scan.set_defaults(func=cmd_cnc)
-    cnc_start = cnc_sub.add_parser(
-        "start",
-        parents=[cnc_opts],
-        help="Cycle Start (requires --confirm)",
-    )
-    cnc_start.add_argument(
-        "--confirm",
-        action="store_true",
-        required=True,
-        help="Required confirmation; Cycle Start is never automatic",
-    )
-    cnc_start.set_defaults(func=cmd_cnc)
-    cnc_sub.add_parser(
-        "hold",
-        parents=[cnc_opts],
-        help="Feed hold",
-    ).set_defaults(func=cmd_cnc)
-    cnc_sub.add_parser(
-        "stop",
-        parents=[cnc_opts],
-        help="Cycle stop",
-    ).set_defaults(func=cmd_cnc)
+    run.add_argument("--no-preview", action="store_true")
+    run.add_argument("--no-rotate-head", action="store_true")
+    run.add_argument("--no-scale", action="store_true")
+    run.add_argument("--force-record-pm", action="store_true")
+    run.add_argument("--port", type=int, default=62101)
+    run.add_argument("--bind-ip", default="0.0.0.0")
+    run.add_argument("--stale-ms", type=float, default=500.0)
+    run.add_argument("--electrode", default="all")
+    run.add_argument("--machine", default=None)
+    run.add_argument("--rot0y", type=float, default=0.0)
+    run.add_argument("--rot0z", type=float, default=0.0)
+    run.set_defaults(func=cmd_run)
 
-    cg = sub.add_parser("convert-gcode", help="Stage D: bundle → 5-axis G-code")
-    cg.add_argument("--bundle", required=True, help="Bundle dir")
-    cg.add_argument(
-        "--config",
-        help="pm YAML (default: config/postprocessor/subjects/subject_{id}.yaml from bundle)",
-    )
-    cg.add_argument("--pm-file", help="Alias for --config (pm-only YAML)")
-    cg.add_argument("--machine", help="Machine YAML (default: config/postprocessor/machine_default.yaml)")
-    cg.add_argument("--output", help="Output base (default: data/output/gcode/)")
-    cg.add_argument(
-        "--trace",
-        choices=["interconnect", "electrode", "both"],
-        default="both",
-        help="Trace geometry (default: both → allinterconnects.txt + allelectrode.txt)",
-    )
-    cg.add_argument(
-        "--electrode",
-        default="all",
-        help="Channel to print: all, name (C3), or 1-based index (default: all)",
-    )
-    cg.add_argument("--rot0y", type=float, default=0.0, help="Registration Y rotation (deg)")
-    cg.add_argument("--rot0z", type=float, default=0.0, help="Registration Z rotation (deg)")
-    cg.add_argument("--subject", help="Legacy .mat subject folder (if not using bundle)")
-    cg.set_defaults(func=cmd_convert_gcode)
+    simulate = sub.add_parser("simulate", help="View electrodes.gcode on the machine")
+    simulate.add_argument("--subject", type=int, required=True)
+    simulate.add_argument("--gcode", default=None)
+    simulate.add_argument("--pm-file", default=None)
+    simulate.add_argument("--machine", default=None)
+    simulate.add_argument("--rot0y", type=float, default=0.0)
+    simulate.add_argument("--rot0z", type=float, default=0.0)
+    simulate.add_argument("--layers", default="mesh,landmarks,origin,tip,arm")
+    simulate.add_argument("--animate", action="store_true")
+    simulate.add_argument("--verbose", action="store_true")
+    simulate.set_defaults(func=cmd_simulate)
 
-    le = sub.add_parser("list-electrodes", help="List channels in a subject bundle")
-    le.add_argument("--bundle", required=True)
-    le.set_defaults(func=cmd_list_electrodes)
-
-    em = sub.add_parser("export-matlab", help="Stage D (legacy): write .mat files")
-    em.add_argument("--input", required=True)
-    em.add_argument("--output")
-    em.add_argument(
-        "--allow-terminal-landmarks",
-        action="store_true",
-        help="Allow export without calibration landmarks (not recommended)",
-    )
-    em.add_argument(
-        "--skip-validation",
-        action="store_true",
-        help="Skip collision-free and path readiness checks (not recommended)",
-    )
-    em.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress per-channel progress output",
-    )
-    em.set_defaults(func=cmd_export_matlab)
-
-    from app.pipeline.run import add_run_parser
-    from app.simulator.cli import add_simulate_gcode_parser
-
-    add_run_parser(sub)
-    add_simulate_gcode_parser(sub)
-
-    return p
+    _add_cnc(sub)
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    _chdir_repo()
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return int(args.func(args))

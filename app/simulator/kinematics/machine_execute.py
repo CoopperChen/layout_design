@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from app.postprocess.gcode.kinematics.machine_fk import structural_arm_joints_batch
+from app.gcode.kinematics.machine_fk import structural_arm_joints_batch
 
 
 @dataclass
@@ -85,7 +85,7 @@ def rigid_geometry_checks(
     atol: float = 1e-3,
 ) -> dict[str, float]:
     """Sanity metrics: fixed segment lengths and arm ⊥ tool."""
-    from app.postprocess.gcode.kinematics.machine_fk import _at_machine_zero_pose
+    from app.gcode.kinematics.machine_fk import _at_machine_zero_pose
 
     arm_lens: list[float] = []
     tool_lens: list[float] = []

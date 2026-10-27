@@ -1,37 +1,19 @@
 # Project goal
 
-**Generate a collision-free wire layout on each subject’s head** — not replay or transfer a reference subject’s path shapes or hub map.
+Place a 10–20 electrode set on each subject’s head and write G-code that prints those pads.
 
-## What we produce (per subject)
+## Inputs
 
-| Generated on target | Source |
-|---------------------|--------|
-| 2D/3D wire paths, entry slots, collision metrics | **Synthesize** (straight/detour + UV surface lift) |
-| Hub 3D positions | Target `fiducials_{id}.json` (TERMINAL_LEFT / TERMINAL_RIGHT clicks) |
-| 10–20 electrodes, mesh, anatomy | Target prep |
+- `scan.ply` — metric point cloud
+- `head.obj`, `head.mtl`, `head.jpg` — textured head, never overwritten
+- Three physical landmarks, measured on the CNC with `record-pm`
 
-## What “preset” means here
+## Output
 
-**Preset = terminal assignment only:** which electrode connects to `TERMINAL_LEFT` vs `TERMINAL_RIGHT`.
+`data/subjects/{id}/electrodes.gcode`
 
-Typically copied once from a reference subject (e.g. subject 1):
+## Steps
 
-```json
-{
-  "preset_version": 4,
-  "preset_id": "s1_assignments",
-  "terminal_assignments": { "Fp1": "TERMINAL_LEFT", "Fp2": "TERMINAL_RIGHT" }
-}
-```
+`mesh` builds one upright head from the point cloud and the texture. `layout` is one picking session (four anatomical points and three calibration points); Cz and the 10–20 sites are computed on save. `record-pm` stores the same three calibration points in the machine frame. `gcode` builds a coplanar disk at each electrode and runs the 5-axis postprocessor.
 
-Stored under `data/presets/` (folder name is legacy; content is assignment-only).
-
-## What preset is NOT
-
-- Not source path curvature or `paths_chord_3d`
-- Not reference terminal 3D positions (unless you opt into `--inherit-preset-terminals`)
-- Not a substitute for running synthesize on the target mesh
-
-## Pipeline in one line
-
-Prep target → **synthesize** (assignments + target hubs → new paths) → optional polish → smooth → export-bundle → convert-gcode → simulate-gcode.
+Wire paths, terminal assignment, and interconnect G-code are not part of this pipeline. The previous interconnect version is `origin/master` at `93cff25`.

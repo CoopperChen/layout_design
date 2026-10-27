@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.cli import build_parser
-from app.postprocess.cnc_control import (
+from app.machine.cnc_control import (
     CncControlClient,
     CncControlError,
     build_command,
@@ -97,7 +97,7 @@ def test_resolve_gcode_path_absolute(tmp_path: Path):
 
 
 def test_resolve_gcode_path_relative_to_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from app.postprocess import cnc_control as mod
+    from app.machine import cnc_control as mod
 
     gcode = tmp_path / "wire.txt"
     gcode.write_text("G1 X1\n", encoding="utf-8")
@@ -166,9 +166,9 @@ def test_scan_head_gcode_exists():
 
 def test_load_cli_keeps_gcode_path():
     parser = build_parser()
-    args = parser.parse_args(["cnc", "load", "--gcode", "data/output/gcode/s.txt"])
+    args = parser.parse_args(["cnc", "load", "--gcode", "data/subjects/2/electrodes.gcode"])
     assert args.cnc_cmd == "load"
-    assert Path(args.gcode) == Path("data/output/gcode/s.txt")
+    assert Path(args.gcode) == Path("data/subjects/2/electrodes.gcode")
 
 
 def test_client_roundtrip_status():

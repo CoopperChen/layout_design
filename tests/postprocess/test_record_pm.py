@@ -9,12 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from app.postprocess.cnc_work_pose import (
+from app.machine.cnc_work_pose import (
     WorkPoseUdpClient,
     parse_work_pose_payload,
 )
-from app.postprocess.print_config import load_physical_landmarks, save_physical_landmarks
-from app.postprocess.record_pm import pm_from_raw_touches
+from app.machine.record_pm import pm_from_raw_touches
+from app.subject import load_physical_landmarks, save_physical_landmarks
 
 
 def test_parse_work_pose_payload_mm():

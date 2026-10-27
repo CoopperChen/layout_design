@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from app.preprocess.align_obj import (
+from app.mesh.align import (
     align_obj_to_stl,
     mean_surface_distance_mm,
     rough_similarity_align,

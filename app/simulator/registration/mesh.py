@@ -1,14 +1,17 @@
-"""Register head mesh into controller machine frame for simulate-gcode."""
+"""Register a head mesh into the controller machine frame."""
 
 from __future__ import annotations
 
-from app.postprocess.bundle.models import SubjectBundle
+import numpy as np
+
 from app.simulator.registration.subject import SubjectRegistration, register_subject
 
 
 def register_mesh_full(
-    bundle: SubjectBundle,
-    physical_landmarks_mm,
+    mesh_points: np.ndarray,
+    mesh_faces: np.ndarray,
+    landmarks_xyz: np.ndarray,
+    physical_landmarks_mm: np.ndarray,
     *,
     a_mm: float,
     d_mm: float,
@@ -17,9 +20,10 @@ def register_mesh_full(
     rot0z_deg: float = 0.0,
     machine_frame: bool = True,
 ) -> SubjectRegistration:
-    """Register bundle mesh and landmarks for simulate-gcode."""
     return register_subject(
-        bundle,
+        mesh_points,
+        mesh_faces,
+        landmarks_xyz,
         physical_landmarks_mm,
         a_mm=a_mm,
         d_mm=d_mm,

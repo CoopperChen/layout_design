@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from app.preprocess.mesh_io import (
+from app.mesh.io import (
     discover_obj_texture_images,
     load_textured_obj_mesh,
     obj_has_texcoords,

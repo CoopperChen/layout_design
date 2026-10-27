@@ -1,130 +1,47 @@
-# Data contracts
+# Data layout
 
-Canonical paths: `app/paths.py`. This document describes **what** each artifact contains.
+`app/paths.py` is the only place these paths are defined.
 
-## Stage A — Preprocess
+```text
+data/subjects/{id}/
+  source/
+    scan.ply
+    head.obj          # input texture; align never overwrites this
+    head.mtl
+    head.jpg
+  head.stl            # cleaned geometry, scan frame
+  head.obj            # texture in that same frame
+  head.mtl
+  head.jpg
+  layout.json
+  pm.yaml
+  electrodes.gcode
+```
 
-### `data/raw/{id}.ply`
+`config/machine.yaml` is the printer, shared by every subject.
 
-Raw structured-light / photogrammetry point cloud. Input to the **reconstruct** preprocess step.
-
-### `data/raw/{id}.stl`
-
-Poisson mesh from reconstruct (geometry only). Input to **clear-islands**.
-
-### `data/raw/{id}.obj`
-
-Imported textured OBJ package (same subject basename as the PLY/STL), plus
-companion `.mtl` / `.jpg`. Place under `data/raw/` before **align-obj**.
-This file is **not** overwritten by preprocess.
-
-### `data/cleaned_scans/{id}.obj`
-
-STL-synced textured OBJ written by **align-obj** (ICP + optional head rotation).
-Fiducial picking and any later textured-head step read this path. Materials /
-textures are copied next to it. Transform audit: `{id}_obj_to_stl.npy` in the
-same folder.
-
-Vertex-color sidecars (geometry-only fallback) may appear as
-`{id}_vertex_colors.npy` / `{id}_color_ref.ply` beside the aligned OBJ.
-
-### `data/cleaned_scans/{id}.stl`
-
-Single connected head mesh after `0_clearIslands` (small islands removed). Canonical mesh for all steps after preprocess A.
-
-### `data/json/fiducials_{id}.json`
-
-Keys (3D coordinates as lists; picked on synced OBJ, valid on STL):
-
-- `nasion`, `lpa`, `rpa`, `inion` — anatomical registration
-- `TERMINAL_LEFT`, `TERMINAL_RIGHT` — rear harness terminal clicks
-- `landmark_central`, `landmark_left`, `landmark_back` — calibration landmarks → `Landmarks.mat` / `LandmarkNames.mat`
-
-Synthesize uses the **four anatomical** points for hub registration; terminal 3D positions for layout come from the preset / synthesize hub pose unless polish syncs fiducials.
-
-### `data/json/electrode_positions_{id}.json`
-
-Map electrode name → `[x, y, z]` (includes `Cz`).
-
-### `data/json/initial_terminal_assignments_{id}.json`
-
-Map electrode name → `"TERMINAL_LEFT"` | `"TERMINAL_RIGHT"`.
-
-Produced by balanced geodesic strategy or copied from a reference preset.
-
-## Stage B — Assignment map & generated layouts
-
-### `data/presets/*.json` — assignment map only (canonical)
-
-Minimum for **generate** (`synthesize`):
+## layout.json
 
 ```json
 {
-  "preset_version": 4,
-  "preset_id": "s1_assignments",
-  "assignment_only": true,
-  "terminal_assignments": { "Fp1": "TERMINAL_LEFT", "Fp2": "TERMINAL_RIGHT" }
+  "anatomy": {"nasion": [], "lpa": [], "rpa": [], "inion": []},
+  "cz": [],
+  "calibration": {"central": [], "left": [], "back": []},
+  "electrodes": {"Fp1": [], "Cz": []}
 }
 ```
 
-Full v4 GA exports may include `paths_chord_3d`, `terminal_positions_3d`, anatomy — **not used** by default generate (only `terminal_assignments` is read). Hubs come from target `fiducials_{id}.json`.
+Coordinates are millimetres in the scan frame. `calibration` is the digital triangle. `pm.yaml` is the same three points measured on the machine, with central at `[0, 0, 0]`.
 
-### `data/output/layouts/{tag}_s{id}.json` — **generated** layout
+## pm.yaml
 
-Produced by synthesize on the target (not copied from reference). Top-level keys:
+```yaml
+physical_landmarks_mm:
+  - [0, 0, 0]          # landmark_central
+  - [80, 0, 0]         # landmark_left
+  - [10, 70, 5]        # landmark_back
+```
 
-| Key | Purpose |
-|-----|---------|
-| `metadata.target_subject_id` | Subject integer |
-| `metadata.preset_path` | Source preset |
-| `paths[]` | Per-wire: `electrode`, `terminal`, `modified_path_2d`, `path_points` |
-| `collision_metrics` | `crossing_count`, `electrode_violations`, `layout_collision_free` |
-| `uv_grid` | For 3D reconstruction if `path_points` rebuilt |
+`gcode` refuses an all-zero or degenerate triangle.
 
-**Gate before polish/postprocess:** `crossing_count == 0` and `electrode_violations == 0`.
-
-## Stage C — Polish logs (optional)
-
-### `data/output/logs/subject_{id}/`
-
-Short GA or repair intermediates only. **Not** the default postprocess input.
-
-## Stage D — Print export
-
-### `data/output/smooth/smooth_s{id}_{tag}.json`
-
-Same schema expected by `EXPORT_TO_MATLAB` / legacy g-code:
-
-- `final_paths` — list of smoothed 3D polylines with electrode metadata
-- Mesh reference for normal computation
-
-### `data/output/bundles/subject_{id}/` — **canonical**
-
-Schema `eeg_subject_bundle/1.0.0`:
-
-| File | Contents |
-|------|----------|
-| `manifest.json` | Schema version, frame conventions, array refs |
-| `geometry.npz` | `mesh_points`, `mesh_faces` (0-based), `landmarks_xyz` |
-| `traces.npz` | `channel_names`, `interconnect_xyzn`, `electrode_xyzn` (N×6) |
-
-CLI: `python -m app export-bundle --input data/output/smooth/smooth_s{id}_final.json`
-
-### `data/output/gcode/`
-
-5-axis G-code from `python -m app convert-gcode` (controller machine frame: X,Y,Z = C pivot). Print session YAML in `config/postprocessor/subjects/`. Verify with `simulate-gcode` (same bundle + pm + rot0).
-
-### `data/output/matlab/subject_{id}/` — **legacy**
-
-| File | Contents |
-|------|----------|
-| `InterconnectElectrodePaths.mat` | Wires + electrode circles |
-| `HeadMesh.mat` | Triangulated head |
-| `Landmarks.mat` | Calibration landmarks |
-| `LandmarkNames.mat` | Labels |
-
-## Archive (legacy)
-
-### `data/archive/{run_id}/`
-
-Optional copy of `GA_{subject}_*` logs from reference GA runs used only to **export** presets (`export-v4`). Default pipeline does not read archive for print prep.
+`python -m app paths --subject N` prints each file and whether it exists.

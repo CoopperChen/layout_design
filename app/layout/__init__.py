@@ -1,1 +1,1 @@
-"""Stage B: deterministic straight-line layout synthesis."""
+"""Electrode placement on a textured head."""

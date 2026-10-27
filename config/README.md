@@ -2,21 +2,7 @@
 
 | File | Purpose |
 |------|---------|
-| `defaults.yaml` | Global pipeline defaults: preprocess, assignment preset, polish, smoothing |
+| `machine.yaml` | Arm lengths, tool gap, speeds, safe Z. Shared by every subject. |
+| `defaults.yaml` | Electrode pads, 10–20 size, mesh/ICP limits, and motion tuning. |
 
-Key fields in `defaults.yaml`:
-
-| Key | Default | Used by |
-|-----|---------|---------|
-| `preprocess.poisson_depth` | `12` | `run`, `preprocess reconstruct` |
-| `preprocess.align_head` | `true` | `run` reconstruct (disable with `--no-align-head`) |
-| `synthesize.assignments` | `subject1_best_v4` | `run`, `synthesize` |
-| `postprocess.smoothing_strength` | `0.1` | `run`, `smooth` |
-
-Per-subject overrides can be added later as `config/subjects/{id}.yaml`.
-
-Environment:
-
-| Variable | Effect |
-|----------|--------|
-| `LAYOUT_DESIGN_ROOT` | Override repository root detection in `app/paths.py` |
+`LAYOUT_DESIGN_ROOT` overrides repository-root detection in `app/paths.py`.

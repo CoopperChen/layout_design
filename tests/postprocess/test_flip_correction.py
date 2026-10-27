@@ -5,11 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from app import paths
-from app.postprocess.bundle.load import load_bundle
-from app.postprocess.gcode.config_loader import load_machine_config
-from app.postprocess.gcode.kinematics.axis_angles import compute_axis_angles
-from app.postprocess.gcode.kinematics.flip_correction import (
+from app.gcode.kinematics.axis_angles import compute_axis_angles
+from app.gcode.kinematics.flip_correction import (
     correct_flip,
     enforce_axis_continuity,
     limit_c_slew,
@@ -18,11 +15,6 @@ from app.postprocess.gcode.kinematics.flip_correction import (
     retarget_normals_to_c,
     validate_axis_continuity,
 )
-from app.postprocess.gcode.kinematics.machine_fk import registration_to_machine_frame
-from app.postprocess.gcode.models import JobConfig
-from app.postprocess.gcode.pipeline.align import align_subject
-from app.postprocess.gcode.pipeline.process_traces import process_trace
-from app.postprocess.print_config import load_physical_landmarks
 
 
 def _c_delta_deg(c1: float, c2: float) -> float:
@@ -105,126 +97,3 @@ def test_limit_c_slew_caps_steps():
         assert _c_delta_deg(c_out[i - 1], c_out[i]) <= 12.0 + 1e-9
 
 
-def test_process_trace_applies_correct_flip_on_subject_4():
-    bundle_dir = paths.REPO_ROOT / "data/output/bundles/subject_4"
-    if not (bundle_dir / "manifest.json").is_file():
-        import pytest
-
-        pytest.skip("subject_4 bundle not present")
-
-    bundle = load_bundle(bundle_dir)
-    pm_path = paths.postprocessor_subject_pm(4)
-    if not pm_path.is_file():
-        import pytest
-
-        pytest.skip("subject_4 pm config not present")
-
-    pm = load_physical_landmarks(pm_path)
-    machine = load_machine_config(paths.postprocessor_machine_config())
-    job = JobConfig(physical_landmarks_mm=pm, subject="4", trace_type="interconnect")
-    channels, mesh = align_subject(bundle, job)
-    mesh_m = registration_to_machine_frame(
-        mesh,
-        a_mm=machine.a_mm,
-        d_mm=machine.d_mm,
-        calgap_z_mm=machine.calgap_z_mm,
-    )
-
-    fz = next(ch for ch in channels if ch.name == "Fz")
-    rows = process_trace(
-        fz.interconnect,
-        machine,
-        mesh_points=mesh_m,
-        mesh_faces=bundle.mesh_faces,
-    )
-    jet = True
-    steps: list[float] = []
-    for i in range(1, len(rows)):
-        if jet:
-            steps.append(_c_delta_deg(rows[i - 1, 4], rows[i, 4]))
-        marker = int(rows[i, 6])
-        if marker == 11:
-            jet = False
-        elif marker == 10:
-            jet = True
-    assert steps
-    assert max(steps) < 45.0
-
-
-def test_process_trace_o2_no_start_c_jump_on_subject_5():
-    bundle_dir = paths.REPO_ROOT / "data/output/bundles/subject_5"
-    if not (bundle_dir / "manifest.json").is_file():
-        import pytest
-
-        pytest.skip("subject_5 bundle not present")
-
-    bundle = load_bundle(bundle_dir)
-    pm_path = paths.postprocessor_subject_pm(5)
-    if not pm_path.is_file():
-        import pytest
-
-        pytest.skip("subject_5 pm config not present")
-
-    pm = load_physical_landmarks(pm_path)
-    machine = load_machine_config(paths.postprocessor_machine_config())
-    job = JobConfig(physical_landmarks_mm=pm, subject="5", trace_type="interconnect")
-    channels, mesh = align_subject(bundle, job)
-    mesh_m = registration_to_machine_frame(
-        mesh,
-        a_mm=machine.a_mm,
-        d_mm=machine.d_mm,
-        calgap_z_mm=machine.calgap_z_mm,
-    )
-
-    o2 = next(ch for ch in channels if ch.name == "O2")
-    rows = process_trace(
-        o2.interconnect,
-        machine,
-        mesh_points=mesh_m,
-        mesh_faces=bundle.mesh_faces,
-    )
-    assert _c_delta_deg(rows[0, 4], rows[1, 4]) < 5.0
-
-
-def test_process_trace_slew_limits_c_on_subject_5_fz():
-    """Fz crown can demand large C changes; slew limit caps printer steps."""
-    bundle_dir = paths.REPO_ROOT / "data/output/bundles/subject_5"
-    if not (bundle_dir / "manifest.json").is_file():
-        pytest.skip("subject_5 bundle not present")
-
-    bundle = load_bundle(bundle_dir)
-    pm_path = paths.postprocessor_subject_pm(5)
-    if not pm_path.is_file():
-        pytest.skip("subject_5 pm config not present")
-
-    pm = load_physical_landmarks(pm_path)
-    machine = load_machine_config(paths.postprocessor_machine_config())
-    job = JobConfig(physical_landmarks_mm=pm, subject="5", trace_type="interconnect")
-    channels, mesh = align_subject(bundle, job)
-    mesh_m = registration_to_machine_frame(
-        mesh,
-        a_mm=machine.a_mm,
-        d_mm=machine.d_mm,
-        calgap_z_mm=machine.calgap_z_mm,
-    )
-
-    fz = next(ch for ch in channels if ch.name == "Fz")
-    rows = process_trace(
-        fz.interconnect,
-        machine,
-        mesh_points=mesh_m,
-        mesh_faces=bundle.mesh_faces,
-        channel_name="Fz",
-    )
-    jet = True
-    steps: list[float] = []
-    for i in range(1, len(rows)):
-        if jet:
-            steps.append(_c_delta_deg(rows[i - 1, 4], rows[i, 4]))
-        marker = int(rows[i, 6])
-        if marker == 11:
-            jet = False
-        elif marker == 10:
-            jet = True
-    assert steps
-    assert max(steps) <= 12.0 + 1e-6

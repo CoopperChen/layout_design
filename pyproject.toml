@@ -1,20 +1,16 @@
 [project]
 name = "layout-design"
 version = "0.1.0"
-description = "Generate per-subject EEG wire layouts from terminal assignment maps"
+description = "Place 10-20 electrodes on a head scan and write electrode G-code"
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
     "numpy>=2.2.6",
     "scipy>=1.15.3",
-    "shapely>=2.1.2",
     "open3d>=0.19.0",
     "pyvista>=0.48.4",
     "vtk>=9.6.2",
-    "matplotlib>=3.10.9",
-    "mne>=1.12.1",
     "pyyaml>=6.0.3",
-    "tqdm>=4.67.3",
 ]
 
 [project.scripts]
@@ -30,8 +26,6 @@ dev = ["pytest>=7.0", "ruff>=0.4.0"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["app/PYTHON"]
-
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E501"]

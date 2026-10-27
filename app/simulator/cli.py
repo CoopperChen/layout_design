@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from app import paths
-from app.runtime import setup_runtime
 
 
 def _parse_layers(value: str) -> set[str]:
@@ -20,8 +19,8 @@ def _parse_layers(value: str) -> set[str]:
 
 
 def simulate_gcode(
-    gcode: str | Path,
-    bundle: str | Path,
+    subject_id: int | str,
+    gcode: str | Path | None = None,
     *,
     pm_file: str | Path | None = None,
     machine_config: str | Path | None = None,
@@ -33,12 +32,9 @@ def simulate_gcode(
     screenshot: str | Path | None = None,
     title: str | None = None,
 ) -> None:
-    setup_runtime()
     import numpy as np
 
-    from app.postprocess.bundle.load import load_bundle
-    from app.postprocess.gcode.config_loader import load_machine_config
-    from app.postprocess.print_config import load_physical_landmarks, resolve_pm_config
+    from app.gcode.config_loader import load_machine_config
     from app.simulator.kinematics.inverse import decode_postprocessor_paths
     from app.simulator.kinematics.machine_execute import (
         forward_states_from_gcode,
@@ -51,30 +47,28 @@ def simulate_gcode(
         render_simulation_screenshot,
         show_simulation,
     )
+    from app.subject import load_head_arrays, load_layout, load_physical_landmarks
 
-    gcode_path = Path(gcode)
+    gcode_path = Path(gcode) if gcode else paths.electrodes_gcode(subject_id)
     if not gcode_path.is_absolute():
         gcode_path = paths.REPO_ROOT / gcode_path
 
-    bundle_path = Path(bundle)
-    if not bundle_path.is_absolute():
-        bundle_path = paths.REPO_ROOT / bundle_path
-
-    subject_bundle = load_bundle(bundle_path)
-    pm_path = resolve_pm_config(bundle_path, pm_file=pm_file)
+    pm_path = Path(pm_file) if pm_file else paths.pm_yaml(subject_id)
+    if not pm_path.is_absolute():
+        pm_path = paths.REPO_ROOT / pm_path
     pm = load_physical_landmarks(pm_path)
+    layout = load_layout(subject_id)
+    mesh_points, mesh_faces = load_head_arrays(subject_id)
 
-    machine_path = (
-        Path(machine_config)
-        if machine_config
-        else paths.postprocessor_machine_config()
-    )
+    machine_path = Path(machine_config) if machine_config else paths.machine_config()
     if not machine_path.is_absolute():
         machine_path = paths.REPO_ROOT / machine_path
     machine = load_machine_config(machine_path)
 
     registration = register_mesh_full(
-        subject_bundle,
+        mesh_points,
+        mesh_faces,
+        layout.calibration_xyz(),
         pm,
         a_mm=machine.a_mm,
         d_mm=machine.d_mm,
@@ -112,7 +106,7 @@ def simulate_gcode(
         )
         from scipy.spatial import cKDTree
 
-        from app.postprocess.gcode.kinematics.machine_fk import (
+        from app.gcode.kinematics.machine_fk import (
             machine_to_registration_frame,
         )
 
@@ -148,15 +142,15 @@ def simulate_gcode(
         )
         if float(np.median(mesh_d_lm)) > 1.0:
             print(
-                "warning: G-code may not match this bundle/pm/rot0 — "
-                "regenerate with convert-gcode using the same --pm-file and --rot0 flags",
+                "warning: G-code may not match this layout/pm/rot0 — "
+                "regenerate with gcode using the same --rot0 flags",
                 file=sys.stderr,
             )
         if registration.landmark_fit_error_mm > 2.0:
             print(
                 "warning: measured pm differs from registered digital landmarks "
                 f"(max {registration.landmark_fit_error_mm:.1f} mm); "
-                "remeasure pm or regenerate G-code with convert-gcode",
+                "remeasure pm or regenerate G-code with: python -m app gcode",
                 file=sys.stderr,
             )
         if float(np.median(fk_vs_print)) > 5.0:
@@ -165,11 +159,7 @@ def simulate_gcode(
                 "expected when runtime arm geometry differs from offline compensation",
             )
 
-    names = subject_bundle.landmark_names or [
-        "central",
-        "left",
-        "back",
-    ]
+    names = ["central", "left", "back"]
 
     scene = SimulationScene(
         mesh_points=mesh_points,
@@ -192,7 +182,7 @@ def simulate_gcode(
     )
 
     if title is None:
-        title = f"Subject {subject_bundle.subject_id} — {gcode_path.name}"
+        title = f"Subject {subject_id} — {gcode_path.name}"
     if screenshot is not None:
         out = Path(screenshot)
         if not out.is_absolute():
@@ -207,8 +197,8 @@ def simulate_gcode(
 def cmd_simulate_gcode(args: argparse.Namespace) -> int:
     try:
         simulate_gcode(
+            args.subject,
             args.gcode,
-            args.bundle,
             pm_file=args.pm_file,
             machine_config=args.machine_config,
             rot0y_deg=args.rot0y,
@@ -231,19 +221,13 @@ def cmd_simulate_gcode(args: argparse.Namespace) -> int:
 
 def add_simulate_gcode_parser(sub: argparse._SubParsersAction) -> None:
     sg = sub.add_parser(
-        "simulate-gcode",
+        "simulate",
         help="3D viewer: forward FK — G-code X,Y,Z = C pivot, B,C = arm/tool",
     )
-    sg.add_argument("--gcode", required=True, help="G-code .txt file")
-    sg.add_argument("--bundle", required=True, help="Subject bundle directory")
-    sg.add_argument(
-        "--pm-file",
-        help="Physical landmarks YAML (default: config/postprocessor/subjects/subject_{id}.yaml)",
-    )
-    sg.add_argument(
-        "--machine-config",
-        help="Machine YAML (default: config/postprocessor/machine_default.yaml)",
-    )
+    sg.add_argument("--subject", type=int, required=True)
+    sg.add_argument("--gcode", default=None, help="G-code file (default: electrodes.gcode)")
+    sg.add_argument("--pm-file", help="Physical landmarks YAML (default: the subject's pm.yaml)")
+    sg.add_argument("--machine", dest="machine_config", help="Machine YAML (default: config/machine.yaml)")
     sg.add_argument("--rot0y", type=float, default=0.0, help="Bed Y rotation (deg)")
     sg.add_argument("--rot0z", type=float, default=0.0, help="Bed Z rotation (deg)")
     sg.add_argument(

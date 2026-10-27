@@ -1,74 +1,47 @@
-# Pipeline defaults (override per run via CLI)
+# Electrode pad shape and motion tuning. Printer geometry is config/machine.yaml.
 
-preprocess:
-  terminal_assignment_strategy: balanced  # balanced | shortest
-  poisson_depth: 12
-  # Drop lowest-density Poisson vertices (floaters). 0 = disable.
-  poisson_density_quantile: 0.02
-  align_head: false  # head rotation is on textured OBJ during align-obj
-  electrode_spacing: 4.5
-  full_circle: false
-  # Import textured OBJ and ICP-align to cleaned STL (align-obj step)
-  align_obj:
-    match_scale: true
-    preview: true
-    rotate_head: true  # interactive rotation on textured OBJ; STL gets same transform
-    n_samples: 50000
-    max_correspondence_mm: 15.0
-    fitness_min: 0.3
-    mean_dist_max_mm: 3.0
+electrode:
+  area_cm2: 0.5   # pad area; diameter is the circle of this area, in mm
+  nlines: 10      # zigzag rows across the disk
 
-synthesize:
-  assignments: subject1_best_v4  # data/presets/{name}.json — terminal LEFT/RIGHT map
-  use_target_terminals: true
-  optimize_terminals: false
-  preserve_entry_order: false
-  uv_resolution: 100
-  terminal_stop_mm: 20.0  # shorten each wire before strip entry (0 = off)
-  terminal_slot_spacing_mm: 6.0  # arc pitch between adjacent strip slots
-  terminal_min_points: 4
-  visualize: true  # 2D PNG + 3D view after synthesize (CLI: --no-visualize)
+layout:
+  scale: 0.8        # initial 10–20 size; 1.0 is the measured nasion–inion arc
+  scale_min: 0.5    # slider lower end
+  scale_max: 1.5    # slider upper end
 
-polish:
-  enabled: true  # run polish in `python -m app run` (override with --no-polish)
-  mode: gentle  # gentle = fixed-endpoint separation polish; refine = refine-v4; ga-short = warm-start GA
-  focus: separation
-  phase2_max_rounds: 100
-  aggressive_pass: false
-  skip_phase1_when_electrode_free: true
-  fixed_endpoints: true
-  profile: false  # set true or use --profile / --polish-profile for timing breakdown
-  # Target centerline clearance (mm): phase-2 pair penalty + layout deficit metric.
-  min_trace_separation_mm: 6.0
-  ga_generations: 100
-  ga_population: 100
-  visualize: true  # 2D PNG + 3D view after polish (CLI: --no-visualize)
+mesh:
+  scale_to_mm: 1000              # multiply the PLY into millimetres (1000 if the scan is metres)
+  poisson_depth: 12              # octree depth; higher keeps more surface detail
+  poisson_density_quantile: 0.02 # drop this lowest fraction of Poisson vertices
+  outlier_neighbors: 40
+  outlier_std_ratio: 1.0
+  island_min_size_ratio: 0.02    # keep components at least this fraction of the largest
+  island_min_cells: 200
+  icp_samples: 50000
+  icp_max_correspondence_mm: 15
+  icp_max_iteration: 80
+  icp_fitness_min: 0.3
+  icp_mean_dist_max_mm: 3
 
 postprocess:
-  smoothing_strength: 0.1
-  visualize: true  # 2D PNG + 3D view after smooth (CLI: --no-visualize)
-  arm_inside_margin_mm: 0.0  # signed-distance tolerance for arm-in-mesh flip
+  arm_inside_margin_mm: 0.0
   engage_b_threshold_deg: 90
   engage_xy_offset_default_mm: 20
   engage_xy_offset_max_mm: 40
   engage_xy_offset_step_mm: 1
-  engage_descent_min_clearance_mm: 20  # min tip clearance during engage Z-down / disengage Z-up legs
+  engage_descent_min_clearance_mm: 20
   optimize_trace_order: true
-  trace_order_method: c_nearest_neighbor  # nearest_neighbor | c_nearest_neighbor
-  trace_order_start: first  # first | home
+  trace_order_method: c_nearest_neighbor
+  trace_order_start: first
   skip_origin_when_bc_close: true
   c_short_transfer_max_delta_deg: 20
   c_order_xy_weight: 0.05
-  # Catch leftover ±(B,C) branch flips (~180°). Allow steep but real scalp curvature.
   axis_max_c_step_deg: 90
-  # Calm C near the crown so tip does not serpentine from atan2(nx,ny) jitter.
   normal_path_smooth_alpha: 0.5
   normal_path_smooth_passes: 1
-  c_pole_nxy_min: 0.2  # inherit prior XY heading when |n_xy| is below this
-  c_max_slew_deg: 12  # max |ΔC| per sample while printing (anti-serpentine)
-  c_crown_hold_b_deg: 20  # walk C only while a pinned slew has |B| below this
-  c_crown_step_deg: 1  # max |ΔC| per sample while that walk follows the normal
-  c_aim_deg: 5  # whole-trace C plan keeps the tool axis within this of the normal
-  c_plan_sample_mm: 3  # path spacing used to budget C steps under the feed cap
-  terminal_min_points: 4
-  matlab_folder: subject_optimized  # relative to data/output/matlab/
+  c_pole_nxy_min: 0.2
+  c_max_slew_deg: 12
+  c_crown_hold_b_deg: 20
+  c_crown_step_deg: 1
+  c_aim_deg: 5
+  c_plan_sample_mm: 3

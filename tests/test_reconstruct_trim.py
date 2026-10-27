@@ -15,7 +15,7 @@ def _require_open3d():
 def test_trim_poisson_by_density_keeps_mesh():
     """Open3D remove_vertices_by_mask returns None — must not wipe the mesh."""
     o3d = _require_open3d()
-    from app.preprocess.reconstruct import trim_poisson_by_density
+    from app.mesh.reconstruct import trim_poisson_by_density
 
     mesh = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=10)
     dens = np.linspace(0.0, 1.0, len(mesh.vertices))

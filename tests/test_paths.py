@@ -1,4 +1,4 @@
-"""Canonical path helpers."""
+"""Canonical subject paths."""
 
 from app import paths
 
@@ -8,27 +8,30 @@ def test_repo_root_is_parent_of_app():
     assert paths.DATA_DIR == paths.REPO_ROOT / "data"
 
 
-def test_subject_paths_use_stem():
+def test_subject_folder_layout():
     sid = 2
-    assert paths.raw_scan(sid).name == "2.stl"
-    assert paths.fiducials_json(sid).name == "fiducials_2.json"
-    assert paths.synth_layout(sid).name == "synth_s2.json"
-    assert paths.smooth_json(sid, "final").name == "smooth_s2_final.json"
-    assert paths.bundle_export_dir(sid).name == "subject_2"
-    assert paths.bundle_export_dir(sid).parent.name == "bundles"
-    assert paths.gcode_output_dir(sid).name == "subject_2_post"
-    assert paths.postprocessor_machine_config().name == "machine_default.yaml"
-    assert paths.postprocessor_subject_pm(sid).name == "subject_2.yaml"
+    root = paths.subject_dir(sid)
+    assert root.name == "2"
+    assert paths.source_ply(sid) == root / "source" / "scan.ply"
+    assert paths.source_obj(sid) == root / "source" / "head.obj"
+    assert paths.head_stl(sid) == root / "head.stl"
+    assert paths.head_obj(sid) == root / "head.obj"
+    assert paths.layout_json(sid).name == "layout.json"
+    assert paths.pm_yaml(sid).name == "pm.yaml"
+    assert paths.electrodes_gcode(sid).name == "electrodes.gcode"
+    assert paths.machine_config().name == "machine.yaml"
 
 
-def test_preset_relative_name():
-    p = paths.preset_path("reference_v4")
-    assert p.parent == paths.DATA_DIR / "presets"
-    assert p.suffix == ".json"
-
-
-if __name__ == "__main__":
-    test_repo_root_is_parent_of_app()
-    test_subject_paths_use_stem()
-    test_preset_relative_name()
-    print("OK")
+def test_paths_command_lists_every_artifact():
+    labels = [label for label, _path in paths.subject_artifacts(3)]
+    assert labels == [
+        "source ply",
+        "source obj",
+        "source mtl",
+        "source jpg",
+        "head stl",
+        "head obj",
+        "layout",
+        "pm",
+        "gcode",
+    ]

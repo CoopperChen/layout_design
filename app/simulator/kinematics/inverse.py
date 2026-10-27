@@ -6,9 +6,9 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.spatial import cKDTree
 
-from app.postprocess.gcode.kinematics.axis_angles import compute_axis_angles
-from app.postprocess.gcode.models import MachineConfig
-from app.postprocess.mesh_normals import head_center_from_points, orient_normals_outward
+from app.gcode.kinematics.axis_angles import compute_axis_angles
+from app.gcode.mesh_normals import head_center_from_points, orient_normals_outward
+from app.gcode.models import MachineConfig
 
 # Squared-degree tolerance for B/C recovery (~0.22 deg RMS).
 _BC_TOL = 0.05
@@ -481,7 +481,7 @@ def nozzle_tip_print_positions(
     Inverts the postprocessor (surface target on the scalp) then offsets outward
     along the surface normal by ``gap_size_mm`` so the tip path is not on the mesh.
 
-    ``mesh_points`` must be in the same frame as ``convert-gcode`` registration
+    ``mesh_points`` must be in the same frame as ``gcode`` registration
     (landmark frame: central landmark at ``pm[0]``). Use
     ``nozzle_tip_print_positions_machine_frame`` when the mesh is already in
     controller machine frame.
@@ -530,14 +530,14 @@ def decode_postprocessor_paths(
     """
     Invert G-code in landmark frame, return scalp + print tips in machine frame.
 
-    ``convert-gcode`` writes C-pivot commands from scalp traces registered with
+    ``gcode`` writes C-pivot commands from pads registered with
     ``pm[0]`` at the origin. ``simulate-gcode`` displays mesh in controller machine
     frame; decode must use landmark mesh for inversion then shift results to match
     forward FK and the viewer mesh.
 
     Returns (scalp_machine, print_tips_machine, scalp_landmark, print_tips_landmark).
     """
-    from app.postprocess.gcode.kinematics.machine_fk import (
+    from app.gcode.kinematics.machine_fk import (
         machine_to_registration_frame,
         registration_to_machine_frame,
     )

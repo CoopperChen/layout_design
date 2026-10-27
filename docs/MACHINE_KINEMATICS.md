@@ -153,27 +153,20 @@ B = C + a · Rz(−C) · [1, 0, 0]      # C=0 → +X; C=90 → −Y
 tip = B + d · tool_dir(B, C)          # tool ⊥ arm; −Z at B=0
 ```
 
-**Offline (`convert-gcode`):** scalp trace → `machine_zero` → `tool_offset` → writes **X,Y,Z,B,C**. That compensation is baked into G-code; the machine executes it literally.
+**Offline (`gcode`):** pad polyline → `machine_zero` → `tool_offset` → writes **X,Y,Z,B,C**. That compensation is baked into G-code; the machine executes it literally.
 
-**Trace coordinate semantics:**
+**Pad coordinate semantics:** electrode disks are coplanar perimeter zigzags in the plane `gap_size_mm` above the surface. The postprocessor applies tool length `d` only (`coords_include_gap=True`), so the gap is not added twice.
 
-| Trace | Bundle XYZ meaning | Tool offset in `convert-gcode` |
-|-------|-------------------|--------------------------------|
-| Interconnect | Scalp contact (material lands on surface) | `d + gap_size_mm` |
-| Electrode | Pad plane at `surface + gap_size_mm` along normal | `d` only (gap already in geometry) |
-
-Electrode disks are built at export (`export-bundle`) as coplanar perimeter zigzags in that offset plane; `convert-gcode --trace electrode` must not apply gap twice.
-
-**Postprocessor decode** (`decode_postprocessor_paths`, `--verbose` only): inverts offline transforms in **landmark frame** (same as `convert-gcode`), then shifts scalp/tip to **machine frame** for comparison with forward FK and the viewer mesh. Standoff median should be ≈ ``gap_size_mm``; FK vs decode may still differ at arbitrary B,C.
+**Postprocessor decode** (`decode_postprocessor_paths`, `--verbose` only): inverts offline transforms in **landmark frame** (same as `gcode`), then shifts scalp/tip to **machine frame** for comparison with forward FK and the viewer mesh. Standoff median should be ≈ ``gap_size_mm``; FK vs decode may still differ at arbitrary B,C.
 
 ### Machine-frame registration
 
-`simulate-gcode` uses the same `scan2phys` as `convert-gcode`, then shifts into **controller machine frame**:
+`simulate` uses the same `scan2phys` as `gcode`, then shifts into **controller machine frame**:
 
 ```
 registration_to_machine_frame(p) = p + (0, −a, −(d + calgap_z))
 ```
 
-Mesh, landmarks, and G-code paths then share one frame (C at origin). Use the same `--pm-file`, `--rot0y`, and `--rot0z` as `convert-gcode`.
+Mesh, landmarks, and G-code paths then share one frame (C at origin). Use the same `--rot0y` and `--rot0z` as `gcode`.
 
 **Viewer layers:** `m` mesh · `l` landmarks · `o` machine-zero reference · `c` C pivot path · `t` tip · `a` arm. Step HUD shows X, Y, Z, B, C.

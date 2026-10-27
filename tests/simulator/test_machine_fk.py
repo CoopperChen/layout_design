@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from app import paths
-from app.postprocess.gcode.config_loader import load_machine_config
-from app.postprocess.gcode.kinematics.machine_fk import (
+from app.gcode.config_loader import load_machine_config
+from app.gcode.kinematics.machine_fk import (
     arm_offset_xy_matlab,
     c_center_from_tip,
     machine_to_registration_frame,
@@ -116,7 +116,7 @@ def test_structural_arm_segment_lengths_constant():
 
 
 def test_machine_zero_head_frame():
-    machine = load_machine_config(paths.postprocessor_machine_config())
+    machine = load_machine_config(paths.machine_config())
     central, tip_mz, c_mz, b_mz = machine_zero_head_frame(
         a_mm=machine.a_mm,
         d_mm=machine.d_mm,
@@ -137,7 +137,7 @@ def test_machine_zero_head_frame():
 
 
 def test_registration_machine_frame_roundtrip():
-    machine = load_machine_config(paths.postprocessor_machine_config())
+    machine = load_machine_config(paths.machine_config())
     fk_kw = {
         "a_mm": machine.a_mm,
         "d_mm": machine.d_mm,
@@ -151,7 +151,7 @@ def test_registration_machine_frame_roundtrip():
 
 
 def test_machine_zero_in_registration_frame():
-    machine = load_machine_config(paths.postprocessor_machine_config())
+    machine = load_machine_config(paths.machine_config())
     central, tip_mz, c_mz, _b_mz = machine_zero_head_frame(
         a_mm=machine.a_mm,
         d_mm=machine.d_mm,
@@ -193,7 +193,7 @@ def test_machine_zero_in_registration_frame():
 
 def test_c_pivot_when_tip_on_central_landmark():
     """Tip on central landmark — C pivot reads (0, 0, −calgap) in machine frame."""
-    machine = load_machine_config(paths.postprocessor_machine_config())
+    machine = load_machine_config(paths.machine_config())
     _central, _tip_mz, _c_mz, _b_mz = machine_zero_head_frame(
         a_mm=machine.a_mm,
         d_mm=machine.d_mm,

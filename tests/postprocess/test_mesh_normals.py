@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.postprocess.mesh_normals import (
+from app.gcode.mesh_normals import (
     orient_normals_along_path,
     orient_normals_outward,
     orient_trace_xyzn,

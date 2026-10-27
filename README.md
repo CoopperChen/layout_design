@@ -1,475 +1,195 @@
 # layout_design
 
-**Generate** per-subject EEG interconnect layouts (2D/3D wire paths on the scalp). Each head uses its own mesh, electrodes, and terminal clicks; the only cross-subject input is **which electrode goes to LEFT vs RIGHT** (the “preset” = terminal assignment map).
+Place a standard 10–20 electrode set on one subject’s head scan and write 5-axis G-code for the electrode pads.
 
-**Not** applying a reference GA layout or rigidly mapping reference hub positions (that is legacy / opt-in).
+You bring a point cloud (`.ply`) and a textured head packaged as a `.zip` (`.obj`, `.mtl`, and `.jpg`, under any filenames). On the printer you measure the same three calibration points you picked on the scan. The program registers those two triangles and writes `electrodes.gcode`.
+
+It does not plan wires. Run every command from the repository root.
 
 **Repository:** https://github.com/CoopperChen/layout_design
 
-**Run from repository root** (`layout_design/`).
+## Install
 
-### Install (first-time clone)
-
-Python **3.12** (exactly — `pip` rejects other versions). Create a project venv and install from `pyproject.toml`:
+Python **3.12** only.
 
 ```powershell
 cd layout_design
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-python -m pip install -e ".[dev]"   # runtime + pytest/ruff; omit [dev] for runtime only
+python -m pip install -e ".[dev]"
 ```
 
-Dependencies come from `pyproject.toml`: `numpy`, `scipy`, `shapely`, `open3d`, `pyvista`, `vtk`, `matplotlib`, `mne`, `pyyaml`, `tqdm` (plus `pytest` / `ruff` with `[dev]`). The same lists are mirrored in `requirements.txt` / `requirements-dev.txt` for `pip install -r` workflows. The `.venv/` folder is gitignored — recreate it on each machine.
+On Linux or macOS, create the venv with `python3.12 -m venv .venv` and activate it with `source .venv/bin/activate`.
 
-Activate later sessions with `.\.venv\Scripts\Activate.ps1` (Linux/macOS: `source .venv/bin/activate`).
+`layout <command>` is the same entry point as `python -m app <command>`. Later shells need the venv activated again.
 
-Then initialize the data tree:
+Check that the printer file is present:
 
 ```powershell
-python -m app init-data
-python -m app paths --subject 2
+python -m app paths --subject 1
 ```
 
-Console alias: `layout <command> …` (same as `python -m app`).
+`config/machine.yaml` should print as `ok`. Arm length, tool gap, and speeds live there and are shared by every subject. Motion tuning (slew, trace order, engage clearance) is `config/defaults.yaml`.
 
-More setup detail: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md). Scope: [docs/GOAL.md](docs/GOAL.md).
+## What you need before a subject
 
----
+1. A `.ply` point cloud. Units can be meters; the mesh step scales meters into millimeters.
+2. A `.zip` of the textured head: one `.obj`, one `.mtl`, and one `.jpg` or `.png`. Names inside the zip do not matter.
+3. Three physical marks on the head that you can both click on the texture and touch with the printer tip. The layout step calls them calibration **central**, **left**, and **back**.
+4. For `record-pm` and `cnc` only: Mach4 publishing the work-coordinate pose. Setup is in [docs/RECORD_PM.md](docs/RECORD_PM.md). Mesh and layout do not need the machine.
 
-## Recommended workflow: `run`
+Pick an integer subject id, for example `1`. Everything for that person goes in `data/subjects/1/`.
 
-For a new subject, the usual input is a **PLY point cloud**. Use a single command to walk through preprocess → layout → G-code:
+## Run a subject
 
 ```powershell
-# 1. Place scan: data/raw/2.ply
-#    and textured OBJ: data/raw/2.obj (or pass --obj)
-# 2. One-time: assignment map (or use default subject1_best_v4 in config)
-python -m app build-assignments --reference 1 --id s1_assignments
-
-# 3. Full pipeline (interactive align-obj preview + fiducials + electrodes)
-python -m app run --target 2
+python -m app run --subject 1
 ```
 
-**Default stages** (`--from reconstruct` → `--to gcode`):
+That is `mesh`, then `layout`, then `record-pm`, then `gcode`. The command stops at the first failure. If `source/` is empty, two file dialogs open:
 
-| Stage | Type | What it does |
-|-------|------|----------------|
-| `reconstruct` | **interactive** | PLY → STL only (Space/Enter/S confirm · Esc/Q cancel · close = confirm) |
-| `clear-islands` | automated | Remove islands → `data/cleaned_scans/{id}.stl` |
-| `align-obj` | **interactive** | Import `data/raw/{id}.obj` → ICP + head-rotate → write `data/cleaned_scans/{id}.obj` (STL same transform) |
-| `fiducials` | **interactive** | Pick anatomy/terminals/landmarks on synced OBJ (Space/Enter confirm · S/close save · Q discard) |
-| `cz` | automated | Compute Cz → `data/json/Cz_{id}.json` |
-| `electrodes` | **interactive** | Place 10–20 electrodes (Space/Enter/S/close save · Q discard) |
-| `synthesize` | automated + view | Generate layout → PNG + 3D (`--no-visualize` to skip) |
-| `smooth` | automated + view | B-spline paths → PNG + 3D (`--no-visualize` to skip) |
-| `bundle` | automated | Export `data/output/bundles/subject_{id}/` |
-| `print-config` | automated | Create empty pm YAML scaffold if missing |
-| `record-pm` | **interactive (CNC)** | Capture work-pose landmarks via Mach4 UDP (skipped if already measured) |
-| `gcode` | automated | Write G-code (requires measured pm from `record-pm`) |
+1. Choose the `.ply`.
+2. Choose the `.zip`.
 
-Optional stages (not in default run):
-
-| Stage | How to include |
-|-------|----------------|
-| `polish` | Default in `run` (skip with `--no-polish`); visualizes after (same as synthesize/smooth) |
-| `simulate` | Add `--to simulate` (opens PyVista G-code viewer at the end) |
-
-The pipeline **stops on first failure** and prints which stage failed. Resume with `--from <stage>`.
-
-### `run` — common examples
+They are copied into the subject folder as `scan.ply`, `head.obj`, `head.mtl`, and `head.jpg`. The OBJ `mtllib` line and the MTL texture filename are rewritten to those names. You can skip the dialogs:
 
 ```powershell
-# Default: PLY at data/raw/2.ply, preset from config (subject1_best_v4), through G-code
-python -m app run --target 2
-
-# Custom PLY path
-python -m app run --target 2 --ply D:\scans\subject2.ply
-
-# Skip preprocess when mesh + fiducials + electrodes already exist
-python -m app run --target 2 --from synthesize
-
-# Resume after a failed export
-python -m app run --target 2 --from bundle
-
-# Polish + open simulator at the end
-python -m app run --target 2 --to simulate
-python -m app run --target 2 --no-polish --from synthesize
-
-# Preprocess only (stop before layout generation)
-python -m app run --target 2 --to electrodes
+python -m app run --subject 1 --ply D:\scans\cloud.ply --zip D:\scans\texture.zip
 ```
 
-### `run` — all options
+A rerun skips Poisson and ICP when `head.stl` and `head.obj` are already newer than the source files, and it skips `record-pm` when `pm.yaml` is already a valid triangle.
 
-#### Subject & input
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--target` | *(required)* | Subject id (used for all paths: `data/raw/{id}.ply`, `synth_s{id}.json`, etc.) |
-| `--ply` | `data/raw/{target}.ply` | Input point cloud for reconstruct |
-| `--obj` | `data/raw/{target}.obj` | Imported textured OBJ for align-obj |
-
-#### Stage range
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--from` | `reconstruct` | First stage to run (see stage table above) |
-| `--to` | `gcode` | Last stage to run; use `simulate` for 3D viewer |
-| `--no-polish` | off | Skip polish between synthesize and smooth |
-| `--polish-mode` | `gentle` | `gentle`, `repair`, `refine`, or `ga-short` |
-
-Valid `--from` / `--to` values (in order):
-
-`reconstruct` → `clear-islands` → `align-obj` → `fiducials` → `cz` → `electrodes` → `synthesize` → `polish` → `smooth` → `bundle` → `print-config` → `record-pm` → `gcode` → `simulate`
-
-#### Preprocess (reconstruct / align-obj)
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--no-align-head` | off | Skip head rotation UI during Poisson reconstruct |
-| `--depth` | `12` (config) | Poisson octree depth; override `preprocess.poisson_depth` in `config/defaults.yaml` |
-| `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for ICP sync |
-| `--no-scale` | off | align-obj: skip isotropic scale match before ICP |
-| `--no-preview` | off | align-obj: skip overlay confirmation |
-| `--no-rotate-head` | off | align-obj: skip textured OBJ head-rotation UI |
-
-#### Synthesize (passed through to layout generation)
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| *(preset)* | `subject1_best_v4` | Terminal LEFT/RIGHT map — **not a CLI flag**; set in `config/defaults.yaml` → `synthesize.assignments` |
-| `--preserve-entry-order` | off | Keep reference strip slot order (full v4 presets only) |
-| `--inherit-preset-terminals` | off | **Legacy:** rigid-map reference hub positions onto target |
-| `--rotate` | off | ±36° hub angle search around fiducial clicks (may reduce crossings) |
-| `--uv-resolution` | `100` | UV grid resolution for 3D path lift |
-
-#### Smooth & export
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--smooth-tag` | `final` | Output filename tag (`smooth_s{id}_{tag}.json`) |
-| `--smoothing-strength` | config | B-spline factor; default from `postprocess.smoothing_strength` |
-| `--allow-terminal-landmarks` | off | Export without calibration landmarks (not recommended) |
-| `--skip-validation` | off | Skip collision-free / path checks on export (not recommended) |
-| `--quiet` | off | Suppress per-channel bundle export progress |
-
-#### Print config & G-code
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--force-print-config` | off | Overwrite existing empty pm YAML scaffold |
-| `--force-record-pm` | off | Re-capture CNC landmarks even if pm already measured |
-| `--pm-port` | `62101` | Mach4 work-pose UDP port for `record-pm` (Orbbec uses `62100`) |
-| `--pm-bind-ip` | `0.0.0.0` | UDP bind address for `record-pm` |
-| `--pm-stale-ms` | `500` | Ignore CNC pose older than this (ms) |
-| `--config` / `--pm-file` | auto | Physical landmarks YAML for registration |
-| `--machine` | `config/postprocessor/machine_default.yaml` | Machine geometry and speeds |
-| `--gcode-output` | `data/output/gcode/` | G-code output base directory |
-| `--trace` | `both` | `interconnect`, `electrode`, or `both` |
-| `--electrode` | `all` | `all`, channel name (`C3`), or 1-based index |
-| `--rot0y`, `--rot0z` | `0` | Bed rotation (degrees); must match simulate |
-| `--legacy-subject` | — | Legacy `.mat` folder instead of bundle |
-
-The default `run` path includes **`record-pm`** before **`gcode`**: jog the tip on the machine, confirm with Enter/Space, then `s` to save. If pm is already measured, that stage is skipped unless `--force-record-pm`.
-
-#### Simulator (when `--to simulate`)
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--layers` | `mesh,landmarks,origin,tip,arm` | Comma-separated viewer layers |
-| `--animate` | off | `p` key advances one G-code step |
-| `--verbose` | off | FK diagnostics, registration fit, tip vs mesh metrics |
-
-```powershell
-python -m app run --help    # full list on your install
-```
-
----
-
-## Configuration (`config/defaults.yaml`)
-
-Pipeline defaults live in **`config/defaults.yaml`**. Change these once instead of passing flags every run.
-
-```yaml
-preprocess:
-  terminal_assignment_strategy: balanced   # balanced | shortest
-  poisson_depth: 12                      # reconstruct (--depth overrides)
-  poisson_density_quantile: 0.02         # trim low-density Poisson floaters (0 = off)
-  align_head: false                      # legacy reconstruct rotation; prefer align-obj
-  electrode_spacing: 4.5
-  full_circle: false
-  align_obj:                             # import textured OBJ → ICP to cleaned STL
-    match_scale: true
-    preview: true
-    rotate_head: true                    # UV+JPG OBJ rotation; STL gets same transform
-    n_samples: 50000
-    max_correspondence_mm: 15.0
-    fitness_min: 0.3
-    mean_dist_max_mm: 3.0
-
-synthesize:
-  assignments: subject1_best_v4            # data/presets/{name}.json — LEFT/RIGHT map
-  use_target_terminals: true
-  optimize_terminals: false
-  preserve_entry_order: false
-  uv_resolution: 100
-  terminal_stop_mm: 20.0
-  terminal_slot_spacing_mm: 6.0         # arc pitch between adjacent strip slots
-  visualize: true
-
-polish:
-  mode: gentle
-  min_trace_separation_mm: 6.0
-  phase2_max_rounds: 100
-  ga_generations: 100
-  ga_population: 100
-  visualize: true
-
-postprocess:
-  smoothing_strength: 0.1
-  visualize: true
-```
-
-**Assignment preset:** `synthesize.assignments` names a file under `data/presets/` (default **`subject1_best_v4`**, tracked in git as an assignment-only LEFT/RIGHT map). Optional custom map:
-
-```powershell
-python -m app build-assignments --reference 1 --id s1_assignments
-# then set synthesize.assignments: s1_assignments in config/defaults.yaml
-```
-
-`python -m app paths --subject 2` prints canonical paths including the active assignment preset.
-
-| Environment variable | Effect |
-|---------------------|--------|
-| `LAYOUT_DESIGN_ROOT` | Override repository root in `app/paths.py` |
-
----
-
-## Pipeline overview
-
-| Stage | Purpose |
-|-------|---------|
-| **A. Preprocess** | PLY → mesh, fiducials, terminals, 10–20 electrodes |
-| **B. Generate layout** | Assignment map + target geometry → `synth_s{id}.json` |
-| **C. Polish** | Fixed-endpoint separation (default in `run`; `--no-polish` to skip) |
-| **D. Postprocess** | Smooth → bundle → G-code → **simulate** (3D viewer) |
-
-| Stage | Directory | Output |
-|-------|-----------|--------|
-| A | `app/preprocess/` | `data/json/`, `data/cleaned_scans/` |
-| B | `app/layout/` | `data/output/layouts/` |
-| C | `app/polish/` | `data/output/layouts/*_repaired.json` |
-| D | `app/postprocess/` + `app/simulator/` | `data/output/smooth/`, `bundles/`, `gcode/` |
-
-Details: [docs/PIPELINE.md](docs/PIPELINE.md) · [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) · **[docs/CLI.md](docs/CLI.md)** (per-command reference)
-
----
-
-## Individual commands
-
-Use step-by-step commands when debugging one stage or scripting partial workflows.
-
-### Setup
-
-```powershell
-python -m app init-data              # create data/ tree
-python -m app paths --subject 2      # print canonical paths + default preset
-```
-
-### Stage A — `preprocess`
-
-```powershell
-python -m app preprocess --subject 2 --step reconstruct       # PLY → STL
-python -m app preprocess --subject 2 --step clear-islands
-python -m app preprocess --subject 2 --step align-obj --obj data/raw/2.obj
-python -m app preprocess --subject 2 --step fiducials           # interactive
-python -m app preprocess --subject 2 --step cz
-python -m app preprocess --subject 2 --step electrodes          # interactive
-python -m app preprocess --subject 2 --step assignments         # optional local map
-python -m app preprocess --subject 2 --step entry-capacity
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--subject` | required | Subject id |
-| `--step` | required | Step name (see table in [docs/CLI.md](docs/CLI.md)) |
-| `--ply` | `data/raw/{id}.ply` | Input for `reconstruct` |
-| `--obj` | `data/raw/{id}.obj` | Imported textured OBJ for `align-obj` |
-| `--no-scale` | off | `align-obj`: skip scale match before ICP |
-| `--no-preview` | off | `align-obj`: skip overlay confirmation |
-| `--no-rotate-head` | off | `align-obj`: skip textured OBJ head-rotation UI |
-| `--no-align-head` | off | Skip rotation UI |
-| `--depth` | `12` | Poisson depth |
-| `--spacing` | `6.0` | Strip slot pitch in mm (`entry-capacity`) |
-| `--full-circle` | off | Full 10–20 circle |
-
-### Stage B — layout
-
-```powershell
-python -m app build-assignments --reference 1 --id s1_assignments
-python -m app synthesize --target 2                    # uses default preset from config
-python -m app synthesize --target 2 --visualize          # + 2D PNG + 3D window
-python -m app visualize --applied data/output/layouts/synth_s2.json
-```
-
-`synthesize` no longer takes `--assignments` / `--preset`; the preset is read from **`config/defaults.yaml`**.
-
-| `synthesize` option | Default | Description |
-|---------------------|---------|-------------|
-| `--target` | required | Target subject id |
-| `--out` | auto | Output layout JSON |
-| `--preserve-entry-order` | off | Keep reference entry order |
-| `--inherit-preset-terminals` | off | Legacy rigid hub map |
-| `--rotate` | off | ±36° hub angle search around fiducial clicks |
-| `--uv-resolution` | `100` | UV grid resolution |
-| `--visualize` | off | Save 2D + open 3D after synth |
-| `--show` / `--no-show` | — | 2D window / skip 3D with `--visualize` |
-| `--skip-collisions` | off | Faster visualize |
-
-### Stage C — `polish` (default in `run`)
-
-```powershell
-python -m app polish --applied data/output/layouts/synth_s2.json --mode gentle
-```
-
-Modes: `gentle` (repair), `repair`, `refine`, `ga-short`. Output: e.g. `synth_s2_repaired.json`.
-
-### Stage D — postprocess
-
-```powershell
-python -m app smooth --applied data/output/layouts/synth_s2.json
-python -m app export-bundle --input data/output/smooth/smooth_s2_final.json
-
-# Physical landmarks at the machine (preferred):
-python -m app record-pm --subject 2
-# Or empty scaffold + manual YAML edit:
-python -m app init-print-config --subject 2
-
-python -m app convert-gcode --bundle data/output/bundles/subject_2
-python -m app cnc load --gcode data/output/gcode/subject_2_post/allinterconnects.txt
-python -m app cnc start --confirm
-python -m app list-electrodes --bundle data/output/bundles/subject_2
-python -m app simulate-gcode `
-  --gcode data/output/gcode/subject_2_post/allinterconnects.txt `
-  --bundle data/output/bundles/subject_2
-```
-
-Use **layout JSON** (`synth_s*.json`) for `visualize` / `polish` / `smooth` input. Use **smooth JSON** for `export-bundle`.
-
-Legacy MATLAB: `python -m app export-matlab --input data/output/smooth/smooth_s2_final.json`
-
-Full argument tables: [docs/CLI.md](docs/CLI.md)
-
----
-
-## Physical landmarks (print time)
-
-Digital calibration picks in `fiducials_{id}.json` are **scan-frame**. At print time you must measure the same three markers on the real head in **machine work coordinates** and store them as `physical_landmarks_mm` (pm). That registration drives `convert-gcode` / `simulate-gcode`.
-
-### Automated capture (CNC DRO + keyboard)
-
-1. Install and run [`scripts/mach4_work_pose_publisher.lua`](scripts/mach4_work_pose_publisher.lua) in Mach4 (publishes to `62100` Orbbec + `62101` record-pm; PLC must also call `PollCncCommandUdp()` for `python -m app cnc`).
-2. Mount the end-effector; jog the tip to each marker.
-3. Capture:
-
-```powershell
-python -m app record-pm --subject 2
-python -m app record-pm --subject 2 --force   # overwrite existing YAML
-```
+### Keys in every window
 
 | Key | Action |
 |-----|--------|
-| Enter / Space | Capture current work XYZ for the selected landmark |
-| 1 / 2 / 3 | Jump to central / left / back |
-| n / p | Next / previous |
-| s | Save YAML |
-| q | Abort |
+| Space, Enter, or S | Accept |
+| Q or Esc | Discard |
+| Close the window | Accept |
 
-**Order:** `landmark_central` → `landmark_left` → `landmark_back`.  
-Central is stored as `[0,0,0]`; left/back are **relative** to the central DRO (no need to zero work coords).
+Closing a window keeps the current result. Q and Esc throw that step away.
 
-Output: `config/postprocessor/subjects/subject_{id}.yaml` (includes optional `capture:` audit of raw DRO and B/C).
+### 1. Mesh
 
-### Manual alternative
+`mesh` builds one upright head in the scan frame.
+
+1. **Outlier preview.** Gray points are kept, red points are dropped. Space, Enter, S, Q, or Esc only closes this preview.
+2. **Normal flip.** `F` flips the point normals. Accept keeps the normals you are looking at. Discard restores the original direction. The crown of the head has to point up, because Cz is taken from the highest vertex.
+3. Poisson reconstruction, density trim, and island removal write `head.stl`.
+4. **Overlay check.** The textured OBJ is drawn on the gray STL. Accept if they coincide. Discard stops the mesh step.
+5. **Upright rotation.** Arrow keys roll and pitch by 2.5°. `A` and `D` yaw. Keys `1` through `6` snap the camera to ±X, ±Y, and ±Z. Accept applies that rotation to both the OBJ and the STL. Discard leaves the ICP pose unchanged.
+
+`--no-preview` skips the overlay. `--no-rotate-head` skips the upright rotation. `--no-scale` skips the scale match before ICP. `--depth` is the Poisson octree depth (default 12).
+
+### 2. Layout
+
+One textured view, seven picks, in this order:
+
+1. Nasion
+2. Left pre-auricular point (LPA)
+3. Right pre-auricular point (RPA)
+4. Inion
+5. Calibration central
+6. Calibration left
+7. Calibration back
+
+Right-click the surface, then Space, Enter, or S places that landmark. Keys `1` through `7` jump back to a landmark to place it again. `N` and `P` move forward and back in the list. After all seven are placed, Space, Enter, or S continues. Q or Esc discards the set.
+
+The next window projects the 10–20 sites. Drag the size slider (default 0.8, range 0.5–1.5). Space, Enter, or S writes `layout.json`. Q or Esc discards it. Cz is the intersection of the nasion–inion and LPA–RPA slices through the crown, and each site is snapped to the nearest mesh vertex.
+
+The three calibration clicks are the digital triangle. Touch those same three marks on the machine in the next step. They are not electrode sites.
+
+### 3. Record the physical landmarks
+
+Jog the tip to central, then left, then back. Space, Enter, or S captures the current landmark and, once all three are stored, writes `pm.yaml`. `N`, `P`, and `1`/`2`/`3` move among the three. Q or Esc aborts and writes nothing.
+
+Central is stored as `[0, 0, 0]`. Left and back are stored relative to that touch, so you do not need to zero the work coordinates on the central mark. Mach4 must already be publishing the work pose on UDP port `62101`. If `pm.yaml` exists, the command refuses to overwrite it unless you pass `--force`, or `--force-record-pm` on `run`.
+
+### 4. G-code
+
+Each electrode becomes a coplanar zigzag disk. Pad area and zigzag row count are `electrode.area_cm2` and `electrode.nlines` in `config/defaults.yaml` (0.5 cm² and 10 rows). The disk sits `gap_size_mm` above the surface (15 mm in `config/machine.yaml`). It is registered from the digital triangle in `layout.json` to the physical triangle in `pm.yaml`, then the 5-axis postprocessor writes `data/subjects/1/electrodes.gcode`.
 
 ```powershell
-python -m app init-print-config --subject 2
-# edit physical_landmarks_mm by hand
+python -m app gcode --subject 1 --electrode Cz
 ```
 
-### Details
+`--electrode all` is the default and writes every pad in trace order. A name or a 1-based index writes `{name}.gcode` in the same folder. `--rot0y` and `--rot0z` are optional bed rotations in degrees and must match if you later simulate.
 
-Full Mach4 / UDP / frame notes: **[config/postprocessor/README.md](config/postprocessor/README.md)** · kinematics: [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md)
+## Settings
 
----
+Edit `config/defaults.yaml`. Printer geometry stays in `config/machine.yaml`.
 
-## Terminal entries (target-native)
+| Key | What it changes |
+|-----|-----------------|
+| `electrode.area_cm2`, `electrode.nlines` | Pad area and zigzag rows |
+| `layout.scale`, `scale_min`, `scale_max` | 10–20 size and the slider range |
+| `mesh.scale_to_mm` | PLY unit conversion (1000 when the scan is in metres) |
+| `mesh.poisson_depth`, `poisson_density_quantile` | Surface detail and floater trim |
+| `mesh.outlier_neighbors`, `outlier_std_ratio` | Point-cloud outlier removal |
+| `mesh.island_min_size_ratio`, `island_min_cells` | Small disconnected pieces dropped after Poisson |
+| `mesh.icp_samples`, `icp_max_correspondence_mm`, `icp_fitness_min`, `icp_mean_dist_max_mm` | Texture-to-mesh alignment |
+| `postprocess:` | Slew, trace order, engage clearance |
 
-Synthesize uses **fiducial-native** strip zones by default:
+`--depth` on `mesh` or `run` overrides `mesh.poisson_depth` for that command.
 
-- Terminal safety zones are centered on **TERMINAL_LEFT / TERMINAL_RIGHT** clicks (polar projection).
-- Each wire ends at a **strip entry** on the zone boundary, not at the hub center.
-- 3D endpoints use UV surface lift with a light blend toward the hub.
-
-**3D visualize markers**
-
-| Color | Meaning |
-|-------|---------|
-| Gray | Hub clicks (`TERMINAL_LEFT` / `TERMINAL_RIGHT`) |
-| Lime | Wire ends (`entry_position_3d`) |
-| Cyan | Path splines |
-
----
-
-## G-code simulator
-
-Forward kinematics: programmed **X,Y,Z = C pivot**; mesh and paths share **controller machine frame**. Use the same `--pm-file`, `--rot0y`, and `--rot0z` as `convert-gcode`.
-
-See [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md) and [docs/CLI.md](docs/CLI.md#simulate-gcode) for layer keys and viewer controls.
-
----
-
-## Repository layout
+## Subject folder
 
 ```text
-layout_design/
-├── app/
-│   ├── preprocess/         # Stage A
-│   ├── layout/             # Stage B
-│   ├── pipeline/           # `run` orchestration
-│   ├── polish/             # Stage C (default in run)
-│   ├── postprocess/        # Stage D: smooth, bundle, convert-gcode
-│   └── simulator/          # G-code 3D viewer
-├── config/                 # defaults.yaml + postprocessor machine/pm configs
-├── data/                   # Pipeline I/O (see data/README.md)
-├── docs/                   # CLI.md, PIPELINE.md, MACHINE_KINEMATICS.md, …
-├── legacy_gcode_examples/  # MATLAB reference (optional)
-├── scripts/                # Mach4 work-pose + cnc command Lua, NSF helpers, …
-└── tests/
+data/subjects/1/
+  source/
+    scan.ply            # your point cloud, renamed
+    head.obj            # texture package, renamed; align does not overwrite this
+    head.mtl
+    head.jpg
+  head.stl              # cleaned mesh, scan frame
+  head.obj              # texture in that same upright frame
+  head.mtl
+  head.jpg
+  layout.json           # anatomy, Cz, three calibration points, electrode xyz
+  pm.yaml               # three physical landmarks, central at the origin
+  electrodes.gcode
 ```
 
-Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+`layout.json` coordinates are millimeters in the scan frame. `python -m app paths --subject 1` prints each file and whether it exists.
 
----
+## Start again from a later step
 
-## Environment
-
-Use the project venv (see [Install](#install-first-time-clone)):
+`--from` and `--to` are `mesh`, `layout`, `record-pm`, or `gcode`.
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m app run --target 2
+python -m app run --subject 1 --from layout
+python -m app run --subject 1 --from gcode
+python -m app run --subject 1 --from record-pm --force-record-pm
 ```
 
----
+Use `--from layout` when the mesh is already upright and you only want to repick landmarks. Use `--from gcode` after editing `layout.json` or `pm.yaml`. Mesh and layout can be repeated without the CNC. `record-pm` is the step that has to happen at the machine, and it is not repeated when G-code is regenerated.
 
-## Agent skill
+## Check the toolpath, then send it
 
-`@layout-synth-pipeline`
+`simulate` and `cnc` are not part of `run`.
 
----
+```powershell
+python -m app simulate --subject 1
+python -m app simulate --subject 1 --gcode data/subjects/1/Cz.gcode --animate
+```
 
-## Status
+The viewer shows the mesh, landmarks, C-pivot path, tip, and arm in the machine frame. Use the same `--rot0y` and `--rot0z` you used for `gcode`.
 
-**Primary path:** `run --target {id}` from PLY through G-code, with default assignment preset in config. Individual commands remain for debugging and partial reruns. Target fiducial hubs + fiducial-native strip entries are default.
+```powershell
+python -m app cnc status
+python -m app cnc load --subject 1
+python -m app cnc start --confirm
+```
+
+`load` sends that subject’s `electrodes.gcode`. `home` and `scan` load the scripts in `scripts/` and start only when you pass `--confirm`. `hold` and `stop` do not need `--confirm`.
+
+## More detail
+
+| Topic | Document |
+|-------|----------|
+| Every flag | [docs/CLI.md](docs/CLI.md) |
+| What each stage writes | [docs/PIPELINE.md](docs/PIPELINE.md) |
+| `layout.json` and `pm.yaml` fields | [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) |
+| Mach4 UDP publisher | [docs/RECORD_PM.md](docs/RECORD_PM.md) |
+| B/C, tool offset, registration | [docs/MACHINE_KINEMATICS.md](docs/MACHINE_KINEMATICS.md) |

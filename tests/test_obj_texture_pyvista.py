@@ -13,7 +13,7 @@ def test_load_pyvista_textured_obj(tmp_path: Path):
     import open3d as o3d
     import pyvista as pv
 
-    from app.preprocess.obj_texture import load_pyvista_textured_obj
+    from app.mesh.texture import load_pyvista_textured_obj
 
     obj = tmp_path / "head.obj"
     mtl = tmp_path / "head.mtl"
@@ -47,7 +47,7 @@ def test_stl_transform_does_not_wipe_without_normals(tmp_path: Path):
     pytest.importorskip("open3d")
     import open3d as o3d
 
-    from app.preprocess.obj_texture import apply_transform_to_triangle_mesh_file
+    from app.mesh.texture import apply_transform_to_triangle_mesh_file
 
     stl = tmp_path / "head.stl"
     mesh = o3d.geometry.TriangleMesh.create_sphere(radius=10.0, resolution=10)
@@ -77,7 +77,7 @@ def test_stl_transform_does_not_wipe_without_normals(tmp_path: Path):
 
 def test_stl_transform_rejects_empty_file(tmp_path: Path):
     pytest.importorskip("open3d")
-    from app.preprocess.obj_texture import apply_transform_to_triangle_mesh_file
+    from app.mesh.texture import apply_transform_to_triangle_mesh_file
 
     empty = tmp_path / "empty.stl"
     empty.write_bytes(b"")
@@ -90,7 +90,7 @@ def test_polydata_surface_centroid_ignores_unused_verts():
     pytest.importorskip("pyvista")
     import pyvista as pv
 
-    from app.preprocess.obj_texture import polydata_surface_centroid
+    from app.mesh.texture import polydata_surface_centroid
 
     # Unit square in XY at z=0 (area centroid ≈ (0.5, 0.5, 0)).
     # Plus a cloud of unused verts high on +Z (would bias a plain mean).

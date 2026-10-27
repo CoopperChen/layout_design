@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.postprocess.gcode.io.write_gcode import format_gcode_lines
+from app.gcode.io.write_gcode import format_gcode_lines
 
 
 def test_format_gcode_rounds_offset_legs_to_two_decimals():

@@ -1,49 +1,25 @@
-# Pipeline stages
+# Pipeline
 
-Run all commands from the **repository root** unless noted.
+Run from the repository root.
 
-```bash
-python -m app init-data          # create data/ tree
-python -m app paths --subject 2  # print canonical paths
+```text
+mesh → layout → record-pm → gcode
 ```
 
-## Stage map
+| Command | What it does | Writes |
+|---------|----------------|--------|
+| `mesh` | Poisson from the PLY, drop islands, ICP the OBJ into that frame, one upright rotation | `head.stl`, `head.obj` |
+| `layout` | Seven picks, then Cz and 10–20 review | `layout.json` |
+| `record-pm` | Jog the tip to central, left, and back | `pm.yaml` |
+| `gcode` | Disk pads, scan-to-physical registration, 5-axis motion | `electrodes.gcode` |
 
-| Stage | Module | Primary outputs |
-|-------|--------|-----------------|
-| A | `app/preprocess/` | `data/cleaned_scans/`, `data/json/*` |
-| B | `app/layout/` | `data/output/layouts/synth_s*.json` |
-| C | `app/polish/` | `data/output/layouts/*_repaired.json`, optional `output/logs/` |
-| D | `app/postprocess/` | `data/output/smooth/`, `data/output/bundles/`, `data/output/gcode/` |
-
-## Stage D (postprocess)
-
-```bash
-# Smooth B-spline paths
-python -m app smooth --applied data/output/layouts/synth_s4.json
-
-# Validate before expensive mesh export
-python -m app validate --input data/output/smooth/smooth_s4_final.json
-
-# Canonical bundle export
-python -m app export-bundle --input data/output/smooth/smooth_s4_final.json
-
-# Print registration (measured at print time; not in data/)
-python -m app init-print-config --subject 4
-
-# 5-axis G-code (default: both interconnect + electrode traces)
-python -m app convert-gcode --bundle data/output/bundles/subject_4/
-
-# 3D viewer — forward FK, machine-frame mesh (same pm + rot0 as convert-gcode)
-python -m app simulate-gcode \
-  --gcode data/output/gcode/subject_4_post/allinterconnects.txt \
-  --bundle data/output/bundles/subject_4
+```powershell
+python -m app run --subject 2
+python -m app run --subject 2 --from gcode
 ```
 
-Legacy `.mat` export remains available via `export-matlab` for MATLAB tooling; prefer `export-bundle` + `convert-gcode` + `simulate-gcode`.
+`run` skips `record-pm` when `pm.yaml` already contains a measured triangle. Pass `--force-record-pm` to capture again.
 
-See [CLI.md](CLI.md) for flags (`--quiet`, `--skip-validation`, `--trace`, etc.).
+`simulate` and `cnc` are optional. They are not stages of `run`.
 
-## Agent workflow
-
-Use Cursor skill `@layout-synth-pipeline` for checklists, CLI flags, and anti-patterns.
+Rerunning `mesh` skips Poisson and ICP when `head.stl` and `head.obj` are newer than `source/scan.ply` and `source/head.obj`.

@@ -3,8 +3,8 @@ Side test: load a Wavefront OBJ (+ MTL / JPG) and print texture diagnostics.
 
 Usage (from repo root):
   python scripts/test_read_obj.py
-  python scripts/test_read_obj.py --obj data/raw/7.obj
-  python scripts/test_read_obj.py --obj data/raw/7.obj --no-view
+  python scripts/test_read_obj.py --obj data/subjects/2/source/head.obj
+  python scripts/test_read_obj.py --obj data/subjects/2/source/head.obj --no-view
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--obj",
         type=Path,
-        default=REPO_ROOT / "data" / "raw" / "7.obj",
-        help="Path to .obj (default: data/raw/7.obj)",
+        default=REPO_ROOT / "data" / "subjects" / "2" / "source" / "head.obj",
+        help="Path to .obj (default: data/subjects/2/source/head.obj)",
     )
     p.add_argument(
         "--no-view",
