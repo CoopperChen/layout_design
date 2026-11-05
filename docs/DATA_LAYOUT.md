@@ -16,6 +16,7 @@ data/subjects/{id}/
   layout.json
   pm.yaml
   electrodes.gcode
+  interconnect.json   # optional; written by `interconnect`, not by `run`
 ```
 
 `config/machine.yaml` is the printer, shared by every subject.
@@ -43,5 +44,9 @@ physical_landmarks_mm:
 ```
 
 `gcode` refuses an all-zero or degenerate triangle.
+
+## interconnect.json
+
+Written by `python -m app interconnect --subject N` after the left and right terminals are clicked. `picked` is true only for those clicks. `terminals` are the two harness points on the scalp. `assignments` maps each electrode to `TERMINAL_LEFT` or `TERMINAL_RIGHT`. `slots` is the 0-based order along that strip after odd swaps. `routes` are polylines that follow `head.stl` from the electrode to its slot. `odd_pairs` is how many same-hub pairs still cross an odd number of times.
 
 `python -m app paths --subject N` prints each file and whether it exists.

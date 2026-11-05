@@ -16,4 +16,4 @@ Place a 10–20 electrode set on each subject’s head and write G-code that pri
 
 `mesh` builds one upright head from the point cloud and the texture. `layout` is one picking session (four anatomical points and three calibration points); Cz and the 10–20 sites are computed on save. `record-pm` stores the same three calibration points in the machine frame. `gcode` builds a coplanar disk at each electrode and runs the 5-axis postprocessor.
 
-Wire paths, terminal assignment, and interconnect G-code are not part of this pipeline. The previous interconnect version is `origin/master` at `93cff25`.
+Wire paths are not part of `run`, and this tree does not write interconnect G-code. After electrodes are placed, `python -m app interconnect --subject N` draws the pre-search harness: odd slot swaps, even bends, then a polar UV lift onto the scalp. Polish and the genetic search remain `origin/master` at `93cff25`.

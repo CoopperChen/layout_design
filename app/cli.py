@@ -172,6 +172,22 @@ def cmd_cnc(args: argparse.Namespace) -> int:
     return 0 if ack.ok else 1
 
 
+def cmd_interconnect(args: argparse.Namespace) -> int:
+    from app.interconnect.view import run_interconnect
+
+    try:
+        out = run_interconnect(
+            args.subject,
+            pick=args.pick,
+            show=not args.no_show,
+            spacing=args.spacing,
+        )
+    except (FileNotFoundError, ValueError, ImportError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0 if out is not None else 1
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     from app.pipeline.run import run_pipeline
 
@@ -251,6 +267,20 @@ def build_parser() -> argparse.ArgumentParser:
     gcode.add_argument("--rot0y", type=float, default=0.0)
     gcode.add_argument("--rot0z", type=float, default=0.0)
     gcode.set_defaults(func=cmd_gcode)
+
+    wires = sub.add_parser(
+        "interconnect",
+        help="Show an initial left/right wire layout (after the pipeline)",
+    )
+    wires.add_argument("--subject", type=int, required=True)
+    wires.add_argument(
+        "--pick",
+        action="store_true",
+        help="Click the left and right terminals again",
+    )
+    wires.add_argument("--no-show", action="store_true", help="Write interconnect.json without opening the view")
+    wires.add_argument("--spacing", type=float, default=6.0, help="Slot pitch along each strip, in mm")
+    wires.set_defaults(func=cmd_interconnect)
 
     run = sub.add_parser("run", help="mesh → layout → record-pm → gcode")
     run.add_argument("--subject", type=int, required=True)

@@ -79,6 +79,10 @@ def electrodes_gcode(subject_id: int | str) -> Path:
     return subject_dir(subject_id) / "electrodes.gcode"
 
 
+def interconnect_json(subject_id: int | str) -> Path:
+    return subject_dir(subject_id) / "interconnect.json"
+
+
 def channel_gcode(subject_id: int | str, name: str) -> Path:
     return subject_dir(subject_id) / f"{name}.gcode"
 
@@ -121,4 +125,5 @@ def subject_artifacts(subject_id: int | str) -> list[tuple[str, Path]]:
         ("layout", layout_json(subject_id)),
         ("pm", pm_yaml(subject_id)),
         ("gcode", electrodes_gcode(subject_id)),
+        ("interconnect", interconnect_json(subject_id)),
     ]

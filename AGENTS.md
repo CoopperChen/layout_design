@@ -2,7 +2,7 @@
 
 ## Goal
 
-Place 10–20 electrodes on a head scan and write electrode G-code. Do not plan interconnects.
+Place 10–20 electrodes on a head scan and write electrode G-code. The pipeline does not plan wires. `interconnect` is an optional later view: clicked terminals, odd slot swaps, even bends, and a polar UV lift onto the scalp. No genetic search and no interconnect G-code.
 
 ## Working directory
 

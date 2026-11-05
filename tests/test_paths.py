@@ -19,6 +19,7 @@ def test_subject_folder_layout():
     assert paths.layout_json(sid).name == "layout.json"
     assert paths.pm_yaml(sid).name == "pm.yaml"
     assert paths.electrodes_gcode(sid).name == "electrodes.gcode"
+    assert paths.interconnect_json(sid).name == "interconnect.json"
     assert paths.machine_config().name == "machine.yaml"
 
 
@@ -34,4 +35,5 @@ def test_paths_command_lists_every_artifact():
         "layout",
         "pm",
         "gcode",
+        "interconnect",
     ]
