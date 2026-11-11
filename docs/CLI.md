@@ -71,7 +71,7 @@ python -m app interconnect --subject 2 --pick
 python -m app interconnect --subject 2 --no-show --spacing 6
 ```
 
-Reads `layout.json` and the head mesh. The first window asks for a left terminal click, then a right one (right-click the scalp, then Space / Enter / S). Q or Esc leaves the file unchanged. Those two points are snapped onto `head.stl`. Electrodes are balanced across them, strip slots sit at `--spacing` millimetres (default 6), and odd swaps exchange same-hub slots when that removes an odd crossing. Each wire is that flat curve lifted onto `head.stl` with the polar UV grid, so it follows the planned route along the scalp. A later run reuses terminals that were picked. `--pick` clicks them again. `--no-show` skips the wire window after the picks.
+Reads `layout.json` and the head mesh. The first window asks for a left terminal click, then a right one (right-click the scalp, then Space / Enter / S). Q or Esc leaves the file unchanged. Those two points are snapped onto `head.stl`. Electrodes are balanced across them, strip slots sit at `--spacing` millimetres (default 6), and odd swaps exchange same-hub slots when that removes an odd crossing. Each wire is that flat curve lifted onto `head.stl` with the polar UV grid, so it follows the planned route along the scalp. The command prints each trace length, and `lengths_mm` stores the same polyline length. A later run reuses terminals that were picked. `--pick` clicks them again. `--no-show` skips the wire window after the picks.
 
 ### simulate
 

@@ -54,7 +54,7 @@ python -m app interconnect --subject 2 --pick
 python -m app interconnect --subject 2 --no-show
 ```
 
-This writes `interconnect.json`. The first window asks for a left terminal click, then a right one. Wires are the flat synthesize curves lifted onto `head.stl` with the polar UV grid. A later run reuses those clicks. `--pick` clicks again. Leads are balanced across the two hubs, slots sit on a 6 mm pitch (`--spacing`), and odd swaps exchange same-hub slots until same-side wires cross an even number of times. It does not run inside `run`.
+This writes `interconnect.json`. The first window asks for a left terminal click, then a right one. Wires are the flat synthesize curves lifted onto `head.stl` with the polar UV grid. Each trace length is the length of that polyline. A later run reuses those clicks. `--pick` clicks again. Leads are balanced across the two hubs, slots sit on a 6 mm pitch (`--spacing`), and odd swaps exchange same-hub slots until same-side wires cross an even number of times. It does not run inside `run`.
 
 ## Reference
 

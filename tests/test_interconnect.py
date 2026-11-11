@@ -6,6 +6,7 @@ from scipy.sparse.csgraph import dijkstra
 
 from app.cli import build_parser
 from app.interconnect.design import (
+    WireLayout,
     balanced_assignment,
     build_wire_layout,
     mutual_crossings,
@@ -18,7 +19,13 @@ from app.interconnect.design import (
     straight_path,
 )
 from app.interconnect.uv_lift import reconstruct_path
-from app.interconnect.view import load_saved_terminals, require_connected_surface, surface_graph
+from app.interconnect.view import (
+    layout_document,
+    load_saved_terminals,
+    polyline_length,
+    require_connected_surface,
+    surface_graph,
+)
 from app.pipeline.run import STAGES
 
 
@@ -206,6 +213,25 @@ def test_surface_distance_follows_mesh_edges():
     require_connected_surface(graph, len(points))
     distance = dijkstra(graph, directed=False, indices=1)
     assert float(distance[3]) == 2.0
+
+
+def test_trace_length_follows_the_polyline():
+    route = np.array([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 4.0, 0.0]])
+    assert polyline_length(route) == 7.0
+    layout = WireLayout(
+        assignments={"A": "TERMINAL_LEFT"},
+        slots={"A": 0},
+        entries_2d={},
+        paths_2d={},
+        electrodes_2d={},
+        terminals_2d={},
+        odd_pairs_before=0,
+        crossings_before=0,
+        odd_pairs=0,
+        crossings=0,
+    )
+    document = layout_document(layout, {}, {"A": route}, spacing=6.0)
+    assert document["lengths_mm"]["A"] == 7.0
 
 
 def test_interconnect_command_is_outside_the_pipeline():

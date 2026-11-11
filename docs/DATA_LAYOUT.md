@@ -47,6 +47,6 @@ physical_landmarks_mm:
 
 ## interconnect.json
 
-Written by `python -m app interconnect --subject N` after the left and right terminals are clicked. `picked` is true only for those clicks. `terminals` are the two harness points on the scalp. `assignments` maps each electrode to `TERMINAL_LEFT` or `TERMINAL_RIGHT`. `slots` is the 0-based order along that strip after odd swaps. `routes` are polylines that follow `head.stl` from the electrode to its slot. `odd_pairs` is how many same-hub pairs still cross an odd number of times.
+Written by `python -m app interconnect --subject N` after the left and right terminals are clicked. `picked` is true only for those clicks. `terminals` are the two harness points on the scalp. `assignments` maps each electrode to `TERMINAL_LEFT` or `TERMINAL_RIGHT`. `slots` is the 0-based order along that strip after odd swaps. `routes` are polylines that follow `head.stl` from the electrode to its slot. `lengths_mm` is the length of each of those polylines, to 0.1 mm. `odd_pairs` is how many same-hub pairs still cross an odd number of times.
 
 `python -m app paths --subject N` prints each file and whether it exists.

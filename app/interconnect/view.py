@@ -114,6 +114,18 @@ def _xyz_list(point: np.ndarray) -> list[float]:
     return [float(value) for value in np.asarray(point, dtype=float).reshape(-1)]
 
 
+def polyline_length(path: np.ndarray) -> float:
+    """Length of a trace, in millimetres, as the sum of its polyline segments."""
+    path = np.asarray(path, dtype=float)
+    if len(path) < 2:
+        return 0.0
+    return float(np.sum(np.linalg.norm(np.diff(path, axis=0), axis=1)))
+
+
+def trace_lengths_mm(routes: dict[str, np.ndarray]) -> dict[str, float]:
+    return {name: round(polyline_length(route), 1) for name, route in routes.items()}
+
+
 def layout_document(
     layout: WireLayout,
     terminals: dict[str, np.ndarray],
@@ -131,6 +143,7 @@ def layout_document(
         "crossings_before": int(layout.crossings_before),
         "odd_pairs": int(layout.odd_pairs),
         "crossings": int(layout.crossings),
+        "lengths_mm": trace_lengths_mm(routes),
         "routes": {
             name: [_xyz_list(point) for point in np.asarray(route, dtype=float)]
             for name, route in routes.items()
@@ -163,11 +176,12 @@ def _color(index: int, count: int) -> str:
     return f"#{int(red * 255):02x}{int(green * 255):02x}{int(blue * 255):02x}"
 
 
-def _summary_lines(layout: WireLayout) -> list[str]:
+def _summary_lines(layout: WireLayout, lengths: dict[str, float] | None = None) -> list[str]:
+    total = f"  ·  {sum(lengths.values()):.0f} mm" if lengths else ""
     lines = [
         (
             f"Initial wires  ·  odd pairs {layout.odd_pairs_before}→{layout.odd_pairs}"
-            f"  ·  crossings {layout.crossings_before}→{layout.crossings}"
+            f"  ·  crossings {layout.crossings_before}→{layout.crossings}{total}"
         )
     ]
     for terminal, label in (("TERMINAL_LEFT", "LEFT"), ("TERMINAL_RIGHT", "RIGHT")):
@@ -178,7 +192,7 @@ def _summary_lines(layout: WireLayout) -> list[str]:
     return lines
 
 
-def print_layout(layout: WireLayout) -> None:
+def print_layout(layout: WireLayout, lengths: dict[str, float] | None = None) -> None:
     print(
         f"Odd pairs {layout.odd_pairs_before} -> {layout.odd_pairs}, "
         f"crossings {layout.crossings_before} -> {layout.crossings}"
@@ -187,6 +201,19 @@ def print_layout(layout: WireLayout) -> None:
         print(f"  {note}")
     for line in _summary_lines(layout)[1:]:
         print(line)
+    if not lengths:
+        return
+    print("Trace lengths")
+    for terminal, label in (("TERMINAL_LEFT", "LEFT"), ("TERMINAL_RIGHT", "RIGHT")):
+        ordered = [name for name, hub in layout.assignments.items() if hub == terminal and name in lengths]
+        ordered.sort(key=lambda name: layout.slots.get(name, 0))
+        if not ordered:
+            continue
+        print(f"  {label}")
+        for name in ordered:
+            print(f"    {layout.slots[name] + 1:>2}  {name:<8} {lengths[name]:7.1f} mm")
+        print(f"    total {sum(lengths[name] for name in ordered):.1f} mm")
+    print(f"  All traces {sum(lengths.values()):.1f} mm")
 
 
 def pick_terminals(
@@ -284,6 +311,7 @@ def show_layout(
     layout: WireLayout,
     routes: dict[str, np.ndarray],
     slot_xyz: dict[str, np.ndarray],
+    lengths: dict[str, float] | None = None,
 ) -> None:
     plotter = pv.Plotter(window_size=(1600, 1600))
     plotter.set_background("white")
@@ -299,9 +327,12 @@ def show_layout(
             smooth_shading=True,
             name=f"electrode_{name}",
         )
+    labels = [
+        f"{name}  {lengths[name]:.0f} mm" if lengths and name in lengths else name for name in names
+    ]
     plotter.add_point_labels(
         np.vstack([electrodes[name] for name in names]),
-        names,
+        labels,
         font_size=12,
         text_color="black",
         point_size=1,
@@ -353,7 +384,7 @@ def show_layout(
         plotter.add_mesh(line, color=colors.get(name, "orange"), smooth_shading=True, name=f"wire_{name}")
 
     corners = ("upper_left", "lower_left", "lower_right")
-    for index, line in enumerate(_summary_lines(layout)):
+    for index, line in enumerate(_summary_lines(layout, lengths)):
         plotter.add_text(
             line,
             position=corners[min(index, len(corners) - 1)],
@@ -361,7 +392,7 @@ def show_layout(
             color="black",
             name=f"summary_{index}",
         )
-    print("Wire view: each number is that electrode's slot on its harness. Close the window when done.")
+    print("Wire view: slot numbers sit on the harness, and each electrode label includes its trace length. Close the window when done.")
     plotter.show()
 
 
@@ -428,8 +459,11 @@ def run_interconnect(
     slots_3d = {name: np.asarray(route[-1], dtype=float) for name, route in routes.items()}
     document = layout_document(designed, terminals, routes, spacing=spacing)
     out = save_interconnect(subject_id, document)
-    print_layout(designed)
+    lengths = document["lengths_mm"]
+    print_layout(designed, lengths)
     print(f"Wrote {out}")
     if show:
-        show_layout(display, layout_data.electrodes, terminals, designed, routes, slots_3d)
+        show_layout(
+            display, layout_data.electrodes, terminals, designed, routes, slots_3d, lengths
+        )
     return out
