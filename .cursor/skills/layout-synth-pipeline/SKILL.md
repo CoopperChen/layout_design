@@ -67,7 +67,7 @@ python -m app deviation --subject 2 --ply print.ply --zip print.zip
 python -m app deviation --subject 2 --no-scale
 ```
 
-This writes `deviation.json`. It imports the printed ply and textured obj into `printed/source/` and overlaps the planned electrodes on that head. Right-click each printed pad, then Space / Enter / S. The file stores printed minus planned, in the planned head frame. It does not run inside `run`.
+This writes `deviation.json`. It imports the printed ply and textured obj into `printed/source/` and overlaps the planned electrodes on that head. `--no-scale` multiplies the printed head by 1000 (metres to millimetres) instead of matching bounding-box extents. Right-click each printed pad, then Space / Enter / S. The file stores printed minus planned, in the planned head frame. It does not run inside `run`.
 
 ## Reference
 

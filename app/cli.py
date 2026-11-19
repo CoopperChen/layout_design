@@ -316,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     deviation.add_argument(
         "--no-scale",
         action="store_true",
-        help="Keep the printed size even when its extent does not match the planned head",
+        help="Scale the printed head by 1000 (metres to millimetres) instead of matching extents",
     )
     deviation.set_defaults(func=cmd_deviation)
 

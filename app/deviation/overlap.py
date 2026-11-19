@@ -30,9 +30,17 @@ class Overlap:
     source: str
 
 
-def initial_similarity(source_points, target_points, *, match_scale: bool) -> tuple[np.ndarray, float]:
-    """Center the source on the target. Scale only when the extents disagree.
+def initial_similarity(
+    source_points,
+    target_points,
+    *,
+    match_scale: bool,
+    fixed_scale: float | None = None,
+) -> tuple[np.ndarray, float]:
+    """Center the source on the target.
 
+    ``fixed_scale`` is used as given (1000 converts metres to millimetres).
+    Otherwise the extents are matched when they disagree by more than 5%.
     Returns the 4×4 that maps source points, and the scale written into that matrix.
     """
     src = np.asarray(source_points, dtype=float).reshape(-1, 3)
@@ -46,7 +54,12 @@ def initial_similarity(source_points, target_points, *, match_scale: bool) -> tu
     if ext_src < 1e-9:
         raise ValueError("Printed geometry has zero extent")
     ratio = ext_tgt / ext_src
-    scale = ratio if match_scale and abs(ratio - 1.0) > _SCALE_BAND else 1.0
+    if fixed_scale is not None:
+        scale = float(fixed_scale)
+    elif match_scale and abs(ratio - 1.0) > _SCALE_BAND:
+        scale = ratio
+    else:
+        scale = 1.0
     transform = np.eye(4, dtype=float)
     transform[:3, :3] *= scale
     transform[:3, 3] = c_tgt - scale * c_src
@@ -62,13 +75,19 @@ def align_geometry(
     max_correspondence_mm: float,
     max_iteration: int,
     label: str = "ICP",
+    fixed_scale: float | None = None,
 ) -> tuple[np.ndarray, float, str, float]:
     """Rigid ICP after centering. Returns ``(transform, fitness, init, mean_dist_mm)``.
 
     The transform maps the original source onto the target. Reflections are not tried,
     so left and right stay on their own sides.
     """
-    rough, scale = initial_similarity(_points(source), _points(target), match_scale=match_scale)
+    rough, scale = initial_similarity(
+        _points(source),
+        _points(target),
+        match_scale=match_scale,
+        fixed_scale=fixed_scale,
+    )
     print(f"  {label}: initial scale {scale:.4g}")
     src = _to_cloud(source, rough, n_samples)
     tgt = _to_cloud(target, np.eye(4), n_samples)
@@ -112,21 +131,28 @@ def overlap_printed(
     if obj is None:
         raise ValueError(f"Printed OBJ has no triangles: {obj_path}")
     printed = _load_printed(ply_path)
+    # --no-scale uses the mesh metre-to-millimetre factor on the planned head only.
+    # The printed texture and scan stay in one unit, so that step still matches extents.
+    head_scale = None if match_scale else float(cfg["scale_to_mm"])
     kw = dict(
-        match_scale=match_scale,
+        match_scale=True,
         n_samples=samples,
         max_correspondence_mm=max_corr,
         max_iteration=iterations,
+        fixed_scale=None,
     )
+    head_kw = dict(kw, match_scale=match_scale, fixed_scale=head_scale)
 
     print(f"Overlap printed head onto {Path(stl_path).name}")
-    chosen = _chain_overlap(obj, printed, planned, **kw)
+    if head_scale is not None:
+        print(f"Printed head scale ×{head_scale:g} (metres → millimetres)")
+    chosen = _chain_overlap(obj, printed, planned, texture_kw=kw, head_kw=head_kw)
     if chosen.mean_dist_mm > mean_max:
         print(
             f"Printed scan overlap is {chosen.mean_dist_mm:.2f} mm. "
             "Overlapping the textured OBJ on the planned head."
         )
-        direct = _direct_overlap(obj, planned, **kw)
+        direct = _direct_overlap(obj, planned, **head_kw)
         if direct.mean_dist_mm < chosen.mean_dist_mm:
             chosen = direct
 
@@ -144,16 +170,16 @@ def overlap_printed(
     return chosen
 
 
-def _chain_overlap(obj, printed, planned, **kw) -> Overlap:
+def _chain_overlap(obj, printed, planned, *, texture_kw: dict, head_kw: dict) -> Overlap:
     print("Textured OBJ → printed scan")
-    tex_T, tex_fit, tex_init, tex_dist = align_geometry(obj, printed, label="texture", **kw)
+    tex_T, tex_fit, tex_init, tex_dist = align_geometry(obj, printed, label="texture", **texture_kw)
     print(
         f"  texture on scan: fitness={tex_fit:.3f}  mean={tex_dist:.3f} mm  init={tex_init}"
     )
     print("Printed scan → planned head")
-    scan_T, scan_fit, scan_init, _scan_dist = align_geometry(printed, planned, label="scan", **kw)
+    scan_T, scan_fit, scan_init, _scan_dist = align_geometry(printed, planned, label="scan", **head_kw)
     transform = scan_T @ tex_T
-    score = _composed_distance(obj, planned, transform, n_samples=kw["n_samples"])
+    score = _composed_distance(obj, planned, transform, n_samples=head_kw["n_samples"])
     return _pack(transform, scan_fit, scan_init, score, "printed scan")
 
 

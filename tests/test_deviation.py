@@ -95,11 +95,12 @@ def test_initial_similarity_keeps_a_small_size_difference():
     assert np.allclose(apply_transform(src.mean(axis=0), transform), tgt.mean(axis=0), atol=1e-6)
 
 
-def test_initial_similarity_can_refuse_scale():
+def test_no_scale_uses_the_metre_to_millimetre_factor():
     src = np.array([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0], [0.0, 0.1, 0.05]])
     tgt = src * 1000.0
-    _transform, scale = initial_similarity(src, tgt, match_scale=False)
-    assert scale == pytest.approx(1.0)
+    transform, scale = initial_similarity(src, tgt, match_scale=False, fixed_scale=1000.0)
+    assert scale == pytest.approx(1000.0)
+    assert np.allclose(apply_transform(src, transform), tgt, atol=1e-4)
 
 
 def test_printed_import_stays_out_of_the_pipeline_source(tmp_path: Path, monkeypatch):
