@@ -84,7 +84,7 @@ python -m app deviation --subject 2 --no-scale
 
 Reads `layout.json` and `head.stl`. Imports a printed-head `.ply` and a textured `.zip` (or a loose `.obj`) into `printed/source/`. The planned head and its electrode file stay unchanged. The printed texture is fit onto the printed scan, then that scan is fit onto `head.stl`, and the planned electrode positions are drawn on the printed head. Extents that already agree within 5% stay unscaled, so a small shrink remains in the error. A metre-scale import is scaled onto the millimetre head from its bounding box. `--no-scale` multiplies the printed head by `mesh.scale_to_mm` (1000) instead of that box.
 
-The window shows those planned sites. Right-click the printed pad, then Space, Enter, or S. N and P move between electrodes. When every electrode has a click, those same keys write `deviation.json`. Q or Esc discards. Each row is printed minus planned, in the planned head frame, plus the distance in millimetres. The command prints the mean, RMS, and maximum.
+The window shows those planned sites. The active site is an open ring and the others are small dots, and those markers do not take the click. Right-click the scalp at the printed pad, then Space, Enter, or S. N and P move between electrodes. When every electrode has a click, those same keys write `deviation.json`. Q or Esc discards. Each row is printed minus planned, in the planned head frame, plus the distance in millimetres. The command prints the mean, RMS, and maximum.
 
 ### simulate
 

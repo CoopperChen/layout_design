@@ -164,3 +164,31 @@ def test_align_geometry_recovers_a_translation():
     )
     moved = apply_transform(np.asarray(source.vertices), transform)
     assert np.allclose(moved, np.asarray(target.vertices), atol=2.0)
+
+
+def test_guide_ring_leaves_the_scalp_center_open():
+    from app.deviation.view import _guide_ring
+
+    ring = _guide_ring(np.array([0.0, 0.0, 10.0]), np.zeros(3), radius=3.0, tube=0.2)
+    distance = np.linalg.norm(np.asarray(ring.points) - np.array([0.0, 0.0, 10.0]), axis=1)
+    assert distance.min() > 2.0
+
+
+def test_guide_markers_let_the_click_reach_the_scalp():
+    pv = pytest.importorskip("pyvista")
+    vtk = pytest.importorskip("vtk")
+    from app.deviation.view import _show_marker
+
+    pv.OFF_SCREEN = True
+    plotter = pv.Plotter(off_screen=True, window_size=(400, 400))
+    try:
+        plotter.add_mesh(pv.Plane(i_size=20, j_size=20), color="tan", name="head")
+        _show_marker(plotter, pv.Sphere(radius=4, center=(0, 0, 2)), "dot", color="orange")
+        plotter.camera_position = [(0, 0, 12), (0, 0, 0), (0, 1, 0)]
+        plotter.show(auto_close=False)
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.005)
+        assert picker.Pick(200, 200, 0, plotter.renderer)
+        assert picker.GetPickPosition()[2] == pytest.approx(0.0, abs=0.25)
+    finally:
+        plotter.close()

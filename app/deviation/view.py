@@ -77,12 +77,12 @@ def pick_printed_electrodes(obj_path: Path, transform, planned: dict) -> dict[st
 
     def show_current() -> None:
         name = order[state["idx"]]
-        _drop(plotter, "current_plan")
-        plotter.add_mesh(
-            pv.Sphere(center=planned_xyz[name], radius=radius * 1.35),
+        _show_marker(
+            plotter,
+            _guide_ring(planned_xyz[name], np.asarray(mesh.center, dtype=float), radius * 3.0, radius * 0.28),
+            "current_plan",
             color="orange",
             smooth_shading=True,
-            name="current_plan",
         )
         show_instr(_status())
 
@@ -99,7 +99,7 @@ def pick_printed_electrodes(obj_path: Path, transform, planned: dict) -> dict[st
             dist = float(np.linalg.norm(picked[name] - planned_xyz[name]))
             saved = f" Saved {dist:.2f} mm."
         return (
-            f"{state['idx'] + 1}/{len(order)}  {name} — right-click the printed electrode."
+            f"{state['idx'] + 1}/{len(order)}  {name} — right-click the scalp at the printed pad."
             f"{saved}  {KEYS_HELP}. N / P move."
         )
 
@@ -114,12 +114,12 @@ def pick_printed_electrodes(obj_path: Path, transform, planned: dict) -> dict[st
         pos = picker.GetPickPosition()
         pt = (float(pos[0]), float(pos[1]), float(pos[2]))
         state["last_pt"] = pt
-        _drop(plotter, "provisional")
-        plotter.add_mesh(
-            pv.Sphere(center=pt, radius=radius * 0.85),
+        _show_marker(
+            plotter,
+            pv.Sphere(center=pt, radius=radius * 0.7),
+            "provisional",
             color="white",
-            opacity=0.7,
-            name="provisional",
+            opacity=0.85,
         )
 
     def on_confirm() -> None:
@@ -164,8 +164,9 @@ def pick_printed_electrodes(obj_path: Path, transform, planned: dict) -> dict[st
     for key, delta in (("n", 1), ("N", 1), ("p", -1), ("P", -1)):
         plotter.add_key_event(key, lambda d=delta: jump(d))
     print(
-        "Printed electrodes: orange is the planned site to match. Blue marks are the other planned sites.\n"
-        "  Right-click the printed pad, then Space / Enter / S places it.\n"
+        "Printed electrodes: the orange ring is the planned site. Blue dots are the other planned sites.\n"
+        "  Right-click the scalp at the printed pad. The markers do not take the click.\n"
+        "  Space / Enter / S places that point.\n"
         f"  When every electrode is set, {KEYS_HELP}.\n"
         "  N / P move between electrodes. Closing the window accepts a complete set."
     )
@@ -185,9 +186,10 @@ def _transform_polydata(mesh, transform) -> None:
 
 
 def _marker_radius(mesh) -> float:
+    """Small guide size. A head-sized ball would cover the scalp under the click."""
     pts = np.asarray(mesh.points, dtype=float)
     extent = float(np.linalg.norm(pts.max(axis=0) - pts.min(axis=0)))
-    return max(extent * 0.015, 1.5)
+    return max(extent * 0.004, 0.6)
 
 
 def _add_head(plotter: pv.Plotter, mesh) -> None:
@@ -214,47 +216,89 @@ def _draw_planned(plotter, mesh, order, planned_xyz, radius: float) -> None:
     center = np.asarray(mesh.center, dtype=float)
     for name in order:
         point = planned_xyz[name]
-        plotter.add_mesh(
+        _show_marker(
+            plotter,
             pv.Sphere(center=point, radius=radius),
+            f"plan_{name}",
             color="dodgerblue",
-            opacity=0.85,
+            opacity=0.9,
             smooth_shading=True,
-            name=f"plan_{name}",
         )
-        radial = point - center
-        norm = float(np.linalg.norm(radial))
-        if norm < 1e-9:
-            radial = np.array([0.0, 0.0, 1.0])
-            norm = 1.0
-        label_pts.append(point + radial / norm * radius * 2.2)
-    plotter.add_point_labels(
+        label_pts.append(point + _outward(point, center) * radius * 4.0)
+    labels = plotter.add_point_labels(
         np.asarray(label_pts, dtype=float),
         order,
         font_size=14,
         text_color="black",
         point_size=0,
-        shape_opacity=0.75,
+        shape_opacity=0.65,
         always_visible=True,
         name="planned_labels",
     )
+    _ignore_picks(labels)
+
+
+def _guide_ring(center, origin, radius: float, tube: float) -> pv.PolyData:
+    """Open ring around a planned site so the scalp in the middle stays visible."""
+    center = np.asarray(center, dtype=float)
+    normal = _outward(center, origin)
+    seed = np.array([1.0, 0.0, 0.0]) if abs(float(normal[0])) < 0.9 else np.array([0.0, 1.0, 0.0])
+    axis_u = np.cross(normal, seed)
+    axis_u = axis_u / np.linalg.norm(axis_u)
+    axis_v = np.cross(normal, axis_u)
+    theta = np.linspace(0.0, 2.0 * np.pi, 72, endpoint=True)
+    pts = center + normal * (tube * 1.5) + radius * (
+        np.outer(np.cos(theta), axis_u) + np.outer(np.sin(theta), axis_v)
+    )
+    return pv.Spline(pts, n_points=120).tube(radius=tube)
+
+
+def _outward(point, origin) -> np.ndarray:
+    radial = np.asarray(point, dtype=float) - np.asarray(origin, dtype=float)
+    length = float(np.linalg.norm(radial))
+    if length < 1e-9:
+        return np.array([0.0, 0.0, 1.0])
+    return radial / length
+
+
+def _show_marker(plotter, dataset, name: str, **kwargs):
+    """Draw a guide. Clicks pass through it and land on the scalp."""
+    _drop(plotter, name)
+    actor = plotter.add_mesh(dataset, name=name, **kwargs)
+    _ignore_picks(actor)
+    return actor
+
+
+def _ignore_picks(actor) -> None:
+    if actor is None:
+        return
+    if isinstance(actor, (list, tuple)):
+        for item in actor:
+            _ignore_picks(item)
+        return
+    try:
+        actor.SetPickable(False)
+    except AttributeError:
+        pass
 
 
 def _draw_pick(plotter, name: str, printed, planned, radius: float) -> None:
-    _drop(plotter, f"pick_{name}")
-    plotter.add_mesh(
-        pv.Sphere(center=printed, radius=radius * 0.72),
+    _show_marker(
+        plotter,
+        pv.Sphere(center=printed, radius=radius * 0.85),
+        f"pick_{name}",
         color="crimson",
         smooth_shading=True,
-        name=f"pick_{name}",
     )
-    _drop(plotter, f"line_{name}")
     if float(np.linalg.norm(printed - planned)) < 1e-4:
+        _drop(plotter, f"line_{name}")
         return
-    plotter.add_mesh(
-        pv.Line(planned, printed).tube(radius=max(radius * 0.18, 0.25)),
+    _show_marker(
+        plotter,
+        pv.Line(planned, printed).tube(radius=max(radius * 0.18, 0.15)),
+        f"line_{name}",
         color="crimson",
         smooth_shading=True,
-        name=f"line_{name}",
     )
 
 
