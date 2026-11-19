@@ -262,7 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mesh.add_argument("--no-preview", action="store_true")
     mesh.add_argument("--no-rotate-head", action="store_true")
-    mesh.add_argument("--no-scale", action="store_true")
+    mesh.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="Scale the OBJ by 1000 (metres to millimetres) instead of matching extents",
+    )
     mesh.set_defaults(func=cmd_mesh)
 
     layout = sub.add_parser("layout", help="Pick landmarks and place 10–20 electrodes")
@@ -335,7 +339,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--no-preview", action="store_true")
     run.add_argument("--no-rotate-head", action="store_true")
-    run.add_argument("--no-scale", action="store_true")
+    run.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="Scale the OBJ by 1000 (metres to millimetres) instead of matching extents",
+    )
     run.add_argument("--force-record-pm", action="store_true")
     run.add_argument("--port", type=int, default=62101)
     run.add_argument("--bind-ip", default="0.0.0.0")

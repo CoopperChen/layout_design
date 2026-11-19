@@ -31,7 +31,7 @@ python -m app mesh --subject 1 --ply D:\scans\head.ply --zip D:\scans\texture.zi
 
 When `source/scan.ply` or the texture package is missing, `mesh` and `run` open a file dialog: first the `.ply`, then a `.zip` that contains the `.obj`, `.mtl`, and `.jpg` under any names. Those files are copied into `data/subjects/{id}/source/` as `scan.ply`, `head.obj`, `head.mtl`, and `head.jpg`. The OBJ `mtllib` line and the MTL texture name are rewritten to match.
 
-`--no-preview` skips the overlay check. `--no-rotate-head` skips the upright rotation. `--no-scale` skips the scale match before ICP. `--depth` overrides `mesh.poisson_depth` in `config/defaults.yaml`.
+`--no-preview` skips the overlay check. `--no-rotate-head` skips the upright rotation. `--no-scale` multiplies the OBJ by 1000 (metres to millimetres) before ICP instead of matching its bounding box to the STL. `--depth` overrides `mesh.poisson_depth` in `config/defaults.yaml`.
 
 ### layout
 

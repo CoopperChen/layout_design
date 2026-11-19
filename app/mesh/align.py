@@ -43,9 +43,12 @@ def _mesh_to_pcd(mesh, *, n_samples: int, estimate_normals: bool = True):
     return pcd
 
 
-def rough_similarity_align(source, target) -> np.ndarray:
+def rough_similarity_align(source, target, *, scale: float | None = None) -> np.ndarray:
     """
-    Center-to-center translation + isotropic scale so extents match.
+    Center-to-center translation plus isotropic scale.
+
+    ``scale`` is used as given (1000 converts metres to millimetres). When it
+    is omitted, the scale is the ratio of the two bounding-box diagonals.
 
     Returns 4x4 transform applied to *source* (scale about source centroid,
     then translate to target centroid).
@@ -59,9 +62,14 @@ def rough_similarity_align(source, target) -> np.ndarray:
     c_tgt = tgt.mean(axis=0)
     ext_src = float(np.linalg.norm(src.max(axis=0) - src.min(axis=0)))
     ext_tgt = float(np.linalg.norm(tgt.max(axis=0) - tgt.min(axis=0)))
-    if ext_src < 1e-9:
-        raise ValueError("Source mesh has zero extent")
-    scale = ext_tgt / ext_src
+    if scale is None:
+        if ext_src < 1e-9:
+            raise ValueError("Source mesh has zero extent")
+        scale = ext_tgt / ext_src
+    else:
+        scale = float(scale)
+        if scale <= 0.0:
+            raise ValueError(f"scale must be positive, got {scale}")
 
     T = np.eye(4, dtype=float)
     # x' = scale * (x - c_src) + c_tgt
@@ -363,14 +371,17 @@ def align_obj_to_stl(
     source = load_textured_source(source_obj)
     target = load_target_stl(target_stl)
 
-    T = np.eye(4, dtype=float)
     if match_scale:
         T = rough_similarity_align(source, target)
-        source.transform(T)
-        print(
-            f"Rough scale/center align applied "
-            f"(scale≈{float(np.linalg.norm(T[:3, 0])):.4g})"
-        )
+        scale_note = "Rough scale/center align applied"
+    else:
+        from app.config_loader import mesh_config
+
+        metres_to_mm = float(mesh_config()["scale_to_mm"])
+        T = rough_similarity_align(source, target, scale=metres_to_mm)
+        scale_note = f"Fixed scale ×{metres_to_mm:g} (metres → millimetres)"
+    source.transform(T)
+    print(f"{scale_note} (scale≈{float(np.linalg.norm(T[:3, 0])):.4g})")
 
     print("ICP multi-start (identity / 180° / yaw / mirrors)…")
     icp_T, fitness, init_label, mean_d = run_icp_multistart(
@@ -507,7 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-scale",
         action="store_true",
-        help="Skip isotropic scale matching before ICP",
+        help="Scale the OBJ by 1000 (metres to millimetres) instead of matching extents",
     )
     p.add_argument(
         "--no-preview",

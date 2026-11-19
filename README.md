@@ -80,7 +80,7 @@ Closing a window keeps the current result. Q and Esc throw that step away.
 4. **Overlay check.** The textured OBJ is drawn on the gray STL. Accept if they coincide. Discard stops the mesh step.
 5. **Upright rotation.** Arrow keys roll and pitch by 2.5°. `A` and `D` yaw. Keys `1` through `6` snap the camera to ±X, ±Y, and ±Z. Accept applies that rotation to both the OBJ and the STL. Discard leaves the ICP pose unchanged.
 
-`--no-preview` skips the overlay. `--no-rotate-head` skips the upright rotation. `--no-scale` skips the scale match before ICP. `--depth` is the Poisson octree depth (default 12).
+`--no-preview` skips the overlay. `--no-rotate-head` skips the upright rotation. `--no-scale` multiplies the OBJ by 1000 (metres to millimetres) before ICP instead of matching its bounding box to the STL. `--depth` is the Poisson octree depth (default 12).
 
 ### 2. Layout
 

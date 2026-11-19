@@ -51,6 +51,21 @@ def test_rough_similarity_align_centers_and_scales():
     assert abs(ext_src - ext_tgt) / ext_tgt < 0.02
 
 
+def test_fixed_scale_converts_metres_to_millimetres():
+    _require_open3d()
+    target = _colored_sphere(radius=50.0)
+    source = _colored_sphere(radius=0.05, translate=[0.1, -0.02, 0.03])
+    transform = rough_similarity_align(source, target, scale=1000.0)
+    assert float(np.linalg.norm(transform[:3, 0])) == pytest.approx(1000.0)
+    source.transform(transform)
+    src = np.asarray(source.vertices)
+    tgt = np.asarray(target.vertices)
+    assert np.allclose(src.mean(axis=0), tgt.mean(axis=0), atol=1e-4)
+    ext_src = float(np.linalg.norm(src.max(axis=0) - src.min(axis=0)))
+    ext_tgt = float(np.linalg.norm(tgt.max(axis=0) - tgt.min(axis=0)))
+    assert ext_src == pytest.approx(ext_tgt, rel=0.02)
+
+
 def test_icp_recovers_small_rigid_offset(tmp_path: Path):
     o3d = _require_open3d()
     target = _colored_sphere(radius=50.0)
@@ -108,7 +123,8 @@ def test_align_obj_to_stl_writes_synced_obj(tmp_path: Path):
     o3d = _require_open3d()
     target = _colored_sphere(radius=50.0)
     source = o3d.geometry.TriangleMesh(target)
-    source.translate([12.0, -7.0, 4.0])
+    source.scale(0.001, center=source.get_center())
+    source.translate([0.012, -0.007, 0.004])
 
     src_obj = tmp_path / "import.obj"
     stl = tmp_path / "target.stl"
