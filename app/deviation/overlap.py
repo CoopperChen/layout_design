@@ -204,7 +204,6 @@ def _to_cloud(geom, transform, n_samples: int):
 
 
 def _prepare_cloud(cloud, n_samples: int):
-    o3d = _require_open3d()
     count = len(np.asarray(cloud.points))
     keep = max(1000, int(n_samples))
     if count > keep:
