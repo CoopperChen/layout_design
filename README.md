@@ -4,7 +4,7 @@ Place a standard 10–20 electrode set on one subject’s head scan and write 5-
 
 You bring a point cloud (`.ply`) and a textured head packaged as a `.zip` (`.obj`, `.mtl`, and `.jpg`, under any filenames). On the printer you measure the same three calibration points you picked on the scan. The program registers those two triangles and writes `electrodes.gcode`.
 
-The pipeline does not plan wires. After electrodes are placed, `python -m app interconnect --subject 1` opens an initial left/right harness so you can see slot order before placing leads. Run every command from the repository root.
+The pipeline does not plan wires. After electrodes are placed, `python -m app interconnect --subject 1` opens an initial left/right harness so you can see slot order before placing leads. After a head is printed, `python -m app deviation --subject 1` overlaps those planned electrodes on a scan of the print and reports the click error. Run every command from the repository root.
 
 **Repository:** https://github.com/CoopperChen/layout_design
 
@@ -150,6 +150,8 @@ data/subjects/1/
   pm.yaml               # three physical landmarks, central at the origin
   electrodes.gcode
   interconnect.json     # optional harness view; not written by run
+  printed/source/       # printed ply and texture; written by deviation
+  deviation.json        # printed electrode error; not written by run
 ```
 
 `layout.json` coordinates are millimeters in the scan frame. `python -m app paths --subject 1` prints each file and whether it exists.
@@ -168,13 +170,19 @@ Use `--from layout` when the mesh is already upright and you only want to repick
 
 ## Check the toolpath, then send it
 
-`simulate`, `cnc`, and `interconnect` are not part of `run`.
+`simulate`, `cnc`, `interconnect`, and `deviation` are not part of `run`.
 
 ```powershell
 python -m app interconnect --subject 1
 ```
 
 The first window is where you click the left terminal, then the right one. Wires are the flat layout — odd swaps, then even bends — lifted onto the cleaned scalp. `--pick` sets the two points again. The picture is a placement guide; it does not change `electrodes.gcode`.
+
+```powershell
+python -m app deviation --subject 1
+```
+
+This checks a printed head against the plan. Choose the printed `.ply` and the texture `.zip`. Planned electrodes are drawn on that head. Right-click each printed pad, then Space, Enter, or S. The command writes `deviation.json`: printed minus planned, in millimetres.
 
 ```powershell
 python -m app simulate --subject 1

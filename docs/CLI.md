@@ -18,6 +18,7 @@ python -m app <command>
 | `run --subject N` | mesh → layout → record-pm → gcode |
 | `simulate --subject N` | View the G-code |
 | `interconnect --subject N` | Initial left/right wire view (not part of `run`) |
+| `deviation --subject N` | Overlap a printed head and measure electrode error (not part of `run`) |
 | `cnc` | Load or run a file on Mach4 |
 
 ### mesh
@@ -72,6 +73,18 @@ python -m app interconnect --subject 2 --no-show --spacing 6
 ```
 
 Reads `layout.json` and the head mesh. The first window asks for a left terminal click, then a right one (right-click the scalp, then Space / Enter / S). Q or Esc leaves the file unchanged. Those two points are snapped onto `head.stl`. Electrodes are balanced across them, strip slots sit at `--spacing` millimetres (default 6), and odd swaps exchange same-hub slots when that removes an odd crossing. Each wire is that flat curve lifted onto `head.stl` with the polar UV grid, so it follows the planned route along the scalp. The command prints each trace length, and `lengths_mm` stores the same polyline length. A later run reuses terminals that were picked. `--pick` clicks them again. `--no-show` skips the wire window after the picks.
+
+### deviation
+
+```powershell
+python -m app deviation --subject 2
+python -m app deviation --subject 2 --ply D:\prints\head.ply --zip D:\prints\texture.zip
+python -m app deviation --subject 2 --no-scale
+```
+
+Reads `layout.json` and `head.stl`. Imports a printed-head `.ply` and a textured `.zip` (or a loose `.obj`) into `printed/source/`. The planned head and its electrode file stay unchanged. The printed texture is fit onto the printed scan, then that scan is fit onto `head.stl`, and the planned electrode positions are drawn on the printed head. Extents that already agree within 5% stay unscaled, so a small shrink remains in the error. A metre-scale import is scaled onto the millimetre head. `--no-scale` never rescales.
+
+The window shows those planned sites. Right-click the printed pad, then Space, Enter, or S. N and P move between electrodes. When every electrode has a click, those same keys write `deviation.json`. Q or Esc discards. Each row is printed minus planned, in the planned head frame, plus the distance in millimetres. The command prints the mean, RMS, and maximum.
 
 ### simulate
 

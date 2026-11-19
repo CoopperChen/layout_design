@@ -83,6 +83,26 @@ def interconnect_json(subject_id: int | str) -> Path:
     return subject_dir(subject_id) / "interconnect.json"
 
 
+def printed_dir(subject_id: int | str) -> Path:
+    return subject_dir(subject_id) / "printed"
+
+
+def printed_source_dir(subject_id: int | str) -> Path:
+    return printed_dir(subject_id) / "source"
+
+
+def printed_ply(subject_id: int | str) -> Path:
+    return printed_source_dir(subject_id) / "scan.ply"
+
+
+def printed_obj(subject_id: int | str) -> Path:
+    return printed_source_dir(subject_id) / "head.obj"
+
+
+def deviation_json(subject_id: int | str) -> Path:
+    return subject_dir(subject_id) / "deviation.json"
+
+
 def channel_gcode(subject_id: int | str, name: str) -> Path:
     return subject_dir(subject_id) / f"{name}.gcode"
 
@@ -126,4 +146,7 @@ def subject_artifacts(subject_id: int | str) -> list[tuple[str, Path]]:
         ("pm", pm_yaml(subject_id)),
         ("gcode", electrodes_gcode(subject_id)),
         ("interconnect", interconnect_json(subject_id)),
+        ("printed ply", printed_ply(subject_id)),
+        ("printed obj", printed_obj(subject_id)),
+        ("deviation", deviation_json(subject_id)),
     ]

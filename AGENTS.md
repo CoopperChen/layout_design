@@ -2,7 +2,7 @@
 
 ## Goal
 
-Place 10–20 electrodes on a head scan and write electrode G-code. The pipeline does not plan wires. `interconnect` is an optional later view: clicked terminals, odd slot swaps, even bends, and a polar UV lift onto the scalp. No genetic search and no interconnect G-code.
+Place 10–20 electrodes on a head scan and write electrode G-code. The pipeline does not plan wires. `interconnect` is an optional later view: clicked terminals, odd slot swaps, even bends, and a polar UV lift onto the scalp. No genetic search and no interconnect G-code. `deviation` is a separate check of a printed head: import its ply and obj, overlap the planned electrodes, click the printed pads, and write `deviation.json`. It is not part of `run`.
 
 ## Working directory
 

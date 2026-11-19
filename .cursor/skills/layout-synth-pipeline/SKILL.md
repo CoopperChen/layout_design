@@ -3,8 +3,9 @@ name: layout-synth-pipeline
 description: >-
   Places a 10–20 electrode set on a head scan and writes electrode G-code.
   Inputs are scan.ply plus head.obj/mtl/jpg and CNC landmarks (record-pm).
-  Use for layout_design mesh, layout, record-pm, gcode, and the optional
-  interconnect view (initial wires and odd slot swaps, no GA).
+  Use for layout_design mesh, layout, record-pm, gcode, the optional
+  interconnect view (initial wires and odd slot swaps, no GA), and the
+  separate printed-head deviation check.
 ---
 
 # Electrode G-code
@@ -55,6 +56,18 @@ python -m app interconnect --subject 2 --no-show
 ```
 
 This writes `interconnect.json`. The first window asks for a left terminal click, then a right one. Wires are the flat synthesize curves lifted onto `head.stl` with the polar UV grid. Each trace length is the length of that polyline. A later run reuses those clicks. `--pick` clicks again. Leads are balanced across the two hubs, slots sit on a 6 mm pitch (`--spacing`), and odd swaps exchange same-hub slots until same-side wires cross an even number of times. It does not run inside `run`.
+
+## Printed deviation
+
+After `layout` and `head.stl` exist, and a printed head has been scanned:
+
+```bash
+python -m app deviation --subject 2
+python -m app deviation --subject 2 --ply print.ply --zip print.zip
+python -m app deviation --subject 2 --no-scale
+```
+
+This writes `deviation.json`. It imports the printed ply and textured obj into `printed/source/` and overlaps the planned electrodes on that head. Right-click each printed pad, then Space / Enter / S. The file stores printed minus planned, in the planned head frame. It does not run inside `run`.
 
 ## Reference
 

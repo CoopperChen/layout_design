@@ -20,6 +20,9 @@ def test_subject_folder_layout():
     assert paths.pm_yaml(sid).name == "pm.yaml"
     assert paths.electrodes_gcode(sid).name == "electrodes.gcode"
     assert paths.interconnect_json(sid).name == "interconnect.json"
+    assert paths.printed_ply(sid) == root / "printed" / "source" / "scan.ply"
+    assert paths.printed_obj(sid) == root / "printed" / "source" / "head.obj"
+    assert paths.deviation_json(sid).name == "deviation.json"
     assert paths.machine_config().name == "machine.yaml"
 
 
@@ -36,4 +39,7 @@ def test_paths_command_lists_every_artifact():
         "pm",
         "gcode",
         "interconnect",
+        "printed ply",
+        "printed obj",
+        "deviation",
     ]

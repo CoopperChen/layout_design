@@ -20,8 +20,10 @@ python -m app run --subject 2 --from gcode
 
 `run` skips `record-pm` when `pm.yaml` already contains a measured triangle. Pass `--force-record-pm` to capture again.
 
-`simulate`, `cnc`, and `interconnect` are optional. They are not stages of `run`.
+`simulate`, `cnc`, `interconnect`, and `deviation` are optional. They are not stages of `run`.
 
 `interconnect` reads `layout.json` and the head mesh. You pick the left terminal and the right terminal on the scalp. It then assigns electrodes, odd-swaps strip slots, bends any even weave that remains, and lifts those flat curves onto `head.stl`. It writes `interconnect.json`. `--pick` chooses the terminals again. `--no-show` skips the wire window.
+
+`deviation` reads `layout.json` and `head.stl`, imports a printed ply and obj under `printed/source/`, and overlaps the planned electrodes on that printed head. You click each printed pad. It writes `deviation.json`.
 
 Rerunning `mesh` skips Poisson and ICP when `head.stl` and `head.obj` are newer than `source/scan.ply` and `source/head.obj`.

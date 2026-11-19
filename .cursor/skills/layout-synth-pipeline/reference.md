@@ -6,6 +6,7 @@
 | Poisson, islands, ICP | `app/mesh/` |
 | Seven picks, Cz, 10–20 | `app/layout/` |
 | Initial wires, odd swaps, UV lift | `app/interconnect/` |
+| Printed-head electrode error | `app/deviation/` |
 | Disk pads, scan2phys, kinematics | `app/gcode/` |
 | CNC landmarks and load/run | `app/machine/` |
 | Optional viewer | `app/simulator/` |

@@ -188,6 +188,23 @@ def cmd_interconnect(args: argparse.Namespace) -> int:
     return 0 if out is not None else 1
 
 
+def cmd_deviation(args: argparse.Namespace) -> int:
+    from app.deviation.view import run_deviation
+
+    try:
+        out = run_deviation(
+            args.subject,
+            ply_path=args.ply,
+            obj_path=args.obj,
+            zip_path=getattr(args, "zip_path", None),
+            match_scale=not args.no_scale,
+        )
+    except (FileNotFoundError, ValueError, ImportError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0 if out is not None else 1
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     from app.pipeline.run import run_pipeline
 
@@ -281,6 +298,27 @@ def build_parser() -> argparse.ArgumentParser:
     wires.add_argument("--no-show", action="store_true", help="Write interconnect.json without opening the view")
     wires.add_argument("--spacing", type=float, default=6.0, help="Slot pitch along each strip, in mm")
     wires.set_defaults(func=cmd_interconnect)
+
+    deviation = sub.add_parser(
+        "deviation",
+        help="Overlap a printed head on the planned electrodes and report click error",
+    )
+    deviation.add_argument("--subject", type=int, required=True)
+    deviation.add_argument("--ply", type=Path, default=None, help="Printed scan .ply")
+    deviation.add_argument("--obj", type=Path, default=None, help="Loose textured .obj of the printed head")
+    deviation.add_argument(
+        "--zip",
+        dest="zip_path",
+        type=Path,
+        default=None,
+        help="Zip of the printed obj, mtl, and jpg",
+    )
+    deviation.add_argument(
+        "--no-scale",
+        action="store_true",
+        help="Keep the printed size even when its extent does not match the planned head",
+    )
+    deviation.set_defaults(func=cmd_deviation)
 
     run = sub.add_parser("run", help="mesh → layout → record-pm → gcode")
     run.add_argument("--subject", type=int, required=True)
