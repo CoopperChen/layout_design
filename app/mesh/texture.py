@@ -77,13 +77,15 @@ def load_pyvista_textured_obj(obj_path: Path):
 
 
 def visible_surface(mesh):
-    """Drop vertices that no face uses.
+    """Drop unused vertices and tiny floating islands.
 
-    Scanner OBJs often keep UV-atlas ``v`` rows that no triangle references.
-    Those points stretch the camera to an empty box and pull closest-point
-    queries off the scalp, so electrode markers appear to float in space.
+    Scanner OBJs often keep UV-atlas ``v`` rows that no triangle references,
+    and sometimes a one-triangle speck above the scalp. Those points stretch
+    the camera and pull Cz and closest-point queries off the head.
     """
     import pyvista as pv
+
+    from app.mesh.islands import drop_specks
 
     n_points = int(getattr(mesh, "n_points", 0))
     n_cells = int(getattr(mesh, "n_cells", 0))
@@ -103,7 +105,7 @@ def visible_surface(mesh):
             used[faces[cursor + 1 : cursor + 1 + count]] = True
             cursor += 1 + count
     if int(used.sum()) == n_points:
-        return mesh
+        return drop_specks(mesh)
 
     grid = mesh.extract_cells(np.arange(n_cells))
     if isinstance(grid, pv.PolyData):
@@ -115,7 +117,7 @@ def visible_surface(mesh):
         pv.set_new_attribute(surface, "texture", texture)
     dropped = n_points - int(surface.n_points)
     print(f"Ignoring {dropped} unused vertices; visible surface has {surface.n_points} points")
-    return surface
+    return drop_specks(surface)
 
 
 def rotation_about_point_matrix(R: np.ndarray, center: np.ndarray) -> np.ndarray:

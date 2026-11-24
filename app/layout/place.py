@@ -6,6 +6,7 @@ import numpy as np
 import pyvista as pv
 
 from app.layout.template import CHANNELS, template_xyz
+from app.mesh.islands import drop_specks
 
 
 def _surface_points(mesh: pv.PolyData) -> np.ndarray:
@@ -41,6 +42,7 @@ def _snap_to_surface(mesh: pv.PolyData, points: np.ndarray) -> np.ndarray:
 
 
 def compute_cz(mesh: pv.PolyData, anatomy: dict[str, np.ndarray]) -> np.ndarray:
+    mesh = drop_specks(mesh)
     pts = _surface_points(mesh)
     if pts.shape[0] == 0:
         raise ValueError("Head mesh has no points.")

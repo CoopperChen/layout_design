@@ -69,6 +69,33 @@ def test_project_electrodes_ignores_unused_vertices():
     assert max(abs(r - 100.0) for r in radii) < 8.0
 
 
+def _sphere_with_speck():
+    sphere = pv.Sphere(radius=100.0, theta_resolution=48, phi_resolution=48)
+    speck = np.array(
+        [[40.0, 30.0, 160.0], [40.4, 30.0, 160.0], [40.2, 30.3, 160.1]],
+        dtype=float,
+    )
+    faces = np.hstack(
+        [np.asarray(sphere.faces), [3, sphere.n_points, sphere.n_points + 1, sphere.n_points + 2]]
+    )
+    return pv.PolyData(np.vstack([np.asarray(sphere.points), speck]), faces), sphere.n_cells
+
+
+def test_compute_cz_ignores_floating_triangle():
+    """A one-triangle speck above the crown must not shift Cz."""
+    mesh, _n_cells = _sphere_with_speck()
+    anatomy = {
+        "nasion": np.array([0.0, 100.0, 0.0]),
+        "inion": np.array([0.0, -100.0, 0.0]),
+        "lpa": np.array([-100.0, 0.0, 0.0]),
+        "rpa": np.array([100.0, 0.0, 0.0]),
+    }
+    cz = compute_cz(mesh, anatomy)
+    assert cz[2] > 90.0
+    assert abs(float(cz[0])) < 15.0
+    assert abs(float(cz[1])) < 15.0
+
+
 def test_compute_cz_ignores_stray_high_vertex():
     sphere = pv.Sphere(radius=100.0, theta_resolution=48, phi_resolution=48)
     stray = np.array([[40.0, 30.0, 400.0]])

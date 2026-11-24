@@ -85,6 +85,49 @@ def test_stl_transform_rejects_empty_file(tmp_path: Path):
         apply_transform_to_triangle_mesh_file(empty, np.eye(4))
 
 
+def test_visible_surface_drops_floating_triangle():
+    pytest.importorskip("pyvista")
+    import pyvista as pv
+
+    from app.mesh.texture import visible_surface
+
+    sphere = pv.Sphere(radius=100.0, theta_resolution=24, phi_resolution=24)
+    speck = np.array(
+        [[10.0, 0.0, 140.0], [10.4, 0.0, 140.0], [10.2, 0.3, 140.1]],
+        dtype=float,
+    )
+    faces = np.hstack(
+        [np.asarray(sphere.faces), [3, sphere.n_points, sphere.n_points + 1, sphere.n_points + 2]]
+    )
+    mesh = pv.PolyData(np.vstack([np.asarray(sphere.points), speck]), faces)
+    mesh.active_texture_coordinates = np.zeros((mesh.n_points, 2))
+    pv.set_new_attribute(mesh, "texture", "atlas")
+    surface = visible_surface(mesh)
+    assert surface.n_cells == sphere.n_cells
+    assert float(np.max(np.asarray(surface.points)[:, 2])) < 110.0
+    assert getattr(surface, "texture", None) == "atlas"
+    tcoords = surface.active_texture_coordinates
+    assert tcoords is not None and len(tcoords) == surface.n_points
+
+
+def test_drop_specks_keeps_a_wide_shell():
+    pytest.importorskip("pyvista")
+    import pyvista as pv
+
+    from app.mesh.islands import drop_specks
+
+    sphere = pv.Sphere(radius=100.0, theta_resolution=16, phi_resolution=16)
+    n = sphere.n_points
+    quad = np.array(
+        [[200.0, 0.0, 0.0], [240.0, 0.0, 0.0], [240.0, 30.0, 0.0], [200.0, 30.0, 0.0]],
+        dtype=float,
+    )
+    faces = np.hstack([np.asarray(sphere.faces), [3, n, n + 1, n + 2], [3, n, n + 2, n + 3]])
+    mesh = pv.PolyData(np.vstack([np.asarray(sphere.points), quad]), faces)
+    cleaned = drop_specks(mesh)
+    assert cleaned.n_cells == mesh.n_cells
+
+
 def test_visible_surface_drops_unused_vertices():
     pytest.importorskip("pyvista")
     import pyvista as pv
